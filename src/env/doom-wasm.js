@@ -45,7 +45,7 @@ export class DoomWasmArena{
     this.actions=ACTION_SPECS.map(({mask,...action})=>action);
     this.actionMasks=Object.fromEntries(ACTION_SPECS.map(action=>[action.id,action.mask]));
     this.schema={
-      objective:"Stay alive, neutralize hostile threats, conserve useful resources, interact with the environment when appropriate, and make progress through the level.",
+      objective:"Stay alive, neutralize hostile threats, conserve useful resources, and make progress through the level.",
       actionFields:[
         {id:"forward",label:"forward control",description:"whether this candidate holds forward movement",min:0,max:1},
         {id:"back",label:"backward control",description:"whether this candidate holds backward movement",min:0,max:1},
