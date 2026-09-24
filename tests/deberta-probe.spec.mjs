@@ -6,7 +6,8 @@ test("probe DeBERTa xsmall as an evidence-conditioned DOOM teacher",async({page}
   await page.goto("http://127.0.0.1:8000/doom.html",{waitUntil:"domcontentloaded"});
   await page.locator("#bootBtn").click();
   await page.waitForFunction(()=>document.querySelector("#runtimeStatus")?.textContent==="ENGINE READY",null,{timeout:90000});
-  await page.locator(".advanced-panel").evaluate(el=>{el.open=true});\n  await page.locator("#modelSelect").selectOption("deberta");
+  await page.locator(".advanced-panel").evaluate(el=>{el.open=true});
+  await page.locator("#modelSelect").selectOption("deberta");
   await page.locator("#loadModelBtn").click();
   await page.waitForFunction(()=>{const t=document.querySelector("#modelStatus")?.textContent||"";return t.includes("bootstrap")||t.includes("failed")},null,{timeout:240000});
   const status=(await page.locator("#modelStatus").textContent())||"";
