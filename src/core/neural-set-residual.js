@@ -68,8 +68,14 @@ function actionVector(action,dim,compiledActionFields=[]){
   const params=action.params||action.values||{};
   for(const compiled of compiledActionFields){
     const {field}=compiled;if(!Object.prototype.hasOwnProperty.call(params,field.id))continue;
-    addSparse(out,compiled.valueSparse,normalizeValue(params[field.id],field));
+    const raw=params[field.id],enumValue=compiled.enumValues?.[String(raw)];
     addSparse(out,compiled.presentSparse,1);
+    if(enumValue){
+      addSparse(out,enumValue.sparse,1);addDense(out,enumValue.semanticDense,1.05);
+    }else{
+      const normalized=normalizeValue(raw,field);
+      addSparse(out,compiled.valueSparse,normalized);addDense(out,compiled.semanticDense,normalized*.95);
+    }
   }
   let n=0;for(const x of out)n+=x*x;n=Math.sqrt(n)||1;for(let i=0;i<out.length;i++)out[i]/=n;return out;
 }
