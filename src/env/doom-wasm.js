@@ -91,7 +91,10 @@ export class DoomWasmArena{
         {id:"velocity_x",label:"player x velocity",description:"player horizontal x momentum",scale:32},
         {id:"velocity_y",label:"player y velocity",description:"player horizontal y momentum",scale:32},
         {id:"heading",label:"player heading",description:"player view angle as a signed normalized turn",min:-1,max:1},
-        {id:"kills",label:"kills",description:"hostile actors defeated by the player in the current episode",min:0,max:100}
+        {id:"kills",label:"kills",description:"hostile actors defeated by the player in the current episode",min:0,max:100},
+        {id:"visited_cells",label:"visited spatial cells",description:"number of distinct coarse player-position cells visited this episode",min:0,max:500},
+        {id:"cell_visits",label:"current cell visits",description:"number of control transitions ending in the current coarse spatial cell",scale:16},
+        {id:"exploration_novelty",label:"exploration novelty",description:"inverse revisit count of the current spatial cell; higher means less familiar",min:0,max:1}
       ],
       collections:[
         {
@@ -135,7 +138,7 @@ export class DoomWasmArena{
         }
       ]
     };
-    this.lastRaw=null;this.lastObservation=null;this.lastDamageDealt=0;this.lastOutcome=null;
+    this.lastRaw=null;this.lastObservation=null;this.lastDamageDealt=0;this.lastOutcome=null;this.visitedCells=new Map();this.lastExploration={visitedCells:0,cellVisits:0,novelty:1,newCell:false};
   }
 
   static async boot({canvas,onProgress=()=>{},actionMs=110,iwadFile=null,contentName=null}={}){
@@ -175,6 +178,15 @@ export class DoomWasmArena{
     while(performance.now()-started<timeoutMs){try{const raw=this.readRaw();if(raw.ready)return raw}catch{}await sleep(80)}
     throw new Error("Timed out waiting for Doom telemetry");
   }
+  cellKey(raw){
+    const p=raw?.player||{};return Math.floor(Number(p.x||0)/128)+","+Math.floor(Number(p.y||0)/128);
+  }
+  commitExploration(raw){
+    const key=this.cellKey(raw),before=this.visitedCells.get(key)||0,next=before+1;
+    this.visitedCells.set(key,next);
+    const state={visitedCells:this.visitedCells.size,cellVisits:next,novelty:1/next,newCell:before===0};
+    this.lastExploration=state;return state;
+  }
   flatten(raw){
     const p=raw.player||{},all=raw.world?.entities||[],lines=raw.world?.lines||[];
     const heading=((Number(p.angle||0)>>>0)/4294967296)*2-1;
@@ -192,19 +204,21 @@ export class DoomWasmArena{
       health:Number(p.health||0),armor:Number(p.armor||0),bullets:Number(p.ammo?.bullets||0),shells:Number(p.ammo?.shells||0),rockets:Number(p.ammo?.rockets||0),cells:Number(p.ammo?.cells||0),
       recent_damage:Number(p.recent_damage||0),recent_damage_dealt:Number(this.lastDamageDealt||0),under_fire:p.under_fire?1:0,weapon:Number(p.weapon||0),
       player_x:Number(p.x||0),player_y:Number(p.y||0),player_z:Number(p.z||0),velocity_x:Number(p.vx||0),velocity_y:Number(p.vy||0),heading,kills:Number(p.kills||0),
+      visited_cells:Number(this.lastExploration?.visitedCells||0),cell_visits:Number(this.lastExploration?.cellVisits||0),exploration_novelty:Number(this.lastExploration?.novelty??1),
       _collections:{entities,geometry}
     };
   }
   observe(){const raw=this.readRaw();this.lastRaw=raw;this.lastObservation=this.flatten(raw);return this.lastObservation}
-  outcome(previous,next){
+  outcome(previous,next,{exploration=this.lastExploration}={}){
     const prev=previous?.player||{},cur=next?.player||{};
     const healthDelta=Number(cur.health||0)-Number(prev.health||0);
     const killDelta=Math.max(0,Number(cur.kills||0)-Number(prev.kills||0));
     const damageDealt=Math.max(0,hostileHealth(previous)-hostileHealth(next));
-    let reward=-.001+damageDealt*.02+killDelta*1.25;
+    const explorationBonus=exploration?.newCell?.015:0;
+    let reward=-.001+damageDealt*.02+killDelta*1.25+explorationBonus;
     if(healthDelta<0)reward+=healthDelta*.03;else if(healthDelta>0)reward+=healthDelta*.005;
     if(Number(cur.health||0)<=0)reward-=2;
-    return{reward,damageDealt,healthDelta,killDelta,dead:Number(cur.health||0)<=0};
+    return{reward,damageDealt,healthDelta,killDelta,explorationBonus,newCell:!!exploration?.newCell,visitedCells:Number(exploration?.visitedCells||0),dead:Number(cur.health||0)<=0};
   }
   reward(previous,next){return this.outcome(previous,next).reward}
   async step(actionId){
@@ -212,13 +226,13 @@ export class DoomWasmArena{
     const before=this.lastRaw||this.readRaw();
     this.module.ccall("PromptFPS_SetControls",null,["number"],[this.actionMasks[actionId]]);
     await sleep(this.actionMs);this.module.ccall("PromptFPS_SetControls",null,["number"],[0]);if(this.settleMs)await sleep(this.settleMs);
-    const after=this.readRaw(),outcome=this.outcome(before,after);
+    const after=this.readRaw(),exploration=this.commitExploration(after),outcome=this.outcome(before,after,{exploration});
     this.lastDamageDealt=outcome.damageDealt;this.lastOutcome=outcome;this.lastRaw=after;this.lastObservation=this.flatten(after);
     return{observation:this.lastObservation,reward:outcome.reward,done:outcome.dead,info:{raw:after,outcome,engine:after.engine||"Chocolate Doom"}};
   }
   async reset(){
     this.module.ccall("PromptFPS_SetControls",null,["number"],[0]);this.module.ccall("PromptFPS_SetStart",null,[],[]);
-    this.lastDamageDealt=0;this.lastOutcome=null;await sleep(100);const raw=await this.waitUntilReady();this.lastRaw=raw;this.lastObservation=this.flatten(raw);return this.lastObservation;
+    this.lastDamageDealt=0;this.lastOutcome=null;this.visitedCells=new Map();await sleep(100);const raw=await this.waitUntilReady();this.commitExploration(raw);this.lastExploration.newCell=false;this.lastRaw=raw;this.lastObservation=this.flatten(raw);return this.lastObservation;
   }
 }
 
