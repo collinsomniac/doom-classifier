@@ -50,6 +50,15 @@ export class SemanticResidualPolicy{
     if(!["hybrid","adaptive","neural"].includes(mode))throw new Error("Unknown inference mode: "+mode);
     this.inferenceMode=mode;
   }
+  reconfigure({schema=this.schema,actions=this.actions}={}){
+    this.teacherGeneration++;this.teacherPromise=null;
+    this.schema=schema;this.actions=actions;
+    this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;this.novelty=new NoveltyTracker(this.baseSize);
+    if(this.q.setSchema&&this.q.setActions){this.q.setSchema(schema);this.q.setActions(actions)}
+    else if(this.q instanceof LinearResidualQ){this.q=new LinearResidualQ(actions.length,this.featureSize)}
+    this.semantic.compile(schema,actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;
+    return this;
+  }
   resetEpisode(){this.memory.reset()}
   resetLearning(){
     this.teacherGeneration++;this.teacherPromise=null;this.q.reset();this.novelty.reset();this.rng=mulberry32(this.seed);

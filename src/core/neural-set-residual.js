@@ -90,14 +90,8 @@ export class NeuralSetResidualQ{
   constructor(schema,actions,{seed=2026,hashDim=48,globalDim=16,entityHidden=24,entityDim=16,actionDim=24,headDim=32,lr=.008,gamma=.96,l2=1e-6}={}){
     this.schema=schema;this.actions=actions;this.seed=seed;this.hashDim=hashDim;this.globalDim=globalDim;this.entityHidden=entityHidden;this.entityDim=entityDim;this.actionDim=actionDim;this.headDim=headDim;
     this.lr=lr;this.gamma=gamma;this.l2=l2;this.name="SchemaHashSetNet";
-    this.compiledGlobals=compileFields(schema.fields,hashDim);
-    this.compiledCollections=(schema.collections||[]).map(collection=>({
-      id:collection.id,
-      fields:compileFields(collection.fields,hashDim),
-      prefixSparse:compileSparse([collection.label,collection.description].filter(Boolean).join(" ")||collection.id,hashDim,.2)
-    }));
-    this.actionEmbeddings=actions.map(a=>actionVector(a,actionDim));
-    this.contextDim=globalDim+entityDim*2+2;this.headInputDim=this.contextDim+actionDim;this.initialize();
+    this.contextDim=globalDim+entityDim*2+2;this.headInputDim=this.contextDim+actionDim;
+    this.setSchema(schema);this.setActions(actions);this.initialize();
   }
   initialize(){
     const rng=mulberry32(this.seed);
@@ -110,12 +104,28 @@ export class NeuralSetResidualQ{
     this.updates=0;this.distillUpdates=0;
   }
   reset(){this.initialize()}
+  setSchema(schema){
+    this.schema=schema;
+    this.compiledGlobals=compileFields(schema.fields,this.hashDim);
+    this.compiledGlobalPrefix=compileSparse("global state",this.hashDim,.2);
+    this.compiledCollections=(schema.collections||[]).map(collection=>({
+      id:collection.id,
+      fields:compileFields(collection.fields,this.hashDim),
+      prefixSparse:compileSparse([collection.label,collection.description].filter(Boolean).join(" ")||collection.id,this.hashDim,.2)
+    }));
+    return this;
+  }
+  setActions(actions){
+    this.actions=actions;
+    this.actionEmbeddings=actions.map(a=>actionVector(a,this.actionDim));
+    return this;
+  }
   parameterCount(){return this.layers.reduce((n,l)=>n+l.count(),0)}
   zeroGrad(){for(const layer of this.layers)layer.zeroGrad()}
   apply(lr=this.lr){for(const layer of this.layers)layer.step(lr,this.l2)}
 
   encodeState(observation,{cache=false}={}){
-    const globalRaw=vectorFromCompiled(this.compiledGlobals,observation,this.hashDim,compileSparse("global state",this.hashDim,.2));
+    const globalRaw=vectorFromCompiled(this.compiledGlobals,observation,this.hashDim,this.compiledGlobalPrefix);
     const globalCache=this.globalLayer.forward(globalRaw);
     const mean=new Float32Array(this.entityDim),max=new Float32Array(this.entityDim),maxIndex=new Int32Array(this.entityDim);
     max.fill(-Infinity);maxIndex.fill(-1);
