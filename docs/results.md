@@ -39,7 +39,7 @@ Current fast model features:
 - typed numeric action representations;
 - three bootstrap value heads.
 
-Current parameter count in CI: **6,419**.
+Current parameter count in CI: **6,803**.
 
 ### Large-state microbenchmark
 
@@ -50,8 +50,8 @@ Synthetic input:
 
 Latest GitHub Actions CPU sample:
 
-- p50: **4.01 ms**
-- p95: **5.16 ms**
+- p50: **5.49 ms**
+- p95: **7.42 ms**
 
 Earlier precompiled-hash optimization reduced the same class of workload from roughly 20 ms to ~5 ms by moving schema text processing out of the tick loop.
 
@@ -61,12 +61,12 @@ Latest CI sample:
 
 | actions | p50 | p95 | parameters |
 |---:|---:|---:|---:|
-| 8 | 0.74 ms | 1.42 ms | 6,419 |
-| 32 | 1.56 ms | 1.88 ms | 6,419 |
-| 128 | 2.06 ms | 2.52 ms | 6,419 |
-| 256 | 3.59 ms | 4.43 ms | 6,419 |
-| 512 | 6.40 ms | 7.15 ms | 6,419 |
-| 1,024 | 12.37 ms | 13.15 ms | 6,419 |
+| 8 | 1.10 ms | 2.05 ms | 6,803 |
+| 32 | 1.32 ms | 1.87 ms | 6,803 |
+| 128 | 2.88 ms | 3.63 ms | 6,803 |
+| 256 | 5.14 ms | 6.31 ms | 6,803 |
+| 512 | 9.27 ms | 10.69 ms | 6,803 |
+| 1,024 | 17.82 ms | 18.77 ms | 6,803 |
 
 This demonstrates that request-time option count changes compute but not parameter count.
 
@@ -108,7 +108,7 @@ The optional MiniLM schema compiler is intended to turn description paraphrase t
 
 ## Attention inspection
 
-The controller can report the highest-weight records for the chosen action.
+The controller can report the highest-weight records for the chosen action. The attention query is now conditioned on action, global state and recent temporal state.
 
 Tests verify:
 
@@ -139,3 +139,8 @@ The next meaningful evidence requires:
 5. frozen teacher-off evaluation;
 6. multi-environment transfer;
 7. equivalent typed-decision benchmark datasets against external baselines.
+
+
+## State-conditioned attention update
+
+The action-only attention query was replaced with an action + global-state + temporal-state query. In the deterministic fixture, changing only global state while keeping the action and record set fixed shifted record attention weights by about 0.025. The change increased the fast model from 6,419 to 6,803 parameters and modestly increased the large-state CPU benchmark, but removes a meaningful expressivity shortcut.
