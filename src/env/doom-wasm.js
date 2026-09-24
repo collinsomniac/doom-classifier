@@ -38,13 +38,47 @@ export class DoomWasmArena{
         {id:"rockets",label:"rockets",description:"available rocket ammunition",min:0,max:100},
         {id:"cells",label:"cells",description:"available energy-cell ammunition",min:0,max:600},
         {id:"recent_damage",label:"recent damage",description:"damage registered by the engine in the recent combat window",min:0,max:100},
-        {id:"visible_hostiles",label:"visible hostiles",description:"number of living hostile actors currently visible to the player",min:0,max:16},
-        {id:"nearest_hostile_distance",label:"nearest hostile distance",description:"world-space distance to the nearest visible hostile actor; larger means farther away",min:0,max:2048},
-        {id:"nearest_hostile_bearing",label:"nearest hostile bearing",description:"signed relative bearing of the nearest visible hostile; zero is directly ahead, negative and positive values are opposite turn directions",min:-1,max:1},
-        {id:"nearest_hostile_health",label:"nearest hostile health",description:"remaining health of the nearest visible hostile actor",min:0,max:1000},
-        {id:"nearest_hostile_targeting",label:"nearest hostile targeting player",description:"whether the nearest visible hostile currently targets the player",min:0,max:1},
-        {id:"visible_pickups",label:"visible pickups",description:"number of currently visible collectible world objects",min:0,max:24},
+        {id:"weapon",label:"equipped weapon",description:"numeric engine identifier of the currently equipped weapon",min:0,max:8},
+        {id:"player_x",label:"player x position",description:"player world x coordinate",scale:2048},
+        {id:"player_y",label:"player y position",description:"player world y coordinate",scale:2048},
+        {id:"velocity_x",label:"player x velocity",description:"player horizontal x momentum",scale:32},
+        {id:"velocity_y",label:"player y velocity",description:"player horizontal y momentum",scale:32},
+        {id:"heading",label:"player heading",description:"player view angle as a signed normalized turn",min:-1,max:1},
         {id:"kills",label:"kills",description:"hostile actors defeated by the player in the current episode",min:0,max:100}
+      ],
+      collections:[
+        {
+          id:"entities",label:"world entities",description:"dynamic actors, objects and pickups represented relative to the player",
+          fields:[
+            {id:"type",label:"entity type",description:"numeric engine object type identifier",scale:64},
+            {id:"relative_x",label:"relative x",description:"entity x displacement from the player",scale:1024},
+            {id:"relative_y",label:"relative y",description:"entity y displacement from the player",scale:1024},
+            {id:"relative_z",label:"relative z",description:"entity z displacement from the player",scale:256},
+            {id:"velocity_x",label:"entity x velocity",description:"entity x momentum",scale:32},
+            {id:"velocity_y",label:"entity y velocity",description:"entity y momentum",scale:32},
+            {id:"radius",label:"entity radius",description:"physical collision radius",scale:64},
+            {id:"height",label:"entity height",description:"physical collision height",scale:128},
+            {id:"health",label:"entity health",description:"remaining actor health when applicable",scale:256},
+            {id:"distance",label:"distance",description:"distance from player to entity",scale:1024},
+            {id:"relative_angle",label:"relative angle",description:"signed angular displacement from the player's view",min:-1,max:1},
+            {id:"visible",label:"line of sight",description:"whether the engine reports direct line of sight",min:0,max:1},
+            {id:"countkill",label:"kill-count actor flag",description:"whether this engine actor counts toward the level kill total",min:0,max:1},
+            {id:"pickup",label:"collectible flag",description:"whether this engine object is collectible or special",min:0,max:1},
+            {id:"targeting_player",label:"targets player",description:"whether this actor currently targets the player",min:0,max:1}
+          ]
+        },
+        {
+          id:"geometry",label:"world geometry",description:"map line segments represented relative to the player",
+          fields:[
+            {id:"x1",label:"line endpoint one x",description:"first endpoint x displacement from player",scale:1024},
+            {id:"y1",label:"line endpoint one y",description:"first endpoint y displacement from player",scale:1024},
+            {id:"x2",label:"line endpoint two x",description:"second endpoint x displacement from player",scale:1024},
+            {id:"y2",label:"line endpoint two y",description:"second endpoint y displacement from player",scale:1024},
+            {id:"blocking",label:"blocking geometry",description:"whether this line blocks player movement",min:0,max:1},
+            {id:"special",label:"interactive line special",description:"numeric engine special action attached to the line",scale:32},
+            {id:"tag",label:"line tag",description:"numeric map linkage tag attached to the line",scale:32}
+          ]
+        }
       ]
     };
     this.lastRaw=null;this.lastObservation=null;
@@ -53,89 +87,63 @@ export class DoomWasmArena{
   static async boot({canvas,onProgress=()=>{},actionMs=120}={}){
     if(!canvas)throw new Error("DoomWasmArena.boot requires a canvas");
     onProgress("fetching pinned Chocolate Doom runtime");
-    const [source,wasmBinary,dataPackage]=await Promise.all([
-      fetchAsset("chocolate-doom.js","text"),fetchAsset("chocolate-doom.wasm"),fetchAsset("chocolate-doom.data")
-    ]);
+    const [source,wasmBinary,dataPackage]=await Promise.all([fetchAsset("chocolate-doom.js","text"),fetchAsset("chocolate-doom.wasm"),fetchAsset("chocolate-doom.data")]);
     onProgress("instantiating WebAssembly runtime");
     const blobUrl=URL.createObjectURL(new Blob([source],{type:"text/javascript"}));
-    let createModule;
-    try{({default:createModule}=await import(blobUrl))}finally{URL.revokeObjectURL(blobUrl)}
+    let createModule;try{({default:createModule}=await import(blobUrl))}finally{URL.revokeObjectURL(blobUrl)}
     if(typeof createModule!=="function")throw new Error("Chocolate Doom module factory was not exported");
     const module=await createModule({
       canvas,keyboardListeningElement:canvas,wasmBinary,locateFile:path=>RAW_BASE+"/"+path,getPreloadedPackage:()=>dataPackage,noInitialRun:true,
-      preRun:[m=>{
-        mkdir(m.FS,"/config");mkdir(m.FS,"/savegames");
-        m.FS.writeFile("/config/default.cfg","fullscreen 0\ngrabmouse 0\nuse_mouse 0\n");
-        m.FS.writeFile("/config/chocolate-doom.cfg","aspect_ratio_correct 1\ninteger_scaling 0\nscreenblocks 10\nsmooth_pixel_scaling 0\nforce_software_renderer 1\n");
-      }],
+      preRun:[m=>{mkdir(m.FS,"/config");mkdir(m.FS,"/savegames");m.FS.writeFile("/config/default.cfg","fullscreen 0\ngrabmouse 0\nuse_mouse 0\n");m.FS.writeFile("/config/chocolate-doom.cfg","aspect_ratio_correct 1\ninteger_scaling 0\nscreenblocks 10\nsmooth_pixel_scaling 0\nforce_software_renderer 1\n")}],
       print:()=>{},printErr:message=>console.warn("[doom]",message)
     });
     onProgress("starting Freedoom");
-    try{
-      module.callMain(["-window","-iwad","/iwads/freedoom2.wad","-warp","1","-skill","1","-nomusic","-nosound","-config","/config/default.cfg","-extraconfig","/config/chocolate-doom.cfg"]);
-    }catch(error){
-      const message=String(error);
-      if(!message.includes("unwind")&&!message.includes("SimulateInfiniteLoop"))throw error;
-    }
-    const arena=new DoomWasmArena(module,{actionMs});
-    await arena.waitUntilReady();await arena.reset();onProgress("ready");return arena;
+    try{module.callMain(["-window","-iwad","/iwads/freedoom2.wad","-warp","1","-skill","1","-nomusic","-nosound","-config","/config/default.cfg","-extraconfig","/config/chocolate-doom.cfg"])}
+    catch(error){const message=String(error);if(!message.includes("unwind")&&!message.includes("SimulateInfiniteLoop"))throw error}
+    const arena=new DoomWasmArena(module,{actionMs});await arena.waitUntilReady();await arena.reset();onProgress("ready");return arena;
   }
 
   setActionMs(ms){this.actionMs=clamp(Number(ms)||120,35,1000)}
   readRaw(){
     const json=this.module.ccall("PromptFPS_Observation","string",[],[]);
-    const raw=JSON.parse(String(json));
-    if(!raw.ready)throw new Error("Doom telemetry bridge is not ready");
-    return raw;
+    const raw=JSON.parse(String(json));if(!raw.ready)throw new Error("Doom telemetry bridge is not ready");return raw;
   }
   async waitUntilReady(timeoutMs=8000){
     const started=performance.now();
-    while(performance.now()-started<timeoutMs){
-      try{const raw=this.readRaw();if(raw.ready)return raw}catch{}
-      await sleep(80);
-    }
+    while(performance.now()-started<timeoutMs){try{const raw=this.readRaw();if(raw.ready)return raw}catch{}await sleep(80)}
     throw new Error("Timed out waiting for Doom telemetry");
   }
   flatten(raw){
-    const player=raw.player||{};
-    const all=raw.world?.entities||[];
-    const enemies=all.filter(entity=>entity.enemy&&entity.visible&&entity.health>0).sort((a,b)=>a.distance-b.distance);
-    const nearest=enemies[0],relative=nearest?clamp(Number(nearest.relative_angle||0)/2147483648,-1,1):0;
+    const p=raw.player||{},all=raw.world?.entities||[],lines=raw.world?.lines||[];
+    const heading=((Number(p.angle||0)>>>0)/4294967296)*2-1;
+    const entities=all.map(e=>({
+      type:Number(e.type||0),relative_x:Number(e.relative_x||0),relative_y:Number(e.relative_y||0),relative_z:Number(e.z||0)-Number(p.z||0),
+      velocity_x:Number(e.vx||0),velocity_y:Number(e.vy||0),radius:Number(e.radius||0),height:Number(e.height||0),health:Number(e.health||0),
+      distance:Number(e.distance||0),relative_angle:clamp(Number(e.relative_angle||0)/2147483648,-1,1),visible:e.visible?1:0,countkill:e.enemy?1:0,pickup:e.pickup?1:0,targeting_player:e.targeting_player?1:0
+    }));
+    const geometry=lines.map(line=>({
+      x1:Number(line.x1||0)-Number(p.x||0),y1:Number(line.y1||0)-Number(p.y||0),x2:Number(line.x2||0)-Number(p.x||0),y2:Number(line.y2||0)-Number(p.y||0),
+      blocking:line.blocking?1:0,special:Number(line.special||0),tag:Number(line.tag||0)
+    }));
     return{
-      health:Number(player.health||0),armor:Number(player.armor||0),bullets:Number(player.ammo?.bullets||0),shells:Number(player.ammo?.shells||0),
-      rockets:Number(player.ammo?.rockets||0),cells:Number(player.ammo?.cells||0),recent_damage:Number(player.recent_damage||0),
-      visible_hostiles:enemies.length,nearest_hostile_distance:nearest?clamp(Number(nearest.distance||0),0,2048):2048,
-      nearest_hostile_bearing:relative,nearest_hostile_health:nearest?Math.max(0,Number(nearest.health||0)):0,
-      nearest_hostile_targeting:nearest?.targeting_player?1:0,visible_pickups:all.filter(entity=>entity.pickup&&entity.visible).length,kills:Number(player.kills||0)
+      health:Number(p.health||0),armor:Number(p.armor||0),bullets:Number(p.ammo?.bullets||0),shells:Number(p.ammo?.shells||0),rockets:Number(p.ammo?.rockets||0),cells:Number(p.ammo?.cells||0),
+      recent_damage:Number(p.recent_damage||0),weapon:Number(p.weapon||0),player_x:Number(p.x||0),player_y:Number(p.y||0),velocity_x:Number(p.vx||0),velocity_y:Number(p.vy||0),heading,kills:Number(p.kills||0),
+      _collections:{entities,geometry}
     };
   }
-  observe(){
-    const raw=this.readRaw();this.lastRaw=raw;this.lastObservation=this.flatten(raw);return this.lastObservation;
-  }
+  observe(){const raw=this.readRaw();this.lastRaw=raw;this.lastObservation=this.flatten(raw);return this.lastObservation}
   reward(previous,next){
-    const prev=previous?.player||{},cur=next?.player||{};
-    const healthDelta=Number(cur.health||0)-Number(prev.health||0),killDelta=Math.max(0,Number(cur.kills||0)-Number(prev.kills||0));
-    let reward=-0.002+killDelta*2;
-    if(healthDelta<0)reward+=healthDelta/50;else if(healthDelta>0)reward+=healthDelta/200;
-    if(Number(cur.health||0)<=0)reward-=2;
-    return reward;
+    const prev=previous?.player||{},cur=next?.player||{};const healthDelta=Number(cur.health||0)-Number(prev.health||0),killDelta=Math.max(0,Number(cur.kills||0)-Number(prev.kills||0));
+    let reward=-.002+killDelta*2;if(healthDelta<0)reward+=healthDelta/50;else if(healthDelta>0)reward+=healthDelta/200;if(Number(cur.health||0)<=0)reward-=2;return reward;
   }
   async step(actionId){
     if(!(actionId in CONTROL))throw new Error("Unsupported Doom action: "+actionId);
-    const before=this.lastRaw||this.readRaw();
-    this.module.ccall("PromptFPS_SetControls",null,["number"],[CONTROL[actionId]]);
-    await sleep(this.actionMs);this.module.ccall("PromptFPS_SetControls",null,["number"],[0]);
-    if(this.settleMs)await sleep(this.settleMs);
+    const before=this.lastRaw||this.readRaw();this.module.ccall("PromptFPS_SetControls",null,["number"],[CONTROL[actionId]]);
+    await sleep(this.actionMs);this.module.ccall("PromptFPS_SetControls",null,["number"],[0]);if(this.settleMs)await sleep(this.settleMs);
     const after=this.readRaw();this.lastRaw=after;this.lastObservation=this.flatten(after);
     return{observation:this.lastObservation,reward:this.reward(before,after),done:Number(after.player?.health||0)<=0,info:{raw:after,engine:after.engine||"Chocolate Doom"}};
   }
-  async reset(){
-    this.module.ccall("PromptFPS_SetControls",null,["number"],[0]);this.module.ccall("PromptFPS_SetStart",null,[],[]);
-    await sleep(100);const raw=await this.waitUntilReady();this.lastRaw=raw;this.lastObservation=this.flatten(raw);return this.lastObservation;
-  }
+  async reset(){this.module.ccall("PromptFPS_SetControls",null,["number"],[0]);this.module.ccall("PromptFPS_SetStart",null,[],[]);await sleep(100);const raw=await this.waitUntilReady();this.lastRaw=raw;this.lastObservation=this.flatten(raw);return this.lastObservation}
 }
 
-export const DOOM_RUNTIME_PROVENANCE=Object.freeze({
-  repository:RUNTIME_REPOSITORY,commit:RUNTIME_COMMIT,engine:"Chocolate Doom 3.1.1",content:"Freedoom 0.13.0",
-  note:"Runtime is fetched from a pinned public research build; policy/controller code is implemented independently in doom-classifier."
-});
+export const DOOM_RUNTIME_PROVENANCE=Object.freeze({repository:RUNTIME_REPOSITORY,commit:RUNTIME_COMMIT,engine:"Chocolate Doom 3.1.1",content:"Freedoom 0.13.0",note:"Runtime is fetched from a pinned public research build; policy/controller code is implemented independently in doom-classifier."});

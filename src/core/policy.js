@@ -1,6 +1,7 @@
 import {argmax,clamp,entropyNormalized,mulberry32,softmax} from "./math.js";
 import {TemporalMemory} from "./memory.js";
 import {LinearResidualQ} from "./residual.js";
+import {NeuralSetResidualQ} from "./neural-set-residual.js";
 
 function numericFeatures(schema,obs){
   const out=[1];
@@ -26,11 +27,13 @@ class NoveltyTracker{
 }
 
 export class SemanticResidualPolicy{
-  constructor({schema,actions,semantic,residualWeight=.9,temperature=.8,epsilon=.08,seed=2026}){
+  constructor({schema,actions,semantic,residual="linear",residualWeight=.9,temperature=.8,epsilon=.08,seed=2026}){
     this.schema=schema;this.actions=actions;this.residualWeight=residualWeight;this.temperature=temperature;this.epsilon=epsilon;this.seed=seed;this.rng=mulberry32(seed);
     this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;
-    this.q=new LinearResidualQ(actions.length,this.featureSize);this.novelty=new NoveltyTracker(this.baseSize);
-    this.setSemantic(semantic);
+    if(typeof residual==="object")this.q=residual;
+    else if(residual==="neural-set")this.q=new NeuralSetResidualQ(schema,actions,{seed});
+    else this.q=new LinearResidualQ(actions.length,this.featureSize);
+    this.novelty=new NoveltyTracker(this.baseSize);this.setSemantic(semantic);
   }
   setSemantic(semantic){this.semantic=semantic;semantic.compile(this.schema,this.actions)}
   resetEpisode(){this.memory.reset()}
@@ -42,10 +45,10 @@ export class SemanticResidualPolicy{
   }
   async decide(obs,{useResidual=true,memory=true,explore=false}={}){
     const t0=performance.now(),encoded=this.encode(obs,memory,true);
-    const semanticStart=performance.now();
-    const sem=await this.semantic.score(obs);
-    const semanticMs=performance.now()-semanticStart;
-    const q=this.q.scores(encoded.features);
+    const semanticStart=performance.now(),sem=await this.semantic.score(obs),semanticMs=performance.now()-semanticStart;
+    const residualStart=performance.now();
+    const q=this.q.scoresObservation?this.q.scoresObservation(obs):this.q.scores(encoded.features);
+    const residualMs=performance.now()-residualStart;
     const logits=sem.map((v,i)=>v+(useResidual?this.residualWeight*q[i]:0)),probs=softmax(logits,this.temperature);
     let chosen=argmax(probs);
     if(explore&&this.rng()<this.epsilon)chosen=Math.floor(this.rng()*this.actions.length);
@@ -53,8 +56,12 @@ export class SemanticResidualPolicy{
     return{
       actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:q,features:encoded.features,
       uncertainty:{entropy:entropyNormalized(probs),margin:(sorted[0]??0)-(sorted[1]??0),novelty:this.novelty.observe(encoded.base)},
-      latencyMs:performance.now()-t0,semanticLatencyMs:semanticMs
+      latencyMs:performance.now()-t0,semanticLatencyMs:semanticMs,residualLatencyMs:residualMs
     };
   }
-  learn(transition){return this.q.update(transition.features,transition.actionIndex,transition.reward,transition.nextFeatures,transition.done)}
+  learn(transition){
+    if(this.q.updateTransition)return this.q.updateTransition(transition);
+    return this.q.update(transition.features,transition.actionIndex,transition.reward,transition.nextFeatures,transition.done);
+  }
+  distill(observation,teacherScores,options){return this.q.distill?.(observation,teacherScores,options)||null}
 }

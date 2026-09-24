@@ -28,10 +28,13 @@ export class ExperimentController extends EventTarget{
       const decision=await this.policy.decide(obs,{useResidual:this.useResidual,memory:this.memory,explore:this.training&&this.explore});
       const step=await this.environment.step(decision.action.id),nextEncoded=this.policy.encode(step.observation,this.memory,false);
       let learningInfo=null;
-      if(this.training)learningInfo=this.policy.learn({features:decision.features,actionIndex:decision.actionIndex,reward:step.reward,nextFeatures:nextEncoded.features,done:step.done});
+      if(this.training)learningInfo=this.policy.learn({
+        observation:obs,features:decision.features,actionIndex:decision.actionIndex,reward:step.reward,
+        nextObservation:step.observation,nextFeatures:nextEncoded.features,done:step.done
+      });
       this.steps++;this.episodeReturn+=step.reward;this.latencies.push(decision.latencyMs);if(this.latencies.length>1000)this.latencies.shift();
       this.lastDecision={...decision,reward:step.reward,learningInfo};
-      this.trace.push({t:Date.now(),step:this.steps,observation:obs,action:decision.action.id,probabilities:Object.fromEntries(this.policy.actions.map((a,i)=>[a.id,decision.probs[i]])),reward:step.reward,uncertainty:decision.uncertainty,latencyMs:decision.latencyMs,semanticLatencyMs:decision.semanticLatencyMs,backbone:this.policy.semantic.name,backend:this.policy.semantic.backend||"local-js",mode:{useResidual:this.useResidual,training:this.training,memory:this.memory,explore:this.explore}});
+      this.trace.push({t:Date.now(),step:this.steps,observation:obs,action:decision.action.id,probabilities:Object.fromEntries(this.policy.actions.map((a,i)=>[a.id,decision.probs[i]])),reward:step.reward,uncertainty:decision.uncertainty,latencyMs:decision.latencyMs,semanticLatencyMs:decision.semanticLatencyMs,residualLatencyMs:decision.residualLatencyMs,backbone:this.policy.semantic.name,residual:this.policy.q.name||this.policy.q.constructor.name,backend:this.policy.semantic.backend||"local-js",mode:{useResidual:this.useResidual,training:this.training,memory:this.memory,explore:this.explore}});
       if(this.trace.length>5000)this.trace.shift();
       if(step.done){this.episodes++;this.returns.push(this.episodeReturn);if(this.returns.length>200)this.returns.shift();this.episodeReturn=0;await this.environment.reset();this.policy.resetEpisode()}
       this.dispatchEvent(new Event("tick"));return true;
@@ -39,5 +42,5 @@ export class ExperimentController extends EventTarget{
     finally{this.inFlight=false}
   }
   latencySummary(){return{last:this.latencies.at(-1)||0,p50:percentile(this.latencies,.5),p95:percentile(this.latencies,.95),p99:percentile(this.latencies,.99)}}
-  exportTrace(){return JSON.stringify({meta:{createdAt:new Date().toISOString(),steps:this.steps,episodes:this.episodes,hz:this.hz,backbone:this.policy.semantic.name,backend:this.policy.semantic.backend||"local-js"},trace:this.trace},null,2)}
+  exportTrace(){return JSON.stringify({meta:{createdAt:new Date().toISOString(),steps:this.steps,episodes:this.episodes,hz:this.hz,backbone:this.policy.semantic.name,residual:this.policy.q.name||this.policy.q.constructor.name,backend:this.policy.semantic.backend||"local-js"},trace:this.trace},null,2)}
 }

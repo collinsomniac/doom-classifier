@@ -14,12 +14,12 @@ function buildBars(){ui.bars.innerHTML="";if(!env)return;for(const a of env.acti
 function render(){
   if(!env||!controller||!policy)return;
   const obs=env.lastObservation||env.observe();ui.objective.textContent=env.schema.objective;
-  ui.state.innerHTML=Object.entries(obs).map(([key,value])=>'<div class="state-row"><span>'+key+'</span><strong>'+Number(value).toFixed(3)+'</strong></div>').join("");
+  ui.state.innerHTML=env.schema.fields.map(({id})=>'<div class="state-row"><span>'+id+'</span><strong>'+Number(obs[id]??0).toFixed(3)+'</strong></div>').join("");
   ui.steps.textContent=controller.steps;ui.episodes.textContent=controller.episodes;ui.ret.textContent=controller.episodeReturn.toFixed(3);ui.updates.textContent=policy.q.updates;
-  ui.backbone.textContent=policy.semantic.name+(policy.semantic.backend?" · "+policy.semantic.backend:"");
+  ui.backbone.textContent=policy.semantic.name+(policy.semantic.backend?" · "+policy.semantic.backend:"")+" + "+(policy.q.name||policy.q.constructor.name);
   const lat=controller.latencySummary();ui.latLast.textContent=lat.last.toFixed(2)+" ms";ui.latP95.textContent=lat.p95.toFixed(2)+" ms";ui.latP99.textContent=lat.p99.toFixed(2)+" ms";
   const d=controller.lastDecision;
-  if(d){ui.latSemantic.textContent=d.semanticLatencyMs.toFixed(2)+" ms";ui.lastReward.textContent=d.reward.toFixed(3);ui.chosen.textContent=d.action.label;ui.entropy.textContent=d.uncertainty.entropy.toFixed(3);ui.margin.textContent=d.uncertainty.margin.toFixed(3);ui.novelty.textContent=d.uncertainty.novelty.toFixed(3);[...ui.bars.children].forEach((row,i)=>{row.querySelector(".bar-fill").style.width=(d.probs[i]*100).toFixed(1)+"%";row.lastElementChild.textContent=d.probs[i].toFixed(3)});ui.log.textContent=controller.trace.slice(-12).reverse().map(t=>"s"+String(t.step).padStart(4,"0")+" "+t.action.padEnd(13)+" p="+Math.max(...Object.values(t.probabilities)).toFixed(3)+" r="+t.reward.toFixed(3)+" policy="+t.latencyMs.toFixed(1)+"ms").join("\n")}
+  if(d){ui.latSemantic.textContent=d.semanticLatencyMs.toFixed(2)+" ms";ui.lastReward.textContent=d.reward.toFixed(3);ui.chosen.textContent=d.action.label;ui.entropy.textContent=d.uncertainty.entropy.toFixed(3);ui.margin.textContent=d.uncertainty.margin.toFixed(3);ui.novelty.textContent=d.uncertainty.novelty.toFixed(3);[...ui.bars.children].forEach((row,i)=>{row.querySelector(".bar-fill").style.width=(d.probs[i]*100).toFixed(1)+"%";row.lastElementChild.textContent=d.probs[i].toFixed(3)});ui.log.textContent=controller.trace.slice(-12).reverse().map(t=>"s"+String(t.step).padStart(4,"0")+" "+t.action.padEnd(13)+" p="+Math.max(...Object.values(t.probabilities)).toFixed(3)+" r="+t.reward.toFixed(3)+" neural="+t.residualLatencyMs.toFixed(2)+"ms total="+t.latencyMs.toFixed(1)+"ms").join("\n")}
 }
 function bindController(){controller.addEventListener("tick",render);controller.addEventListener("state",event=>{ui.start.textContent=event.detail==="RUNNING"?"Pause agent":"Start agent";setRuntime(event.detail)});controller.addEventListener("error",event=>{setRuntime("ERROR",true);ui.log.textContent="ERROR: "+event.detail.message+"\n"+ui.log.textContent})}
 
@@ -27,18 +27,22 @@ async function boot(){
   ui.boot.disabled=true;setRuntime("LOADING");ui.bootStatus.textContent="Fetching pinned engine + Freedoom runtime…";
   try{
     env=await DoomWasmArena.boot({canvas:ui.canvas,actionMs:Number(ui.actionMs.value),onProgress:message=>{ui.bootStatus.textContent=message}});
-    hashSemantic=new HashSemanticAdapter();hashSemantic.backend="local-js";policy=new SemanticResidualPolicy({schema:env.schema,actions:env.actions,semantic:hashSemantic,seed:1993});controller=new ExperimentController({environment:env,policy,hz:8});
-    controller.useResidual=ui.residual.checked;controller.training=ui.training.checked;controller.memory=ui.memory.checked;controller.explore=ui.explore.checked;
-    bindController();buildBars();setReadyControls(true);setRuntime("READY");ui.bootStatus.textContent=DOOM_RUNTIME_PROVENANCE.engine+" + "+DOOM_RUNTIME_PROVENANCE.content+" · pinned "+DOOM_RUNTIME_PROVENANCE.commit.slice(0,10);ui.modelStatus.textContent="hash baseline ready";render();
+    hashSemantic=new HashSemanticAdapter();hashSemantic.backend="local-js";
+    policy=new SemanticResidualPolicy({schema:env.schema,actions:env.actions,semantic:hashSemantic,residual:"neural-set",seed:1993});
+    controller=new ExperimentController({environment:env,policy,hz:8});controller.useResidual=ui.residual.checked;controller.training=ui.training.checked;controller.memory=ui.memory.checked;controller.explore=ui.explore.checked;
+    bindController();buildBars();setReadyControls(true);setRuntime("READY");
+    const counts=env.lastObservation?._collections||{};
+    ui.bootStatus.textContent=DOOM_RUNTIME_PROVENANCE.engine+" + "+DOOM_RUNTIME_PROVENANCE.content+" · "+policy.q.parameterCount()+" neural params · "+(counts.entities?.length||0)+" entities + "+(counts.geometry?.length||0)+" geometry records";
+    ui.modelStatus.textContent="hash semantic prior + neural set controller ready";render();
   }catch(error){ui.boot.disabled=false;setRuntime("BOOT FAILED",true);ui.bootStatus.textContent=String(error?.message||error);ui.log.textContent=String(error?.stack||error)}
 }
 async function switchBackbone(){
   if(!policy||!controller)return;controller.pause();setReadyControls(false);ui.modelProgress.value=0;const selected=ui.modelSelect.value,previous=policy.semantic;
   try{
-    if(selected==="hash"){if(previous!==hashSemantic&&previous.dispose)await previous.dispose();policy.setSemantic(hashSemantic);policy.resetLearning();await controller.reset({learning:false});ui.modelStatus.textContent="hash baseline ready · residual weights cleared";render();return}
+    if(selected==="hash"){if(previous!==hashSemantic&&previous.dispose)await previous.dispose();policy.setSemantic(hashSemantic);policy.resetLearning();await controller.reset({learning:false});ui.modelStatus.textContent="hash prior + neural set controller ready · neural weights cleared";render();return}
     const preset=NLI_PRESETS[selected];ui.modelStatus.textContent="loading "+preset.label+" · "+preset.approx;
     const candidate=new TransformersNLIAdapter({preset:selected,onProgress:info=>{if(Number.isFinite(info.normalizedProgress))ui.modelProgress.value=info.normalizedProgress;ui.modelStatus.textContent=(info.status||"loading")+(info.file?" · "+info.file:"")}});
-    candidate.compile(env.schema,env.actions);if(previous!==hashSemantic&&previous.dispose)await previous.dispose();policy.setSemantic(hashSemantic);await candidate.load();policy.setSemantic(candidate);policy.resetLearning();await controller.reset({learning:false});ui.modelProgress.value=100;ui.modelStatus.textContent=preset.label+" ready · "+candidate.backend+" · residual weights cleared";render();
+    candidate.compile(env.schema,env.actions);if(previous!==hashSemantic&&previous.dispose)await previous.dispose();policy.setSemantic(hashSemantic);await candidate.load();policy.setSemantic(candidate);policy.resetLearning();await controller.reset({learning:false});ui.modelProgress.value=100;ui.modelStatus.textContent=preset.label+" + neural set controller ready · neural weights cleared";render();
   }catch(error){policy.setSemantic(hashSemantic);policy.resetLearning();await controller.reset({learning:false});ui.modelSelect.value="hash";ui.modelProgress.value=0;ui.modelStatus.textContent="load failed; hash restored · "+String(error?.message||error);render()}
   finally{setReadyControls(true)}
 }
