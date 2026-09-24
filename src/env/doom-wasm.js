@@ -214,7 +214,7 @@ export class DoomWasmArena{
     const healthDelta=Number(cur.health||0)-Number(prev.health||0);
     const killDelta=Math.max(0,Number(cur.kills||0)-Number(prev.kills||0));
     const damageDealt=Math.max(0,hostileHealth(previous)-hostileHealth(next));
-    const explorationBonus=exploration?.newCell?.015:0;
+    const explorationBonus=exploration?.newCell ? .015 : 0;
     let reward=-.001+damageDealt*.02+killDelta*1.25+explorationBonus;
     if(healthDelta<0)reward+=healthDelta*.03;else if(healthDelta>0)reward+=healthDelta*.005;
     if(Number(cur.health||0)<=0)reward-=2;
