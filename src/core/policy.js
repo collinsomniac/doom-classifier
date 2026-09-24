@@ -1,4 +1,4 @@
-import {argmax,clamp,entropyNormalized,softmax} from "./math.js";
+import {argmax,clamp,entropyNormalized,mulberry32,softmax} from "./math.js";
 import {TemporalMemory} from "./memory.js";
 import {LinearResidualQ} from "./residual.js";
 
@@ -25,39 +25,29 @@ class NoveltyTracker{
 }
 
 export class SemanticResidualPolicy{
-  constructor({schema,actions,semantic,residualWeight=.9,temperature=.8,epsilon=.08}){
-    this.schema=schema;this.actions=actions;this.semantic=semantic;this.residualWeight=residualWeight;this.temperature=temperature;this.epsilon=epsilon;
+  constructor({schema,actions,semantic,residualWeight=.9,temperature=.8,epsilon=.08,seed=2026}){
+    this.schema=schema;this.actions=actions;this.semantic=semantic;this.residualWeight=residualWeight;this.temperature=temperature;this.epsilon=epsilon;this.seed=seed;this.rng=mulberry32(seed);
     semantic.compile(schema,actions);
-    this.baseSize=1+schema.fields.length;
-    this.memory=new TemporalMemory(this.baseSize);
-    this.featureSize=this.baseSize*2;
-    this.q=new LinearResidualQ(actions.length,this.featureSize);
-    this.novelty=new NoveltyTracker(this.baseSize);
+    this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;
+    this.q=new LinearResidualQ(actions.length,this.featureSize);this.novelty=new NoveltyTracker(this.baseSize);
   }
   resetEpisode(){this.memory.reset()}
-  resetLearning(){this.q.reset();this.novelty.reset()}
-  encode(obs,memoryEnabled=true){
+  resetLearning(){this.q.reset();this.novelty.reset();this.rng=mulberry32(this.seed)}
+  encode(obs,memoryEnabled=true,commit=true){
     const base=numericFeatures(this.schema,obs);
-    const temporal=this.memory.update(base,memoryEnabled);
-    const x=new Float32Array(this.featureSize);
-    x.set(base,0);x.set(temporal,this.baseSize);
+    const temporal=commit?this.memory.update(base,memoryEnabled):this.memory.preview(base,memoryEnabled);
+    const x=new Float32Array(this.featureSize);x.set(base,0);x.set(temporal,this.baseSize);
     return{base,features:x};
   }
-  decide(obs,{learning=true,memory=true,explore=true}={}){
-    const t0=performance.now();
-    const encoded=this.encode(obs,memory);
-    const sem=this.semantic.score(obs);
-    const q=this.q.scores(encoded.features);
-    const logits=sem.map((v,i)=>v+(learning?this.residualWeight*q[i]:0));
-    const probs=softmax(logits,this.temperature);
+  decide(obs,{useResidual=true,memory=true,explore=false}={}){
+    const t0=performance.now(),encoded=this.encode(obs,memory,true),sem=this.semantic.score(obs),q=this.q.scores(encoded.features);
+    const logits=sem.map((v,i)=>v+(useResidual?this.residualWeight*q[i]:0)),probs=softmax(logits,this.temperature);
     let chosen=argmax(probs);
-    if(learning&&explore&&Math.random()<this.epsilon)chosen=Math.floor(Math.random()*this.actions.length);
+    if(explore&&this.rng()<this.epsilon)chosen=Math.floor(this.rng()*this.actions.length);
     const sorted=[...probs].sort((a,b)=>b-a);
-    return{
-      actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:q,features:encoded.features,
+    return{actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:q,features:encoded.features,
       uncertainty:{entropy:entropyNormalized(probs),margin:(sorted[0]??0)-(sorted[1]??0),novelty:this.novelty.observe(encoded.base)},
-      latencyMs:performance.now()-t0
-    };
+      latencyMs:performance.now()-t0};
   }
   learn(transition){return this.q.update(transition.features,transition.actionIndex,transition.reward,transition.nextFeatures,transition.done)}
 }
