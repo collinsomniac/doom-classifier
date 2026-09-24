@@ -27,13 +27,26 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
       const lat=c.latencySummary(),dominant=Object.entries(counts).sort((a,b)=>b[1]-a[1])[0]||["none",0];
       return{steps,reward,damage,received,kills,fire,diversity:Object.keys(counts).length,dominant,counts,meanMaxP:maxP/steps,meanEntropy:entropy/steps,p95Ms:lat.p95,teacherCalls:p.teacherCalls-teacherBefore,temperature:p.temperature};
     };
+    const distribution=async()=>{
+      await c.reset({learning:false});p.resetEpisode();
+      const obs=lab.env.observe(),labels=p.actions.map(a=>a.id);
+      const teacherDecision=await p.decide(obs,{useResidual:false,memory:false,explore:false});
+      p.resetEpisode();
+      const neuralDecision=await p.decide(obs,{useResidual:true,memory:false,explore:false});
+      const rank=probs=>labels.map((id,i)=>({id,p:probs[i]})).sort((a,b)=>b.p-a.p);
+      return{teacher:rank(teacherDecision.probs).slice(0,8),neural:rank(neuralDecision.probs).slice(0,8),temperature:p.temperature,teacherState:p.semantic.stateText?.(obs)?.slice(0,3500)||null};
+    };
+    const initialDistribution=await distribution();
     const before=await evaluate(24);
     await c.reset({learning:false});c.training=true;c.explore=true;c.memory=true;c.useResidual=true;p.setInferenceMode("adaptive");
-    const updatesBefore=p.q.updates,teacherBefore=p.teacherCalls;
+    const updatesBefore=p.q.updates,teacherBefore=p.teacherCalls,traceStart=c.trace.length;
     const train=await c.trainBurst({steps:64,epsilon:.16});
-    const training={...train,neuralUpdates:p.q.updates-updatesBefore,teacherCalls:p.teacherCalls-teacherBefore,replaySize:p.replay?.length||0,temperature:p.temperature};
+    const trainingTrace=c.trace.slice(traceStart),trainingCounts={},rewardByAction={};
+    for(const t of trainingTrace){trainingCounts[t.action]=(trainingCounts[t.action]||0)+1;rewardByAction[t.action]=(rewardByAction[t.action]||0)+t.reward}
+    const training={...train,neuralUpdates:p.q.updates-updatesBefore,teacherCalls:p.teacherCalls-teacherBefore,replaySize:p.replay?.length||0,temperature:p.temperature,counts:trainingCounts,rewardByAction};
+    const trainedDistribution=await distribution();
     const after=await evaluate(24);
-    return{before,training,after,params:p.q.parameterCount()};
+    return{initialDistribution,before,training,trainedDistribution,after,params:p.q.parameterCount()};
   });
 
   console.log("DOOM_LEARNING_BENCHMARK "+JSON.stringify(result));
