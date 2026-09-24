@@ -112,9 +112,11 @@ function bindController(){
   controller.addEventListener("state",event=>{ui.start.textContent=event.detail==="RUNNING"?"Pause":"Play";setRuntime(event.detail);updateReadiness()});
   controller.addEventListener("error",event=>{setRuntime("ERROR",true);ui.log.textContent="ERROR: "+event.detail.message+"\n"+ui.log.textContent});
 }
-async function primeCurrentTeacher(label,steps=12){
+async function primeCurrentTeacher(label,steps=12,{converge=false}={}){
   const obs=env.lastObservation||env.observe();ui.modelStatus.textContent=label+" · distilling current state";
-  const prime=await policy.primeTeacher(obs,{steps});if(prime?.stale)throw new Error("Semantic bootstrap became stale");return prime;
+  const prime=await policy.primeTeacher(obs,{steps,maxSteps:converge?64:steps,targetKL:converge?.06:null});
+  if(prime?.stale)throw new Error("Semantic bootstrap became stale");
+  return prime;
 }
 async function compileSchemaOnly(){
   ui.schemaStatus.textContent="loading "+SCHEMA_EMBEDDING_PRESET.label+" · "+SCHEMA_EMBEDDING_PRESET.approx;
@@ -159,8 +161,9 @@ async function prepareRecommended(){
     if(!schemaCompiled)await compileSchemaOnly();
     ui.prepareStatus.textContent="Loading MobileBERT semantic teacher…";ui.modelSelect.value="mobilebert";
     if(!isLearnedTeacher()||policy.semantic.presetKey!=="mobilebert")await loadTeacherOnly("mobilebert");
-    policy.resetLearning();await controller.reset({learning:false});const prime=await primeCurrentTeacher("MobileBERT",16);
-    applyProfile("assisted");ui.prepareStatus.textContent="READY TO PLAY · schema compiled · MobileBERT primed in "+prime.ms.toFixed(0)+" ms · fast path is neural";
+    policy.resetLearning();await controller.reset({learning:false});const prime=await primeCurrentTeacher("MobileBERT",16,{converge:true});
+    const fit=prime.distillation?" · fit "+prime.distillation.stepsUsed+" steps · KL "+prime.distillation.kl.toFixed(3):"";
+    applyProfile("assisted");ui.prepareStatus.textContent="READY TO PLAY · schema compiled · MobileBERT "+prime.ms.toFixed(0)+" ms"+fit+" · fast path is neural";
     ui.tuneStatus.textContent="Optional: run a short real-Doom training burst, then evaluate teacher-off.";setRuntime("READY TO PLAY");render();
   }catch(error){ui.prepareStatus.textContent="Preparation failed · "+String(error?.message||error);setRuntime("PREP FAILED",true)}
   finally{setBusy(false)}
@@ -178,7 +181,7 @@ async function switchTeacher(){
   if(!engineReady)return;controller.pause();setBusy(true);ui.modelProgress.value=0;
   try{
     await loadTeacherOnly(ui.modelSelect.value);policy.resetLearning();await controller.reset({learning:false});
-    if(isLearnedTeacher()){const prime=await primeCurrentTeacher(policy.semantic.name,12);ui.modelStatus.textContent=policy.semantic.name+" ready · bootstrap "+prime.ms.toFixed(0)+" ms"}
+    if(isLearnedTeacher()){const prime=await primeCurrentTeacher(policy.semantic.name,12,{converge:true});ui.modelStatus.textContent=policy.semantic.name+" ready · bootstrap "+prime.ms.toFixed(0)+" ms · fit "+(prime.distillation?.stepsUsed||12)+" steps"}
     else ui.modelStatus.textContent="Hash baseline selected — useful only for ablation.";
     render();
   }catch(error){policy.setSemantic(hashSemantic);teacherReady=false;ui.modelSelect.value="hash";ui.modelProgress.value=0;ui.modelStatus.textContent="teacher load failed · "+String(error?.message||error);render()}
