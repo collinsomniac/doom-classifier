@@ -33,9 +33,16 @@ function vectorFromCompiled(compiledFields,record,dim,prefixSparse=null){
   }
   return out;
 }
-function actionVector(action,dim){
+function actionVector(action,dim,compiledActionFields=[]){
   const text=[action.label,action.description].filter(Boolean).join(" ")||action.id,out=new Float32Array(dim);
-  addSparse(out,compileSparse(text,dim,1));let n=0;for(const x of out)n+=x*x;n=Math.sqrt(n)||1;for(let i=0;i<out.length;i++)out[i]/=n;return out;
+  addSparse(out,compileSparse(text,dim,1));
+  const params=action.params||action.values||{};
+  for(const compiled of compiledActionFields){
+    const {field}=compiled;if(!Object.prototype.hasOwnProperty.call(params,field.id))continue;
+    addSparse(out,compiled.valueSparse,normalizeValue(params[field.id],field));
+    addSparse(out,compiled.presentSparse,1);
+  }
+  let n=0;for(const x of out)n+=x*x;n=Math.sqrt(n)||1;for(let i=0;i<out.length;i++)out[i]/=n;return out;
 }
 class Dense{
   constructor(inputSize,outputSize,rng,{activation="tanh"}={}){
@@ -87,9 +94,11 @@ export class NeuralSetResidualQ{
   setSchema(schema){
     this.schema=schema;this.compiledGlobals=compileFields(schema.fields,this.hashDim);this.compiledGlobalPrefix=compileSparse("global state",this.hashDim,.2);
     this.compiledCollections=(schema.collections||[]).map(collection=>({id:collection.id,fields:compileFields(collection.fields,this.hashDim),prefixSparse:compileSparse([collection.label,collection.description].filter(Boolean).join(" ")||collection.id,this.hashDim,.2)}));
+    this.compiledActionFields=compileFields(schema.actionFields||[],this.actionDim);
+    if(this.actions)this.actionEmbeddings=this.actions.map(a=>actionVector(a,this.actionDim,this.compiledActionFields));
     return this;
   }
-  setActions(actions){this.actions=actions;this.actionEmbeddings=actions.map(a=>actionVector(a,this.actionDim));return this}
+  setActions(actions){this.actions=actions;this.actionEmbeddings=actions.map(a=>actionVector(a,this.actionDim,this.compiledActionFields));return this}
   parameterCount(){return this.layers.reduce((n,l)=>n+l.count(),0)}
   zeroGrad(){for(const layer of this.layers)layer.zeroGrad()}
   apply(lr=this.lr){for(const layer of this.layers)layer.step(lr,this.l2)}
