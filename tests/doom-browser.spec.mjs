@@ -1,8 +1,8 @@
 import {test,expect} from "@playwright/test";
 
-test.setTimeout(120000);
+test.setTimeout(240000);
 
-test("real DOOM runtime boots and accepts one primitive policy step",async({page})=>{
+test("real DOOM boots, takes a primitive step, and switches to a learned NLI policy",async({page})=>{
   const consoleErrors=[];
   page.on("pageerror",error=>consoleErrors.push("pageerror: "+String(error)));
   page.on("console",message=>{if(message.type()==="error")consoleErrors.push("console: "+message.text())});
@@ -30,5 +30,24 @@ test("real DOOM runtime boots and accepts one primitive policy step",async({page
   await expect(page.locator("#chosenAction")).not.toHaveText("—");
   await expect(page.locator("#eventLog")).toContainText("s0001");
 
-  if(consoleErrors.length)throw new Error("Browser errors after successful boot: "+consoleErrors.join(" | "));
+  await page.locator("#modelSelect").selectOption("mobilebert");
+  await page.locator("#loadModelBtn").click();
+  await page.waitForFunction(()=>{
+    const text=document.querySelector("#modelStatus")?.textContent||"";
+    return text.includes("ready")||text.includes("load failed");
+  },null,{timeout:150000});
+
+  const modelStatus=(await page.locator("#modelStatus").textContent())||"";
+  if(modelStatus.includes("load failed")){
+    throw new Error("MobileBERT load failed. status="+modelStatus+" browser="+consoleErrors.join(" | "));
+  }
+
+  await expect(page.locator("#backboneName")).toContainText("MobileBERT-MNLI");
+  await expect(page.locator("#steps")).toHaveText("0");
+  await page.locator("#stepBtn").click();
+  await expect(page.locator("#steps")).toHaveText("1",{timeout:30000});
+  await expect(page.locator("#chosenAction")).not.toHaveText("—");
+  await expect(page.locator("#eventLog")).toContainText("s0001");
+
+  if(consoleErrors.length)throw new Error("Browser errors after successful learned-model step: "+consoleErrors.join(" | "));
 });
