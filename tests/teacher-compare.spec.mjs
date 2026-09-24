@@ -31,7 +31,7 @@ test("compare browser NLI teachers on identical structured DOOM probes",async({p
   });
 
   const mobile=await probe();
-  await page.locator("#modelSelect").selectOption("distilbert");await page.locator("#loadModelBtn").click();
+  await page.locator(".advanced-panel").evaluate(el=>{el.open=true});\n  await page.locator("#modelSelect").selectOption("distilbert");await page.locator("#loadModelBtn").click();
   await page.waitForFunction(()=>{const t=document.querySelector("#modelStatus")?.textContent||"";return t.includes("bootstrap")||t.includes("failed")},null,{timeout:300000});
   const status=(await page.locator("#modelStatus").textContent())||"";
   if(status.includes("failed"))throw new Error(status);
