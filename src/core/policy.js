@@ -179,7 +179,7 @@ export class SemanticResidualPolicy{
     if(explore&&this.rng()<this.epsilon)chosen=Math.floor(this.rng()*this.actions.length);
     const stats=confidenceStats(probs);this.decisionCount++;
     return{
-      actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:q,features:encoded.features,temporal:encoded.temporal,
+      actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:q,semanticPriorScores:residualEval.semanticScores||null,valueScores:residualEval.valueScores||null,features:encoded.features,temporal:encoded.temporal,
       uncertainty:{...stats,novelty,epistemic},latencyMs:performance.now()-t0,semanticLatencyMs:semanticMs,residualLatencyMs:residualMs,
       teacherUsed,teacherPending:!!this.teacherPromise,semanticUsed,inferenceMode:mode,teacherCalls:this.teacherCalls,teacherScheduled:this.teacherScheduled,lastTeacherLatencyMs:this.lastTeacherLatencyMs
     };
