@@ -13,15 +13,18 @@ export class MockArena{
       {id:"fire",label:"fire",description:"activate the currently equipped ranged weapon"},
       {id:"wait",label:"wait",description:"take no movement or weapon action"}
     ];
-    this.schema={fields:[
-      {id:"health",label:"health",description:"remaining player vitality",min:0,max:1},
-      {id:"ammo",label:"ammunition",description:"remaining ammunition for the equipped ranged weapon",min:0,max:1},
-      {id:"threat_distance",label:"threat distance",description:"normalized distance from player to visible hostile threat",min:0,max:1},
-      {id:"threat_bearing",label:"threat bearing",description:"signed horizontal bearing of hostile threat relative to facing",min:-1,max:1},
-      {id:"incoming_damage",label:"recent damage",description:"damage received during the previous environment transition",min:0,max:1},
-      {id:"goal_distance",label:"goal distance",description:"normalized distance from player to progress objective",min:0,max:1},
-      {id:"cover",label:"cover",description:"local protection from hostile attack",min:0,max:1}
-    ]};
+    this.schema={
+      objective:"Stay operational, avoid unnecessary damage, neutralize hostile threats when useful, and reach progress objectives efficiently.",
+      fields:[
+        {id:"health",label:"health",description:"remaining player vitality",min:0,max:1},
+        {id:"ammo",label:"ammunition",description:"remaining ammunition for the equipped ranged weapon",min:0,max:1},
+        {id:"threat_distance",label:"threat distance",description:"normalized distance from player to visible hostile threat",min:0,max:1},
+        {id:"threat_bearing",label:"threat bearing",description:"signed horizontal bearing of hostile threat relative to facing",min:-1,max:1},
+        {id:"incoming_damage",label:"recent damage",description:"damage received during the previous environment transition",min:0,max:1},
+        {id:"goal_distance",label:"goal distance",description:"normalized distance from player to progress objective",min:0,max:1},
+        {id:"cover",label:"cover",description:"local protection from hostile attack",min:0,max:1}
+      ]
+    };
     this.episode=0;this.reset();
   }
   reset(){
@@ -61,7 +64,9 @@ export class MockArena{
     const toward=Math.atan2(this.player.y-this.enemy.y,this.player.x-this.enemy.x),enemySpeed=.012;
     this.enemy.x=clamp(this.enemy.x+Math.cos(toward)*enemySpeed,.02,.98);this.enemy.y=clamp(this.enemy.y+Math.sin(toward)*enemySpeed,.02,.98);
     const nd=Math.hypot(this.enemy.x-this.player.x,this.enemy.y-this.player.y),cover=this.coverAt(this.player.x,this.player.y);
-    if(nd<.34&&this.rng()<(0.43*(1-cover*.75))){this.lastDamage=.035+.055*(1-nd/.34);this.player.health=clamp(this.player.health-this.lastDamage,0,1);reward-=this.lastDamage*2.2}
+    if(nd<.34&&this.rng()<(0.43*(1-cover*.75))){
+      this.lastDamage=.035+.055*(1-nd/.34);this.player.health=clamp(this.player.health-this.lastDamage,0,1);reward-=this.lastDamage*2.2;
+    }
 
     const gd=Math.hypot(this.goal.x-this.player.x,this.goal.y-this.player.y);
     if(gd<.08){reward+=1.7;this.goal={x:.1+.8*this.rng(),y:.1+.8*this.rng()};this.player.ammo=clamp(this.player.ammo+.35,0,1);this.player.health=clamp(this.player.health+.2,0,1)}

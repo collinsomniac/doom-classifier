@@ -4,16 +4,20 @@ import {HashSemanticAdapter} from "../src/core/semantic.js";
 import {SemanticResidualPolicy} from "../src/core/policy.js";
 
 const env=new MockArena(7);
-const policy=new SemanticResidualPolicy({schema:env.schema,actions:env.actions,semantic:new HashSemanticAdapter(),seed:9});
+const semantic=new HashSemanticAdapter();
+const originalScore=semantic.score.bind(semantic);
+semantic.score=async observation=>originalScore(observation);
+const policy=new SemanticResidualPolicy({schema:env.schema,actions:env.actions,semantic,seed:9});
+
 let episodes=0,total=0;
 for(let i=0;i<3000;i++){
   const obs=env.observe();
-  const decision=policy.decide(obs,{useResidual:true,memory:true,explore:true});
+  const decision=await policy.decide(obs,{useResidual:true,memory:true,explore:true});
   assert.equal(decision.probs.length,env.actions.length);
   assert.ok(decision.probs.every(Number.isFinite));
   assert.ok(Math.abs(decision.probs.reduce((a,b)=>a+b,0)-1)<1e-5);
-  const step=env.step(decision.action.id);
-  const next=policy.encode(step.observation,true,false);
+  assert.ok(Number.isFinite(decision.semanticLatencyMs));
+  const step=env.step(decision.action.id),next=policy.encode(step.observation,true,false);
   policy.learn({features:decision.features,actionIndex:decision.actionIndex,reward:step.reward,nextFeatures:next.features,done:step.done});
   total+=step.reward;
   if(step.done){episodes++;env.reset();policy.resetEpisode()}
