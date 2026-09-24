@@ -1,10 +1,8 @@
 # Experiment results
 
-## Synthetic baseline — 2026-09-23
+## Historical synthetic baseline — 2026-09-23
 
-CI benchmark command: node tests/benchmark.mjs
-
-The current test uses the intentionally weak hash structural semantic scorer. Its purpose is to isolate whether the tiny residual learner can learn consequences at all before a learned semantic backbone is involved.
+The first scaffold used an intentionally weak hash semantic scorer plus a linear residual Q learner.
 
 | phase | steps | residual training | exploration | mean reward / step | mean completed-episode return |
 |---|---:|---|---|---:|---:|
@@ -12,25 +10,132 @@ The current test uses the intentionally weak hash structural semantic scorer. It
 | online adaptation | 12,000 | on | on | -0.03022 | -2.4824 |
 | frozen learned residual, different seed | 6,000 | off | off | -0.01105 | -1.4714 |
 
-Interpretation: the linear residual is worth retaining as the minimum-cost learner. The frozen evaluation is substantially better than the semantic-only baseline, so the improvement is not explained solely by exploration during training.
+This result justified keeping a separable consequence-learning path. It is no longer the main model.
 
-This is not evidence that the policy is good in an absolute sense: all reported returns remain negative, the environment is simple, and only one deterministic benchmark configuration has been measured. It is evidence that the separable online-learning path is functioning and can be meaningfully ablated.
+## Real DOOM browser integration
 
-Next results should add multiple seeds, confidence intervals, action distributions and learned NLI backbones.
+Playwright CI verifies the browser chain:
 
+1. static `doom.html` loads;
+2. pinned Chocolate Doom + Freedoom downloads and instantiates;
+3. native structured telemetry is available;
+4. the neural controller scores primitive actions;
+5. a selected primitive advances the real engine;
+6. MobileBERT-MNLI loads through Transformers.js;
+7. the teacher is distilled before control;
+8. a subsequent control tick stays on the neural fast path.
 
-## Real DOOM browser integration — 2026-09-23
+The test is intentionally an integration proof, not a gameplay score.
 
-GitHub Actions browser smoke test: tests/doom-browser.spec.mjs
+## Neural set controller
 
-Verified in headless Chromium:
+Current fast model features:
 
-1. doom.html loads as a static site;
-2. the pinned Chocolate Doom 3.1.1 + Freedoom 0.13.0 runtime downloads and instantiates;
-3. the native bridge returns the 14-field factual observation used by the primitive policy;
-4. the hash baseline executes one primitive action and advances the real engine;
-5. the page switches to MobileBERT-MNLI through Transformers.js;
-6. learned zero-shot scoring completes successfully;
-7. MobileBERT selects a primitive action, the engine executes it, and a new trace/state is recorded.
+- shared global encoder;
+- learned temporal projection;
+- shared record encoder;
+- mean/max set summary;
+- action-conditioned record attention;
+- typed numeric action representations;
+- three bootstrap value heads.
 
-This is an integration result, not yet a gameplay-performance result. The next useful measurement is a controlled multi-episode comparison of semantic-only, semantic + frozen residual, and online adaptation on the same real-engine scenario.
+Current parameter count in CI: **6,419**.
+
+### Large-state microbenchmark
+
+Synthetic input:
+
+- 768 variable records;
+- 12 typed actions.
+
+Latest GitHub Actions CPU sample:
+
+- p50: **4.01 ms**
+- p95: **5.16 ms**
+
+Earlier precompiled-hash optimization reduced the same class of workload from roughly 20 ms to ~5 ms by moving schema text processing out of the tick loop.
+
+### Action-cardinality microbenchmark
+
+Latest CI sample:
+
+| actions | p50 | p95 | parameters |
+|---:|---:|---:|---:|
+| 8 | 0.74 ms | 1.42 ms | 6,419 |
+| 32 | 1.56 ms | 1.88 ms | 6,419 |
+| 128 | 2.06 ms | 2.52 ms | 6,419 |
+| 256 | 3.59 ms | 4.43 ms | 6,419 |
+| 512 | 6.40 ms | 7.15 ms | 6,419 |
+| 1,024 | 12.37 ms | 13.15 ms | 6,419 |
+
+This demonstrates that request-time option count changes compute but not parameter count.
+
+It does **not** demonstrate equivalent accuracy or calibration to Laya/Jev.
+
+## Temporal regression
+
+A dedicated regression test now proves:
+
+- memory-enabled state produces non-zero recent deltas;
+- memory-disabled state zeros the temporal channel;
+- two identical instantaneous observations with different recent histories receive different neural values;
+- TD learning receives matching current and next temporal context.
+
+Example CI score difference for the history ablation: ~8e-4 in the tested random initialization.
+
+## Epistemic ensemble
+
+The three scalar heads begin with different value estimates.
+
+Example CI sample:
+
+- initial normalized ensemble disagreement: ~0.0113;
+- after repeated shared teacher distillation: ~0.01127.
+
+The small decline is qualitatively expected but not yet a calibration result. We still need to measure whether disagreement predicts actual action error / regret.
+
+## Schema transfer
+
+Tests currently cover:
+
+- action reorderings;
+- renamed/rescaled action parameter fields with stable semantic descriptions;
+- variable action cardinality;
+- record permutation invariance;
+- semantic-vector influence independent of surface ids.
+
+The optional MiniLM schema compiler is intended to turn description paraphrase transfer into an empirical test rather than relying only on lexical overlap.
+
+## Attention inspection
+
+The controller can report the highest-weight records for the chosen action.
+
+Tests verify:
+
+- attention weights are finite and normalized;
+- record permutation does not change record-specific weights;
+- teacher distillation changes action preferences while attention remains differentiable.
+
+Attention display is a debugging aid. It should not be interpreted as complete causal explanation.
+
+## Deployment
+
+GitHub Pages deployment is active:
+
+https://collinsomniac.github.io/doom-classifier/
+
+Both validation and deployment jobs are green on current successful revisions.
+
+## What remains unproven
+
+The project does **not** yet establish that the small policy beats Jev or Laya on decision quality.
+
+The next meaningful evidence requires:
+
+1. multi-seed real DOOM episode returns;
+2. survival, damage, kill, progress and resource-efficiency metrics;
+3. teacher-query rate over learning;
+4. Brier/log-score/ECE calibration;
+5. frozen teacher-off evaluation;
+6. multi-environment transfer;
+7. equivalent typed-decision benchmark datasets against external baselines.
