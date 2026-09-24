@@ -15,15 +15,20 @@ const raw={
     lines:[{id:4,x1:80,y1:180,x2:160,y2:180,flags:1,blocking:true,special:0,tag:0}]
   }
 };
-arena.visitedCells=new Map();const firstExplore=arena.commitExploration(raw);const repeatExplore=arena.commitExploration(raw);\nconst moved=structuredClone(raw);moved.player.x=300;const novelExplore=arena.commitExploration(moved);\nconst flat=arena.flatten(raw);
+arena.visitedCells=new Map();const firstExplore=arena.commitExploration(raw);const repeatExplore=arena.commitExploration(raw);
+const moved=structuredClone(raw);moved.player.x=300;const novelExplore=arena.commitExploration(moved);
+const flat=arena.flatten(raw);
 assert.equal(flat.health,87);assert.equal(flat.weapon,1);assert.equal(flat.under_fire,1);assert.equal(flat.player_z,8);assert.equal(flat._collections.entities.length,4);assert.equal(flat._collections.geometry.length,1);
 assert.equal(flat._collections.entities[1].engine_record_id,8);assert.equal(flat._collections.entities[1].targeting_player,1);assert.equal(flat._collections.entities[2].pickup,1);
 assert.equal(flat._collections.entities[1].kind,1);assert.equal(flat._collections.entities[2].kind,3);assert.equal(flat._collections.entities[3].kind,2);
 assert.equal(flat._collections.geometry[0].line_id,4);assert.equal(flat._collections.geometry[0].flags,1);assert.equal(flat._collections.geometry[0].x1,-20);
 
 const damaged=structuredClone(raw);damaged.world.entities[1].health=15;
-const damageOutcome=arena.outcome(raw,damaged,{exploration:{newCell:false,visitedCells:1}});\nconst noveltyOutcome=arena.outcome(raw,raw,{exploration:{newCell:true,visitedCells:2}});
-assert.equal(damageOutcome.damageDealt,15);assert.ok(damageOutcome.reward>0,"nonlethal hostile damage must create immediate positive learning signal");\nassert.equal(firstExplore.newCell,true);assert.equal(repeatExplore.newCell,false);assert.equal(novelExplore.newCell,true);assert.equal(novelExplore.visitedCells,2);\nassert.ok(noveltyOutcome.explorationBonus>0,"new spatial cells must provide a small policy-blind progress bonus");
+const damageOutcome=arena.outcome(raw,damaged,{exploration:{newCell:false,visitedCells:1}});
+const noveltyOutcome=arena.outcome(raw,raw,{exploration:{newCell:true,visitedCells:2}});
+assert.equal(damageOutcome.damageDealt,15);assert.ok(damageOutcome.reward>0,"nonlethal hostile damage must create immediate positive learning signal");
+assert.equal(firstExplore.newCell,true);assert.equal(repeatExplore.newCell,false);assert.equal(novelExplore.newCell,true);assert.equal(novelExplore.visitedCells,2);
+assert.ok(noveltyOutcome.explorationBonus>0,"new spatial cells must provide a small policy-blind progress bonus");
 
 const rewardGood=arena.reward({player:{health:87,kills:3},world:{entities:[]}},{player:{health:87,kills:4},world:{entities:[]}});
 const rewardBad=arena.reward({player:{health:87,kills:3},world:{entities:[]}},{player:{health:62,kills:3},world:{entities:[]}});
