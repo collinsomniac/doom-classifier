@@ -1,146 +1,276 @@
 # Experiment results
 
+## Status
+
+The project now has two distinct evaluation surfaces:
+
+- **real DOOM** — primary product/behavior benchmark;
+- **synthetic arena** — legacy controlled ablation benchmark.
+
+The current system does not yet establish that it beats Jev or Laya on decision quality. It does establish a small, browser-native structured-state controller with real engine actuation, semantic supervision, online consequence learning, teacher-off evaluation, and single-digit-millisecond CPU inference in the current stress benchmark.
+
 ## Historical synthetic baseline — 2026-09-23
 
-The first scaffold used an intentionally weak hash semantic scorer plus a linear residual Q learner.
+The first scaffold used an intentionally weak hash semantic scorer plus a linear residual learner.
 
-| phase | steps | residual training | exploration | mean reward / step | mean completed-episode return |
+| phase | steps | residual training | exploration | mean reward / step | mean episode return |
 |---|---:|---|---|---:|---:|
 | semantic-only baseline | 6,000 | off | off | -0.03711 | -3.4787 |
 | online adaptation | 12,000 | on | on | -0.03022 | -2.4824 |
 | frozen learned residual, different seed | 6,000 | off | off | -0.01105 | -1.4714 |
 
-This result justified keeping a separable consequence-learning path. It is no longer the main model.
+This justified retaining a separable consequence-learning path. It is not the current architecture.
 
-## Real DOOM browser integration
+## Real browser integration
 
-Playwright CI verifies the browser chain:
+Playwright verifies:
 
-1. static `doom.html` loads;
-2. pinned Chocolate Doom + Freedoom downloads and instantiates;
-3. native structured telemetry is available;
-4. the neural controller scores primitive actions;
-5. a selected primitive advances the real engine;
-6. MobileBERT-MNLI loads through Transformers.js;
-7. the teacher is distilled before control;
-8. a subsequent control tick stays on the neural fast path.
+1. real Chocolate Doom + Freedoom boot;
+2. native structured telemetry;
+3. real engine FIRE actuation;
+4. weapon/category semantics;
+5. compiled MiniLM schema semantics;
+6. semantic teacher bootstrap/distillation;
+7. tiny neural fast-path action;
+8. attention inspection;
+9. teacher-off control after preparation.
 
-The test is intentionally an integration proof, not a gameplay score.
+The page may also mount a user-owned Doom IWAD locally in browser memory.
 
-## Neural set controller
+## Current fast model
 
-Current fast model features:
+Model: **SchemaSemanticValueSetNet**
 
-- shared global encoder;
-- learned temporal projection;
-- shared record encoder;
+Current trainable parameters: **7,316**
+
+Components:
+
+- global encoder;
+- temporal-delta encoder;
+- shared variable-record encoder;
 - mean/max set summary;
-- action-conditioned record attention;
-- typed numeric action representations;
+- state-conditioned action attention;
+- typed action parameters;
+- semantic-prior head;
+- separate consequence-value hidden branch;
 - three bootstrap value heads.
 
-Current parameter count in CI: **6,803**.
+A regression test confirms reward-only learning does not alter the semantic-prior logits:
 
-### Large-state microbenchmark
+- semantic drift after reward TD: **0**
+- value branch movement in fixture: **0.0333**
+- combined-score movement: **0.0167**
+- semantic teacher subsequently moves semantic branch: **0.1736**
 
-Synthetic input:
+## Fast-path benchmark
 
-- 768 variable records;
-- 12 typed actions.
+Latest GitHub Actions CPU stress sample:
 
-Latest GitHub Actions CPU sample:
+- records: 768
+- parameters: 7,316
+- p50: **7.45 ms**
+- p95: **9.82 ms**
 
-- p50: **5.49 ms**
-- p95: **7.42 ms**
+CI runners are noisy; earlier split-head samples were somewhat faster. These measurements are engineering timing samples, not hardware-normalized model benchmarks.
 
-Earlier precompiled-hash optimization reduced the same class of workload from roughly 20 ms to ~5 ms by moving schema text processing out of the tick loop.
+### Candidate-cardinality benchmark
 
-### Action-cardinality microbenchmark
-
-Latest CI sample:
-
-| actions | p50 | p95 | parameters |
+| candidates | p50 | p95 | parameters |
 |---:|---:|---:|---:|
-| 8 | 1.10 ms | 2.05 ms | 6,803 |
-| 32 | 1.32 ms | 1.87 ms | 6,803 |
-| 128 | 2.88 ms | 3.63 ms | 6,803 |
-| 256 | 5.14 ms | 6.31 ms | 6,803 |
-| 512 | 9.27 ms | 10.69 ms | 6,803 |
-| 1,024 | 17.82 ms | 18.77 ms | 6,803 |
+| 8 | 1.18 ms | 2.47 ms | 7,316 |
+| 32 | 1.45 ms | 2.66 ms | 7,316 |
+| 128 | 2.95 ms | 3.41 ms | 7,316 |
+| 256 | 5.32 ms | 5.97 ms | 7,316 |
+| 512 | 9.37 ms | 12.95 ms | 7,316 |
+| 1,024 | 17.61 ms | 20.00 ms | 7,316 |
 
-This demonstrates that request-time option count changes compute but not parameter count.
+Candidate count changes compute but not model size.
 
-It does **not** demonstrate equivalent accuracy or calibration to Laya/Jev.
+## Real-DOOM fine-tune benchmark
 
-## Temporal regression
+The one-off Chromium benchmark performs:
 
-A dedicated regression test now proves:
+1. Prepare Recommended;
+2. frozen teacher-off evaluation for 24 decisions;
+3. 64 real environment training decisions;
+4. frozen teacher-off evaluation for another 24 decisions.
 
-- memory-enabled state produces non-zero recent deltas;
-- memory-disabled state zeros the temporal channel;
-- two identical instantaneous observations with different recent histories receive different neural values;
-- TD learning receives matching current and next temporal context.
+### Split semantic/value architecture + independent NLI teacher
 
-Example CI score difference for the history ablation: ~8e-4 in the tested random initialization.
+Pre-training frozen evaluation:
 
-## Epistemic ensemble
+- reward: **+2.526**
+- hostile damage: **65**
+- kills: **1**
+- player damage received: **0**
+- fire-capable actions: **24 / 24**
+- action diversity: **1**
+- dominant action: **back + fire**
+- mean top probability: **0.106**
+- mean normalized entropy: **0.987**
+- p95 neural decision time: **5.89 ms**
 
-The three scalar heads begin with different value estimates.
+64-decision training phase:
 
-Example CI sample:
+- neural updates including replay: **189**
+- teacher calls: **8**
+- replay size: **64**
+- training return: **+5.246**
+- target syncs after run: **8**
 
-- initial normalized ensemble disagreement: ~0.0113;
-- after repeated shared teacher distillation: ~0.01127.
+Post-training frozen evaluation:
 
-The small decline is qualitatively expected but not yet a calibration result. We still need to measure whether disagreement predicts actual action error / regret.
+- reward: **+2.526**
+- hostile damage: **65**
+- kills: **1**
+- player damage received: **0**
+- fire-capable actions: **24 / 24**
+- action diversity: **1**
+- dominant action: **back + fire**
+- mean top probability: **0.127**
+- mean normalized entropy: **0.976**
+- p95 neural decision time: **6.50 ms**
 
-## Schema transfer
+Interpretation:
 
-Tests currently cover:
+- this is materially better than the earlier conflated-head controller, which could collapse into backing/strafe behavior with zero firing;
+- semantic/value separation preserves combat behavior through reward fine-tuning;
+- exact action separation remains weak;
+- the next target is not “make it shoot” but “make related movement+fire choices state-sensitive and less sticky.”
 
-- action reorderings;
-- renamed/rescaled action parameter fields with stable semantic descriptions;
-- variable action cardinality;
-- record permutation invariance;
-- semantic-vector influence independent of surface ids.
+This benchmark predates the newest entity/projectile naming and spatial-novelty additions; a fresh rerun is the next comparison.
 
-The optional MiniLM schema compiler is intended to turn description paraphrase transfer into an empirical test rather than relying only on lexical overlap.
+## Teacher diagnostics
 
-## Attention inspection
+### Token-budget failure discovered
 
-The controller can report the highest-weight records for the chosen action. The attention query is now conditioned on action, global state and recent temporal state.
+An early MobileBERT probe produced byte-identical action distributions for:
 
-Tests verify:
+- an enemy directly ahead;
+- an empty quiet room.
 
-- attention weights are finite and normalized;
-- record permutation does not change record-specific weights;
-- teacher distillation changes action preferences while attention remains differentiable.
+Cause: verbose scalar descriptions exhausted the NLI token budget before world-entity collections.
 
-Attention display is a debugging aid. It should not be interpreted as complete causal explanation.
+Fix:
+
+- compact scalar serialization;
+- preserve categorical/binary collection facts;
+- place non-empty collection summaries inside the premise budget.
+
+After the fix, the teacher became state-sensitive.
+
+### Current MobileBERT limitation
+
+Even after evidence-conditioned wording and independent NLI entailment scoring, MobileBERT still strongly associates FIRE with the standing “neutralize threats” objective in deliberately empty-room probes.
+
+One measured independent-entailment probe:
+
+| probe | aggregate P(fire) |
+|---|---:|
+| hostile directly ahead | ~0.818 |
+| low health / under fire | ~0.835 |
+| quiet room / no entities | ~0.871 |
+
+This is a useful negative result: MobileBERT-MNLI is a semantic prior, but not yet a reliable state-action affordance judge.
+
+No “if no enemy -> forbid FIRE” rule has been introduced to hide this weakness.
+
+DistilBERT and DeBERTa-v3-xsmall browser probes are being evaluated as heavier teacher alternatives.
+
+## Typed primitive actions
+
+The DOOM action set uses literal engine inputs, including movement+fire combinations.
+
+Each compound candidate also has structured primitive fields. The UI therefore reports marginal probabilities such as:
+
+- P(fire)
+- P(strafe)
+- P(turn)
+- P(forward)
+- P(back)
+- P(use)
+
+This prevents a broad “shoot while moving” intent from looking artificially indecisive merely because probability is split among several compound candidates.
+
+## Entity semantics
+
+The adapter now preserves more factual engine meaning:
+
+- equipped weapon names;
+- named Chocolate Doom mobj categories where known;
+- hostile actor;
+- collectible item;
+- projectile / attack effect;
+- other object.
+
+These categories affect both schema-compiled neural representations and teacher summaries.
+
+They are factual telemetry, not strategy.
+
+## Progress signal
+
+The borrowed bridge does not expose explicit level completion progress.
+
+The current interim reward includes a small first-visit bonus for new coarse player-position cells.
+
+The observation also exposes:
+
+- distinct visited cells;
+- current-cell revisit count;
+- exploration novelty.
+
+This supplies a route-agnostic progress signal without a pathfinder or scripted navigation policy.
+
+## Temporal and attention invariants
+
+Tests establish that:
+
+- memory-enabled recent state changes alter neural scores;
+- memory-disabled mode zeros the temporal channel;
+- record order does not alter set behavior;
+- the same action can attend to different records when global state changes;
+- action attention weights remain normalized.
+
+Example deterministic attention shift after changing only global state: ~0.025 maximum record-weight change.
+
+## Target network
+
+The value learner uses a delayed target network.
+
+Tests establish:
+
+- online/target value estimates diverge between syncs;
+- target parameters move on the configured interval;
+- sync difference is zero immediately after target copy.
+
+Teacher refreshes synchronize semantic/shared target parameters only; they do not prematurely copy the delayed target value branch.
 
 ## Deployment
 
-GitHub Pages deployment is active:
+Live:
 
 https://collinsomniac.github.io/doom-classifier/
 
-Both validation and deployment jobs are green on current successful revisions.
+The current main revision has successful full validation/deployment; the immediately preceding functional JavaScript revisions also pass the real Chromium smoke suite.
 
 ## What remains unproven
 
-The project does **not** yet establish that the small policy beats Jev or Laya on decision quality.
+The strongest missing evidence is still:
 
-The next meaningful evidence requires:
+1. multi-seed / multi-episode real DOOM performance;
+2. actual level completion and navigation progress;
+3. reliable semantic teacher affordance calibration;
+4. teacher-query rate vs competence over longer training;
+5. Brier / log-score / ECE calibration;
+6. cross-map generalization;
+7. non-DOOM transfer;
+8. controlled comparison against Laya/Jev on equivalent typed-decision tasks.
 
-1. multi-seed real DOOM episode returns;
-2. survival, damage, kill, progress and resource-efficiency metrics;
-3. teacher-query rate over learning;
-4. Brier/log-score/ECE calibration;
-5. frozen teacher-off evaluation;
-6. multi-environment transfer;
-7. equivalent typed-decision benchmark datasets against external baselines.
+## Next experiments
 
-
-## State-conditioned attention update
-
-The action-only attention query was replaced with an action + global-state + temporal-state query. In the deterministic fixture, changing only global state while keeping the action and record set fixed shifted record attention weights by about 0.025. The change increased the fast model from 6,419 to 6,803 parameters and modestly increased the large-state CPU benchmark, but removes a meaningful expressivity shortcut.
+- rerun real-DOOM fine-tune benchmark with named entity/projectile semantics + spatial novelty;
+- compare MobileBERT, DistilBERT and DeBERTa teacher state sensitivity;
+- add previous-action / identity-aware record recurrence;
+- build a project-owned telemetry engine artifact with level-completion, item/secret, projectile and damage-attribution events;
+- train/distill a decision-specialized teacher rather than relying on generic MNLI;
+- create a portable tiny checkpoint and measure cold-start vs prepared performance.
