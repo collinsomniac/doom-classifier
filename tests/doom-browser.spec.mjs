@@ -35,5 +35,24 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   await expect(page.locator("#chosenAction")).not.toHaveText("—");await expect(page.locator("#eventLog")).toContainText("s0001");
   await expect(page.locator("#attentionList .attention-row").first()).toBeVisible();
 
+  const semanticProbes=await page.evaluate(async()=>{
+    const {env,policy}=window.__doomLab,base=env.observe(),actions=policy.actions;
+    const mkEntity=(overrides={})=>({engine_record_id:99,type:1,x:base.player_x+128,y:base.player_y,z:base.player_z,relative_x:128,relative_y:0,relative_z:0,velocity_x:0,velocity_y:0,radius:20,height:56,health:40,distance:128,relative_angle:0,visible:1,countkill:1,pickup:0,targeting_player:1,...overrides});
+    const cases={
+      enemy_ahead:{...base,health:100,recent_damage:0,recent_damage_dealt:0,under_fire:0,bullets:50,_collections:{entities:[mkEntity()],geometry:[]}},
+      under_fire_side:{...base,health:35,recent_damage:20,recent_damage_dealt:0,under_fire:1,bullets:50,_collections:{entities:[mkEntity({relative_x:64,relative_y:96,distance:116,relative_angle:.22})],geometry:[]}},
+      quiet_room:{...base,health:100,recent_damage:0,recent_damage_dealt:0,under_fire:0,bullets:50,_collections:{entities:[],geometry:[]}}
+    };
+    const out={};
+    for(const [name,obs] of Object.entries(cases)){
+      const scores=await policy.semantic.score(obs),exp=scores.map(Math.exp),z=exp.reduce((a,b)=>a+b,0)||1,probs=exp.map(v=>v/z);
+      const ranked=actions.map((a,i)=>({id:a.id,p:probs[i]})).sort((a,b)=>b.p-a.p);
+      const marginal=field=>actions.reduce((sum,a,i)=>sum+(a.params?.[field]?probs[i]:0),0);
+      out[name]={top:ranked.slice(0,5),fire:marginal("fire"),strafe:marginal("strafe_left")+marginal("strafe_right"),turn:marginal("turn_left")+marginal("turn_right"),forward:marginal("forward"),back:marginal("back"),use:marginal("use")};
+    }
+    return out;
+  });
+  console.log("SEMANTIC_DOOM_PROBES "+JSON.stringify(semanticProbes));
+
   if(consoleErrors.length)throw new Error("Browser errors after successful prepared-model step: "+consoleErrors.join(" | "));
 });
