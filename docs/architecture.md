@@ -2,271 +2,337 @@
 
 ## Research target
 
-The primary benchmark is:
+Primary benchmark:
 
-[
-	ext{structured environment state} ightarrow 	ext{typed decision distribution}
-]
+`structured environment state -> typed decision distribution`
 
-Perception can be added later, but the current question is deliberately narrower: if useful machine state already exists, how little learned compute is required to turn it into fast, calibrated-enough, adaptable actions?
+Perception is intentionally outside the current core question. If a program already has useful state, how little learned compute is required to turn that state into fast, semantically grounded, adaptable actions?
 
-DOOM is the first harness because it supplies rich dynamics, consequences, entities, geometry and a recognizable control surface. The core policy API must remain usable outside games.
+DOOM is the first harness because it supplies dynamics, consequences, variable objects, geometry, resources and a recognizable control surface. The policy API is designed to remain useful outside games.
 
-## Design principle: language at compile time, numbers at control time
+## Three compute timescales
 
-Large typed-decision models such as Laya accept text/JSON and recover semantics inside a language encoder on each request. That is flexible, but repeated state fields, action descriptions and schema prose are mostly static.
+### 1. Compile time
 
-doom-classifier separates two paths.
+Static language should not be re-tokenized every control tick.
 
-### Compile path
+The optional compile path:
 
-Potentially expensive and infrequent:
+1. reads objective and schema metadata;
+2. feature-hashes labels/descriptions as a zero-download fallback;
+3. optionally embeds objective, fields, enum values, collections and actions with MiniLM;
+4. projects those embeddings into the fixed policy feature space;
+5. initializes/reconfigures the tiny neural controller;
+6. disposes MiniLM.
 
-1. read the environment objective and schema metadata;
-2. compile lexical metadata;
-3. optionally embed objective / field / collection / action language with MiniLM;
-4. compile typed numeric action-field definitions;
-5. initialize or reconfigure the small neural controller;
-6. optionally call a larger semantic teacher and distill its distribution.
+### 2. Teacher time
 
-### Control path
+A larger semantic model may be called:
 
-Bounded and repeated:
+- at preparation/bootstrap;
+- periodically;
+- on novelty;
+- on high entropy / low margin;
+- on epistemic disagreement.
 
-1. receive native numeric globals and variable record collections;
-2. compute recent temporal deltas;
-3. encode globals, temporal state and records;
-4. perform action-conditioned record attention;
-5. score every request-time candidate action;
-6. aggregate the bootstrap value ensemble;
-7. softmax the resulting action preferences;
-8. optionally schedule a teacher asynchronously;
-9. execute the selected primitive action.
+Teacher output is distilled locally. The expensive model is not required on frozen neural ticks.
 
-No textual state serialization is required on ordinary neural-only ticks.
+### 3. Control time
 
-## Neural controller
+Every fast tick:
 
-Current controller: `SchemaHashAttentionSetNet`.
+1. receive native scalar state + variable record collections;
+2. encode recent scalar deltas;
+3. encode records with a shared set network;
+4. form an action/state/temporal-conditioned attention query;
+5. attend to records separately for each candidate action;
+6. combine semantic-prior and consequence-value scores;
+7. decode a typed action;
+8. execute literal primitive control inputs.
 
-The parameter count is independent of the number of records and action candidates.
+No language-tokenization pass is required on ordinary neural-only ticks.
 
-### Static schema representation
+## Fast model: SchemaSemanticValueSetNet
 
-Each field/action receives a fixed-size representation from:
+Current trainable parameter count: **7,316**.
 
-- lexical feature hashing over labels/descriptions/units;
-- optional MiniLM sentence embeddings projected into the same fixed space;
-- normalized numeric action parameters where defined.
+Model size is independent of record count and candidate-action count.
 
-The lexical path guarantees a zero-download fallback. The semantic-vector path improves paraphrase relationships without placing MiniLM on the real-time loop.
+### Compiled schema semantics
+
+Each field / action may contain:
+
+- id;
+- human label / description;
+- numeric range or scale;
+- categorical enum meanings;
+- optional MiniLM semantic vector.
+
+Categorical engine codes therefore do not have to remain opaque. The DOOM adapter uses the same generic enum mechanism for weapon names and entity categories.
 
 ### Global state
 
-Current scalar fields are normalized from declared ranges or scales and modulate their compiled field representations.
+Declared scalar fields modulate their compiled field representations.
 
-The objective is also part of the compiled global representation. This is important: the neural controller is not merely learning an environment-specific Q-table; its state representation is conditioned on what the environment says success means.
+The objective itself contributes to the compiled global representation.
 
 ### Temporal state
 
-Recent normalized scalar deltas are maintained by a leaky temporal memory.
+A separate learned channel encodes recent normalized scalar deltas. Temporal information is therefore distinguishable from instantaneous values rather than silently concatenated.
 
-Temporal features are encoded through a separate learned projection using metadata equivalent to "recent change in <field>". They are not silently concatenated with instantaneous values.
-
-This currently covers global fields. Identity-aware temporal tracking for variable records is a future extension.
+Current limitation: variable records are not yet identity-tracked through time.
 
 ### Variable collections
 
-An observation can contain arbitrary named collections:
+For collection `C = {r_1 ... r_n}`, every record uses the same small record MLP.
 
-[
-C_k = {r_1, r_2, ldots, r_n}
-]
+The global set context includes:
 
-Every record is encoded with the same small MLP. Record ordering is intentionally irrelevant.
+- mean record latent;
+- max record latent;
+- record count;
+- collection count.
 
-A global set summary uses mean and max pooling plus bounded record-count information.
+Record ordering is intentionally irrelevant.
 
-### Action-conditioned attention
+### State-conditioned action attention
 
-Mean/max pooling is not enough when different actions should inspect different parts of the world.
+For candidate action `a`, global state `s`, recent temporal state `ds`, and record latent `z_i`:
 
-For action (a), the action embedding produces a query (q_a). Every record latent (z_i) receives:
+`q = Query(action_embedding(a), global(s), temporal(ds))`
 
-[
-alpha_i(a)=mathrm{softmax}left(rac{q_a^	op z_i}{sqrt d}ight)
-]
+`alpha_i = softmax(q dot z_i / sqrt(d))`
 
-and the action receives:
+`attended(a) = sum_i alpha_i * z_i`
 
-[
-c_a=sum_i alpha_i(a)z_i
-]
+This permits the same action to inspect different records in different states.
 
-The final score head therefore sees:
+The live attention inspector is a debugging aid, not a complete causal attribution claim.
 
-- global state;
-- temporal state;
-- permutation-invariant set summary;
-- action-specific attended record context;
-- the typed action embedding.
+## Typed actions
 
-The live UI exposes top attention records for the chosen action as a diagnostic, not as a claim of causal interpretability.
+Actions are request-time objects rather than fixed output-neuron identities.
 
-## Request-time typed actions
+A candidate may contain:
 
-Actions are not represented by fixed output neurons alone.
+- label / description;
+- optional semantic vector;
+- numeric/categorical `params` governed by `schema.actionFields`.
 
-A candidate can include:
+The DOOM harness uses this to represent compound literal controls such as `strafe_left + fire` as:
 
-- id / label / description;
-- optional static semantic vector;
-- optional numeric `params` / `values` governed by `schema.actionFields`.
+`{ strafe_left: 1, fire: 1, ... }`
 
-This permits candidate spaces such as:
+Thus related candidates share primitive structure even though the final decoder still evaluates coherent compound actions.
 
-- discrete game controls;
-- click coordinates;
-- actuator values;
-- ranked objects;
-- thresholds;
-- prices / bids;
-- route candidates;
-- tool calls with numeric arguments.
+This generalizes to coordinates, actuator strengths, bids, thresholds, tool arguments, route candidates, etc.
 
-Changing candidate order or cardinality does not change parameter count.
+## Semantic prior and consequence value
 
-## Value ensemble and uncertainty
+This is the most important current separation.
 
-A single softmax peak is not equivalent to knowledge.
+For each action the shared encoder produces features `h(s,a)`.
 
-The controller now uses three independently initialized scalar value heads over a shared encoder. Reward updates bootstrap a subset of heads; teacher distillation supervises all heads.
+Two training paths sit on those features:
 
-The policy reports four distinct signals:
+### Semantic prior
 
-1. **entropy** — distribution diffuseness;
-2. **margin** — top-1 / top-2 separation;
-3. **novelty** — scalar-state deviation from online history;
-4. **epistemic disagreement** — normalized Jensen-Shannon disagreement among ensemble policy distributions.
+`S(s,a)`
 
-The ensemble is intentionally cheap: only the scalar output heads are independent in the current version. This is a first epistemic approximation, not a fully independent deep ensemble.
+- trained by semantic-teacher distillation;
+- intended to encode action applicability / semantic plausibility;
+- teacher preparation can iterate locally until a bounded KL fit target is reached.
+
+### Consequence value
+
+`V(s,a)`
+
+- trained from real transition reward;
+- has a small hidden layer and three bootstrap scalar heads;
+- uses replay;
+- bootstraps from a delayed target value network.
+
+Final neural score:
+
+`score(s,a) = S(s,a) + value_weight * mean(V_heads(s,a))`
+
+Current `value_weight` is 0.5.
+
+Reward-only TD updates do **not** backpropagate through the semantic/shared branch. A regression test asserts semantic-logit drift is exactly zero during reward-only updates.
+
+Teacher distillation may update the semantic/shared branch, but it synchronizes only the target network's semantic representation. Target value weights remain delayed until their normal TD sync interval.
+
+## Online value learning
+
+For chosen action `a_t`:
+
+`target = r_t + gamma * max_a V_target(s_{t+1}, a)`
+
+`td = target - V_online(s_t, a_t)`
+
+Only the consequence-value branch receives this gradient.
+
+The browser learner adds:
+
+- replay capacity: 96 transitions;
+- replay batch: 2 extra transitions per live update;
+- target sync interval: 24 value updates;
+- bootstrap subset of value heads;
+- optional epsilon exploration during training.
 
 ## Semantic teacher
 
-The normal fast path can run without a large semantic model.
+Current practical teacher: MobileBERT-MNLI in Transformers.js.
 
-Three inference modes are supported:
+Experimental teacher presets:
 
-- **hybrid** — semantic model runs every decision and is combined with neural value;
-- **adaptive** — neural policy controls immediately; semantic teacher is scheduled asynchronously when warranted;
-- **neural** — no semantic calls.
+- DistilBERT-MNLI;
+- DeBERTa-v3-xsmall NLI.
 
-Adaptive teacher triggers can include:
+The adapter:
 
-- initial/bootstrap supervision;
-- fixed refresh interval;
-- high entropy;
-- small top-two margin;
-- state novelty;
-- ensemble disagreement.
+- creates a compact state premise;
+- preserves named enum/category values;
+- summarizes variable collections with category prevalence, binary flags, selected numeric statistics and representative records;
+- bounds premise tokens;
+- scores actions independently with NLI entailment-vs-contradiction odds.
 
-A teacher result is distilled into the small network. Generation/version guards prevent stale teacher results from being applied after model/schema reconfiguration.
+The independent scoring matters: a standard single-label zero-shot classifier forces candidate likelihoods to sum to one even when all choices are weak.
 
-## Online consequence learning
+Current limitation: generic NLI models still over-associate mechanically relevant words (notably FIRE) with the standing objective. They are semantic priors, not yet reliable decision-specialized affordance models.
 
-Reward adaptation uses tiny TD-style updates.
+## Decode calibration
 
-For chosen action (a_t):
+Teacher supervision also fits a small decode-temperature parameter by minimizing cross-entropy against teacher probabilities over a bounded temperature grid.
 
-[
-delta_t=r_t+gamma max_a Q(s_{t+1},a)-Q(s_t,a_t)
-]
+Teacher-only mode uses temperature 1 so this calibration cannot make the teacher baseline artificially sharper.
 
-The shared representation and a bootstrapped subset of ensemble heads are updated.
+## Epistemic uncertainty
 
-The reward signal defines consequences, not strategy. The environment is allowed to say that death is bad or progress is rewarded; it is not allowed to say "if health is low, retreat."
+Three bootstrapped value heads share the encoder.
 
-## Orchestration boundary
+For each candidate they produce slightly different consequence estimates. Jensen-Shannon-style disagreement among the induced policies is exposed as an epistemic signal.
 
-The state machine may understand:
+The UI distinguishes:
 
-- readiness;
-- running / paused / reset / error;
-- action timing;
-- episode boundaries;
-- logging;
-- learning enabled/disabled;
-- teacher enabled/disabled;
-- compute budgets.
+- entropy;
+- top-two margin;
+- scalar-state novelty;
+- value-head epistemic disagreement.
 
-It must not encode behavioral rules.
+## Replay and target network
 
-**The FSM understands program state, never strategy.**
+Experience replay reduces dependence on the latest transition.
+
+The target network is training-only state; it does not add inference work.
+
+Two target sync paths are deliberately separate:
+
+- semantic teacher refresh -> semantic/shared target parameters only;
+- scheduled TD target sync -> semantic + value parameters.
+
+This prevents frequent teacher refreshes from accidentally collapsing the delayed value target.
 
 ## DOOM adapter
 
-The current adapter exposes:
+The adapter exposes facts and mechanics, not tactical policy.
 
-- global player/resource state;
-- a variable entity collection;
-- a variable geometry collection;
-- reward and terminal state;
-- primitive input actuation.
+### Scalar state
 
-It does not expose tactical macros.
+Includes:
 
-The current browser engine is a pinned Chocolate Doom/Freedoom research runtime borrowed for bootstrap convenience. A project-owned minimal telemetry build remains a milestone.
+- health / armor;
+- ammunition;
+- equipped weapon category;
+- recent received / dealt damage;
+- under-fire flag;
+- player position / velocity / heading;
+- kills;
+- visited-cell count / cell revisit count / spatial novelty.
 
-## Transfer invariants
+### Entity records
 
-The test suite now checks or is designed to check:
+Include:
 
-- record permutation invariance;
-- field/action reordering;
-- renamed identifiers with stable descriptions;
-- range/unit rescaling;
-- request-time action cardinality;
-- typed numeric action parameters;
-- temporal channel influence;
-- action-conditioned attention;
-- compiled semantic-vector influence;
-- teacher-off neural inference.
+- absolute and relative position;
+- velocity;
+- dimensions;
+- health;
+- distance / relative angle;
+- line-of-sight;
+- hostile / collectible / targets-player flags;
+- stable record id;
+- factual coarse category;
+- named Chocolate Doom mobj categories when known.
 
-Future tests should add:
+Projectile/attack-effect categories are facts from the engine type table. The policy is not told that a projectile implies any particular response.
 
-- semantic description paraphrases with actual MiniLM compilation;
-- collection renaming;
-- missing fields;
-- distractor records;
-- unseen objectives;
-- cross-domain environments.
+### Geometry records
+
+Expose map-line geometry, blocking flag, special, tag and line flags.
+
+### Primitive actuation
+
+The policy outputs actual button masks. FIRE is Chocolate Doom's real fire input.
+
+No tactical macros are supplied.
+
+## Progress reward
+
+The current borrowed bridge does not expose direct exit/completion progress.
+
+As an interim policy-blind progress signal, the adapter tracks coarse player-position cells per episode and gives a small reward for first visits.
+
+This says only “new space is informative”; it does not specify a route, destination or action.
+
+## Runtime state machine
+
+Allowed responsibilities:
+
+- engine/model readiness;
+- running / paused / resetting / tuning / error;
+- action timing;
+- episode boundaries;
+- teacher lifecycle;
+- training vs evaluation;
+- logs / metrics / export;
+- compute budgets.
+
+Disallowed responsibility:
+
+- behavioral strategy.
+
+**The FSM understands program state, never gameplay policy.**
 
 ## Current complexity
 
-At the present configuration the fast model has 6,803 trainable parameters.
+Latest CI CPU stress sample:
 
-A GitHub Actions CPU microbenchmark with 768 records and 12 actions is approximately 5.5 ms p50 / 7.4 ms p95. Candidate cardinality scales without increasing parameter count.
+- 7,316 trainable parameters;
+- 768 variable records;
+- p50 ~7.45 ms;
+- p95 ~9.82 ms.
 
-Those numbers describe compute behavior, not policy quality.
+Action-cardinality scaling remains parameter-count invariant.
 
-## Next architectural milestones
+## Architectural limitations / next work
 
-### Calibration
+### Previous-action + record recurrence
 
-Add held-out Brier score, log score, ECE/reliability diagrams and temperature/isotonic calibration. Ensemble disagreement should be validated against actual error rather than assumed useful.
+The policy sees global deltas but does not yet explicitly encode which previous control produced them, nor track individual entity identities through time.
 
-### Record identity / recurrence
+### Decision-specialized teacher
 
-Global temporal deltas are now real, but collections are still encoded independently each tick. Add generic record identity association and recurrent/set-memory variants.
-
-### Offline distillation checkpoint
-
-Collect state/action/teacher/reward traces, train the small controller offline, and ship a portable checkpoint rather than beginning every environment from random weights.
-
-### Multi-environment transfer suite
-
-DOOM alone cannot establish generality. Add structured environments with unrelated semantics and action types.
+NLI provides semantic knowledge but is not trained for calibrated state-action affordance decisions. A small generic decision model or decision-specific fine-tune is likely the next major semantic improvement.
 
 ### Owned engine artifact
 
-Build the minimal telemetry ABI from pinned open source so the project no longer relies on a neighboring prebuilt research runtime.
+Build our own pinned Chocolate Doom telemetry artifact so richer native events—level completion, item/secret counts, projectile flags, damage attribution—can be exposed directly.
+
+### Calibration
+
+Add held-out Brier score, log score, ECE/reliability, and test whether epistemic disagreement actually predicts regret/error.
+
+### Multi-environment transfer
+
+DOOM cannot prove generality. Add unrelated structured environments with renamed/paraphrased schemas and different action parameter types.
