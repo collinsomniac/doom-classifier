@@ -114,7 +114,7 @@ function bindController(){
 }
 async function primeCurrentTeacher(label,steps=12,{converge=false}={}){
   const obs=env.lastObservation||env.observe();ui.modelStatus.textContent=label+" · distilling current state";
-  const prime=await policy.primeTeacher(obs,{steps,maxSteps:converge?64:steps,targetKL:converge?.06:null});
+  const prime=await policy.primeTeacher(obs,{steps,maxSteps:converge?128:steps,targetKL:converge?.02:null});
   if(prime?.stale)throw new Error("Semantic bootstrap became stale");
   return prime;
 }
