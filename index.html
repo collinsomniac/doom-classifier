@@ -11,7 +11,7 @@
   <main class="shell">
     <header class="hero">
       <div><p class="eyebrow">SEMANTIC RESIDUAL POLICY / EXPERIMENT 001</p><h1>DOOM Classifier Lab</h1><p class="lede">A browser-native test bed for structured-state → typed-decision controllers.</p></div>
-      <div class="status-pill"><span id="statusDot"></span><span id="fsmState">READY</span></div>
+      <div class="panel-head"><a class="badge" href="./doom.html">open real DOOM experiment</a><div class="status-pill"><span id="statusDot"></span><span id="fsmState">READY</span></div></div>
     </header>
 
     <section class="toolbar panel">
@@ -25,7 +25,7 @@
 
     <section class="grid">
       <article class="panel arena-panel">
-        <div class="panel-head"><div><p class="kicker">ENVIRONMENT</p><h2>Synthetic Arena</h2></div><div class="badge">DOOM adapter next</div></div>
+        <div class="panel-head"><div><p class="kicker">ENVIRONMENT</p><h2>Synthetic Arena</h2></div><a class="badge" href="./doom.html">real engine available</a></div>
         <canvas id="arena" width="760" height="440" aria-label="Synthetic arena visualization"></canvas>
         <p class="caption">Mechanics and reward live here. No behavioral state→action rule is exposed to the policy.</p>
       </article>
@@ -67,7 +67,7 @@
     </section>
 
     <section class="panel log-panel"><div class="panel-head"><div><p class="kicker">TRACE</p><h2>Recent decisions</h2></div><button id="exportBtn" class="secondary">Export trace</button></div><pre id="eventLog">ready.</pre></section>
-    <footer><span>Policy-blind FSM • explicit objective • swappable semantics • tiny consequence learner</span><a href="./docs/architecture.md">architecture</a></footer>
+    <footer><span>Policy-blind FSM • explicit objective • swappable semantics • tiny consequence learner</span><span><a href="./docs/results.md">results</a> · <a href="./docs/architecture.md">architecture</a></span></footer>
   </main>
   <script type="module" src="./src/main.js"></script>
 </body>

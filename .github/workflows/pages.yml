@@ -23,6 +23,8 @@ jobs:
         run: find src tests -name '*.js' -o -name '*.mjs' | xargs -n1 node --check
       - name: Run deterministic smoke test
         run: node tests/smoke.mjs
+      - name: Run DOOM adapter test
+        run: node tests/doom-adapter.mjs
       - name: Run adaptation benchmark
         run: node tests/benchmark.mjs
 
