@@ -12,7 +12,7 @@ const ui={
   profile:$("profileSelect"),applyProfile:$("applyProfileBtn"),profileHint:$("profileHint"),teacherMode:$("teacherModeSelect"),useNeural:$("useNeuralToggle"),learn:$("learnToggle"),memory:$("memoryToggle"),explore:$("exploreToggle"),
   tune:$("tuneBtn"),eval:$("evalBtn"),evalResults:$("evalResults"),tuneSteps:$("tuneSteps"),tuneProgress:$("tuneProgress"),tuneStatus:$("tuneStatus"),tuneBadge:$("tuneBadge"),
   actionMs:$("actionMs"),actionMsOut:$("actionMsOut"),manualAction:$("manualActionSelect"),manual:$("manualBtn"),manualStatus:$("manualStatus"),weaponState:$("weaponState"),
-  bars:$("actionBars"),chosen:$("chosenAction"),entropy:$("entropy"),margin:$("margin"),epistemic:$("epistemic"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),
+  bars:$("actionBars"),chosen:$("chosenAction"),intentFire:$("intentFire"),intentStrafe:$("intentStrafe"),intentTurn:$("intentTurn"),intentForward:$("intentForward"),intentBack:$("intentBack"),intentUse:$("intentUse"),entropy:$("entropy"),margin:$("margin"),epistemic:$("epistemic"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),
   attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),decodeTemp:$("decodeTemp"),replaySize:$("replaySize"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),
   schemaCompile:$("schemaCompileBtn"),schemaStatus:$("schemaStatus"),state:$("stateTable"),objective:$("objectiveText"),steps:$("steps"),episodes:$("episodes"),ret:$("return"),updates:$("updates"),lastReward:$("lastReward"),damageDealt:$("damageDealt"),damageReceived:$("damageReceived"),
   log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot")
@@ -95,6 +95,13 @@ function render(){
       return '<div class="attention-row"><div><strong>'+item.collectionId+'['+item.index+']</strong><small>'+detail+'</small></div><span>'+(item.weight*100).toFixed(1)+'%</span></div>';
     }).join(""):'<div class="attention-empty">No structured records in this observation.</div>';
     ui.lastReward.textContent=d.reward.toFixed(3);ui.chosen.textContent=d.action.label;ui.entropy.textContent=d.uncertainty.entropy.toFixed(3);ui.margin.textContent=d.uncertainty.margin.toFixed(3);ui.epistemic.textContent=(d.uncertainty.epistemic||0).toFixed(3);ui.novelty.textContent=d.uncertainty.novelty.toFixed(3);
+    const marginal=field=>policy.actions.reduce((sum,action,i)=>sum+(Number(action.params?.[field]||0)>0?d.probs[i]:0),0);
+    ui.intentFire.textContent=marginal("fire").toFixed(3);
+    ui.intentStrafe.textContent=(marginal("strafe_left")+marginal("strafe_right")).toFixed(3);
+    ui.intentTurn.textContent=(marginal("turn_left")+marginal("turn_right")).toFixed(3);
+    ui.intentForward.textContent=marginal("forward").toFixed(3);
+    ui.intentBack.textContent=marginal("back").toFixed(3);
+    ui.intentUse.textContent=marginal("use").toFixed(3);
     [...ui.bars.children].forEach((row,i)=>{row.querySelector(".bar-fill").style.width=(d.probs[i]*100).toFixed(1)+"%";row.lastElementChild.textContent=d.probs[i].toFixed(3)});
     ui.log.textContent=controller.trace.slice(-14).reverse().map(t=>"s"+String(t.step).padStart(4,"0")+" "+(t.teacherUsed?"Q":t.teacherPending?"…":"·")+" "+t.action.padEnd(19)+" p="+Math.max(...Object.values(t.probabilities)).toFixed(3)+" r="+t.reward.toFixed(3)+" dmg="+Number(t.outcome?.damageDealt||0).toFixed(0)+" "+t.residualLatencyMs.toFixed(1)+"ms").join("\n");
   }
