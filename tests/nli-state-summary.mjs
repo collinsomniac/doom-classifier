@@ -9,18 +9,21 @@ const schema={
     fields:[
       {id:"distance",label:"distance",description:"distance from controller",scale:100},
       {id:"quality",label:"quality",description:"utility quality",min:0,max:1},
-      {id:"active",label:"active",description:"currently active",min:0,max:1}
+      {id:"active",label:"active",description:"currently active",min:0,max:1},
+      {id:"kind",label:"object kind",description:"categorical object kind",enum:{1:"hostile actor",2:"projectile"}}
     ]
   }]
 };
 const actions=[{id:"use",label:"use",description:"use a suitable object"},{id:"wait",label:"wait",description:"do nothing"}];
 const obs={energy:55,_collections:{objects:[
-  {distance:5,quality:.9,active:1},{distance:80,quality:.2,active:1},{distance:40,quality:.5,active:1}
+  {distance:5,quality:.9,active:1,kind:1},{distance:80,quality:.2,active:1,kind:2},{distance:40,quality:.5,active:1,kind:1}
 ]}};
 const summary=summarizeCollection(schema.collections[0],obs._collections.objects);
 assert.match(summary,/3 records/);
 assert.match(summary,/distance/);
 assert.match(summary,/active active=3\/3 \(100%\)/,"constant active binary flag must survive variance-based compression");
+assert.match(summary,/object kind categories=hostile actor:2, projectile:1/,"categorical collection values must be summarized by semantic name");
+assert.match(summary,/object kind:(hostile actor|projectile)/,"representative records must render categorical names");
 assert.match(summary,/representative 1/);
 const adapter=new TransformersNLIAdapter({maxStateChars:2000});
 adapter.compile(schema,actions);
