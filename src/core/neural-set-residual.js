@@ -153,9 +153,17 @@ export class NeuralSetResidualQ{
     }
     return this;
   }
-  syncTarget(){
+  syncTarget({value=true}={}){
     if(!this.targetNet)return false;
-    this.targetNet.copyParametersFrom(this);this.targetSyncs++;return true;
+    if(value){
+      this.targetNet.copyParametersFrom(this);this.targetSyncs++;
+    }else{
+      for(let i=0;i<this.semanticLayers.length;i++){
+        const from=this.semanticLayers[i],to=this.targetNet.semanticLayers[i];
+        to.w.set(from.w);to.b.set(from.b);to.zeroGrad();
+      }
+    }
+    return true;
   }
   setSchema(schema){
     this.schema=schema;this.compiledGlobals=compileFields(schema.fields,this.hashDim);this.compiledGlobalPrefix=compileSparse("global state objective "+(schema.objective||""),this.hashDim,.25);this.compiledGlobalSemantic=projectSemanticVector(schema.objectiveSemanticVector,this.hashDim);
