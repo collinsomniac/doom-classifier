@@ -121,7 +121,7 @@ export class SemanticResidualPolicy{
       if(result?.student){kl=klDivergence(teacher,result.student);if(used>=steps&&targetKL!=null&&kl<=targetKL)break}
       if(used>=steps&&targetKL==null)break;
     }
-    this.q.syncTarget?.();
+    this.q.syncTarget?.({value:false});
     return result?{...result,stepsUsed:used,kl}:null;
   }
   async primeTeacher(obs,{steps=Math.max(4,this.distillSteps),maxSteps=steps,targetKL=null,temporal=null}={}){
