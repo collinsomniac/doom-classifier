@@ -24,8 +24,14 @@ for(let a=0;a<actions.length;a++){
   const bySlot=Object.fromEntries(top.map(x=>[x.record.slot,x.weight]));
   for(const item of top2)assert.ok(Math.abs(item.weight-bySlot[item.record.slot])<1e-6,"attention must be permutation invariant");
 }
+const lowEnergy={...obs,energy:.05};
+const highAttention=net.inspectAttention(obs,0,{topK:3}),lowAttention=net.inspectAttention(lowEnergy,0,{topK:3});
+const highBySlot=Object.fromEntries(highAttention.map(x=>[x.record.slot,x.weight]));
+const stateAttentionDiff=Math.max(...lowAttention.map(x=>Math.abs(x.weight-highBySlot[x.record.slot])));
+assert.ok(stateAttentionDiff>1e-8,"attention for the same action must be able to change with global state");
+
 const before=net.scoresObservation(obs);
 for(let i=0;i<80;i++)net.distill(obs,[4,-3],{strength:.6});
 const after=net.scoresObservation(obs);
 assert.ok(after[0]-after[1]>before[0]-before[1],"teacher distillation should move action margin");
-console.log(JSON.stringify({ok:true,params:net.parameterCount(),before,after,attention:actions.map((_,i)=>net.inspectAttention(obs,i,{topK:3}).map(x=>({slot:x.record.slot,weight:x.weight})))}));
+console.log(JSON.stringify({ok:true,params:net.parameterCount(),stateAttentionDiff,before,after,attention:actions.map((_,i)=>net.inspectAttention(obs,i,{topK:3}).map(x=>({slot:x.record.slot,weight:x.weight})))}));
