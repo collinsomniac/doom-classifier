@@ -19,12 +19,18 @@ function render(){
   const lat=controller.latencySummary();ui.latLast.textContent=lat.last.toFixed(2)+" ms";ui.latP95.textContent=lat.p95.toFixed(2)+" ms";
   const d=controller.lastDecision;
   if(d){
-    ui.latSemantic.textContent=d.semanticLatencyMs.toFixed(2)+" ms";ui.lastReward.textContent=d.reward.toFixed(3);ui.chosen.textContent=d.action.label;ui.entropy.textContent=d.uncertainty.entropy.toFixed(3);ui.margin.textContent=d.uncertainty.margin.toFixed(3);ui.novelty.textContent=d.uncertainty.novelty.toFixed(3);
+    ui.latSemantic.textContent=(d.semanticLatencyMs||policy.lastTeacherLatencyMs||0).toFixed(2)+" ms";ui.lastReward.textContent=d.reward.toFixed(3);ui.chosen.textContent=d.action.label;ui.entropy.textContent=d.uncertainty.entropy.toFixed(3);ui.margin.textContent=d.uncertainty.margin.toFixed(3);ui.novelty.textContent=d.uncertainty.novelty.toFixed(3);
     [...ui.bars.children].forEach((row,i)=>{row.querySelector(".bar-fill").style.width=(d.probs[i]*100).toFixed(1)+"%";row.lastElementChild.textContent=d.probs[i].toFixed(3)});
-    ui.log.textContent=controller.trace.slice(-12).reverse().map(t=>"s"+String(t.step).padStart(4,"0")+" "+(t.teacherUsed?"T":"·")+" "+t.action.padEnd(13)+" p="+Math.max(...Object.values(t.probabilities)).toFixed(3)+" r="+t.reward.toFixed(3)+" neural="+t.residualLatencyMs.toFixed(2)+"ms total="+t.latencyMs.toFixed(1)+"ms").join("\n");
+    ui.log.textContent=controller.trace.slice(-12).reverse().map(t=>"s"+String(t.step).padStart(4,"0")+" "+(t.teacherUsed?"Q":t.teacherPending?"…":"·")+" "+t.action.padEnd(13)+" p="+Math.max(...Object.values(t.probabilities)).toFixed(3)+" r="+t.reward.toFixed(3)+" neural="+t.residualLatencyMs.toFixed(2)+"ms total="+t.latencyMs.toFixed(1)+"ms").join("\n");
   }
 }
 function bindController(){controller.addEventListener("tick",render);controller.addEventListener("state",event=>{ui.start.textContent=event.detail==="RUNNING"?"Pause agent":"Start agent";setRuntime(event.detail)});controller.addEventListener("error",event=>{setRuntime("ERROR",true);ui.log.textContent="ERROR: "+event.detail.message+"\n"+ui.log.textContent})}
+async function primeCurrentTeacher(label){
+  const obs=env.lastObservation||env.observe();ui.modelStatus.textContent=label+" · semantic bootstrap in progress";
+  const prime=await policy.primeTeacher(obs,{steps:8});
+  if(prime?.stale)throw new Error("Semantic bootstrap became stale");
+  return prime;
+}
 async function boot(){
   ui.boot.disabled=true;setRuntime("LOADING");ui.bootStatus.textContent="Fetching pinned engine + Freedoom runtime…";
   try{
@@ -32,9 +38,9 @@ async function boot(){
     hashSemantic=new HashSemanticAdapter();hashSemantic.backend="local-js";
     policy=new SemanticResidualPolicy({schema:env.schema,actions:env.actions,semantic:hashSemantic,residual:"neural-set",seed:1993,inferenceMode:ui.path.value});
     controller=new ExperimentController({environment:env,policy,hz:8});controller.useResidual=ui.residual.checked;controller.training=ui.training.checked;controller.memory=ui.memory.checked;controller.explore=ui.explore.checked;
-    bindController();buildBars();setReadyControls(true);setRuntime("READY");
+    await primeCurrentTeacher("hash teacher");bindController();buildBars();setReadyControls(true);setRuntime("READY");
     const counts=env.lastObservation?._collections||{};ui.bootStatus.textContent=DOOM_RUNTIME_PROVENANCE.engine+" + "+DOOM_RUNTIME_PROVENANCE.content+" · "+policy.q.parameterCount()+" neural params · "+(counts.entities?.length||0)+" entities + "+(counts.geometry?.length||0)+" geometry records";
-    ui.modelStatus.textContent="adaptive hash teacher + neural set controller ready";render();
+    ui.modelStatus.textContent="adaptive hash teacher ready · bootstrap "+policy.lastTeacherLatencyMs.toFixed(1)+" ms";render();
   }catch(error){ui.boot.disabled=false;setRuntime("BOOT FAILED",true);ui.bootStatus.textContent=String(error?.message||error);ui.log.textContent=String(error?.stack||error)}
 }
 async function switchBackbone(){
@@ -42,14 +48,20 @@ async function switchBackbone(){
   try{
     if(selected==="hash"){
       if(previous!==hashSemantic&&previous.dispose)await previous.dispose();policy.setSemantic(hashSemantic);policy.resetLearning();await controller.reset({learning:false});
-      ui.modelStatus.textContent=ui.path.value+" hash teacher + neural set controller ready · neural weights cleared";render();return;
+      const prime=await primeCurrentTeacher("hash teacher");ui.modelStatus.textContent=ui.path.value+" hash teacher ready · bootstrap "+prime.ms.toFixed(1)+" ms · neural weights primed";render();return;
     }
     const preset=NLI_PRESETS[selected];ui.modelStatus.textContent="loading "+preset.label+" · "+preset.approx;
-    const candidate=new TransformersNLIAdapter({preset:selected,onProgress:info=>{if(Number.isFinite(info.normalizedProgress))ui.modelProgress.value=info.normalizedProgress;ui.modelStatus.textContent=(info.status||"loading")+(info.file?" · "+info.file:"")}});
-    candidate.compile(env.schema,env.actions);if(previous!==hashSemantic&&previous.dispose)await previous.dispose();policy.setSemantic(hashSemantic);await candidate.load();policy.setSemantic(candidate);policy.resetLearning();await controller.reset({learning:false});
-    ui.modelProgress.value=100;ui.modelStatus.textContent=preset.label+" loaded as "+ui.path.value+" teacher · neural weights cleared";render();
+    const candidate=new TransformersNLIAdapter({preset:selected,maxStateChars:2600,onProgress:info=>{
+      if(Number.isFinite(info.normalizedProgress))ui.modelProgress.value=info.normalizedProgress;
+      const status=info.status==="ready"?"model loaded":(info.status||"loading");
+      ui.modelStatus.textContent=status+(info.file?" · "+info.file:"");
+    }});
+    candidate.compile(env.schema,env.actions);if(previous!==hashSemantic&&previous.dispose)await previous.dispose();policy.setSemantic(hashSemantic);await candidate.load();
+    policy.setSemantic(candidate);policy.resetLearning();await controller.reset({learning:false});const prime=await primeCurrentTeacher(preset.label);
+    ui.modelProgress.value=100;ui.modelStatus.textContent=preset.label+" "+ui.path.value+" teacher ready · bootstrap "+prime.ms.toFixed(1)+" ms · fast ticks are neural";render();
   }catch(error){
-    policy.setSemantic(hashSemantic);policy.resetLearning();await controller.reset({learning:false});ui.modelSelect.value="hash";ui.modelProgress.value=0;ui.modelStatus.textContent="load failed; hash restored · "+String(error?.message||error);render();
+    policy.setSemantic(hashSemantic);policy.resetLearning();await controller.reset({learning:false});await primeCurrentTeacher("hash teacher").catch(()=>null);
+    ui.modelSelect.value="hash";ui.modelProgress.value=0;ui.modelStatus.textContent="load/bootstrap failed; hash restored · "+String(error?.message||error);render();
   }finally{setReadyControls(true)}
 }
 
