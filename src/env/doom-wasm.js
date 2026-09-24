@@ -25,6 +25,22 @@ const ACTION_SPECS=Object.freeze([
   action("use","interact / open","press the use key to open doors, activate switches, lifts, or other usable map elements directly ahead",BITS.USE),
   action("wait","wait","apply no movement, turning, firing, or use input for this decision interval",0)
 ]);
+const ENTITY_TYPES=Object.freeze({
+  0:"player",1:"zombie man",2:"shotgun guy",3:"arch-vile",4:"arch-vile fire",5:"revenant",6:"revenant tracer missile",7:"smoke",8:"mancubus",9:"mancubus fireball",
+  10:"chaingunner",11:"imp",12:"demon",13:"spectre",14:"cacodemon",15:"baron of hell",16:"baron fireball",17:"hell knight",18:"lost soul",19:"spider mastermind",
+  20:"arachnotron",21:"cyberdemon",22:"pain elemental",23:"Wolfenstein SS",24:"Commander Keen",25:"Icon of Sin brain",26:"boss spawn spit",27:"spawn target",
+  28:"spawn cube",29:"spawn fire",30:"explosive barrel",31:"imp fireball",32:"cacodemon fireball",33:"rocket projectile",34:"plasma projectile",35:"BFG projectile",
+  36:"arachnotron plasma projectile",37:"bullet impact puff",38:"blood effect",39:"teleport fog",40:"item respawn fog",41:"teleport destination",42:"BFG explosion effect"
+});
+const PROJECTILE_TYPES=new Set([4,6,9,16,26,28,29,31,32,33,34,35,36,42]);
+const ENTITY_KINDS=Object.freeze({0:"other object",1:"hostile actor",2:"projectile or attack effect",3:"collectible item"});
+function entityKind(e){
+  const type=Number(e.type||0);
+  if(PROJECTILE_TYPES.has(type))return 2;
+  if(e.enemy)return 1;
+  if(e.pickup)return 3;
+  return 0;
+}
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
 
@@ -82,7 +98,8 @@ export class DoomWasmArena{
           id:"entities",label:"world entities",description:"dynamic actors, objects and pickups represented with absolute and player-relative state",
           fields:[
             {id:"engine_record_id",label:"engine record id",description:"numeric record identifier supplied by the engine",scale:128},
-            {id:"type",label:"entity type",description:"numeric engine object type identifier",scale:128},
+            {id:"type",label:"entity type",description:"engine object category",enum:ENTITY_TYPES,scale:128},
+            {id:"kind",label:"entity kind",description:"coarse factual engine category of this record",enum:ENTITY_KINDS},
             {id:"x",label:"entity x position",description:"entity absolute world x coordinate",scale:2048},
             {id:"y",label:"entity y position",description:"entity absolute world y coordinate",scale:2048},
             {id:"z",label:"entity z position",description:"entity absolute world vertical coordinate",scale:256},
@@ -162,7 +179,7 @@ export class DoomWasmArena{
     const p=raw.player||{},all=raw.world?.entities||[],lines=raw.world?.lines||[];
     const heading=((Number(p.angle||0)>>>0)/4294967296)*2-1;
     const entities=all.map(e=>({
-      engine_record_id:Number(e.id||0),type:Number(e.type||0),x:Number(e.x||0),y:Number(e.y||0),z:Number(e.z||0),
+      engine_record_id:Number(e.id||0),type:Number(e.type||0),kind:entityKind(e),x:Number(e.x||0),y:Number(e.y||0),z:Number(e.z||0),
       relative_x:Number(e.relative_x||0),relative_y:Number(e.relative_y||0),relative_z:Number(e.z||0)-Number(p.z||0),
       velocity_x:Number(e.vx||0),velocity_y:Number(e.vy||0),radius:Number(e.radius||0),height:Number(e.height||0),health:Number(e.health||0),
       distance:Number(e.distance||0),relative_angle:clamp(Number(e.relative_angle||0)/2147483648,-1,1),visible:e.visible?1:0,countkill:e.enemy?1:0,pickup:e.pickup?1:0,targeting_player:e.targeting_player?1:0
