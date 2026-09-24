@@ -29,6 +29,8 @@ jobs:
         run: node tests/neural-set.mjs
       - name: Run neural temporal invariants
         run: node tests/neural-temporal.mjs
+      - name: Run epistemic ensemble invariants
+        run: node tests/epistemic-ensemble.mjs
       - name: Run action-conditioned attention invariants
         run: node tests/action-attention.mjs
       - name: Benchmark neural set fast path
