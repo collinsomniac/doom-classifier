@@ -17,25 +17,37 @@ function compileSparse(text,dim,baseScale=1){
   return[...map].map(([index,value])=>({index,value}));
 }
 function addSparse(out,sparse,scale=1){for(const {index,value} of sparse)out[index]+=value*scale}
+function addDense(out,dense,scale=1){if(!dense)return;for(let i=0;i<Math.min(out.length,dense.length);i++)out[i]+=dense[i]*scale}
+function projectSemanticVector(vector,dim){
+  if(!vector||!vector.length)return null;
+  const out=new Float32Array(dim);
+  for(let i=0;i<vector.length;i++){
+    const value=Number(vector[i]);if(!Number.isFinite(value)||value===0)continue;
+    let h=Math.imul((i+1)>>>0,0x9e3779b1)>>>0;h^=h>>>16;h=Math.imul(h,0x85ebca6b)>>>0;h^=h>>>13;
+    out[h%dim]+=((h>>>31)?1:-1)*value;
+  }
+  let n=0;for(const v of out)n+=v*v;n=Math.sqrt(n)||1;for(let i=0;i<out.length;i++)out[i]/=n;
+  return out;
+}
 function normalizeValue(value,field={}){
   let v=Number(value);if(!Number.isFinite(v))v=0;
   if(Number.isFinite(field.min)&&Number.isFinite(field.max)&&field.max!==field.min)return clamp(((v-field.min)/(field.max-field.min))*2-1,-1,1);
   const scale=Math.max(1e-6,Number(field.scale)||1),x=v/scale;return x/(1+Math.abs(x));
 }
 function compileFields(fields,dim){
-  return(fields||[]).map(field=>({field,valueSparse:compileSparse(descriptor(field),dim,1),presentSparse:compileSparse(descriptor(field)+" present",dim,.04)}));
+  return(fields||[]).map(field=>({field,valueSparse:compileSparse(descriptor(field),dim,1),presentSparse:compileSparse(descriptor(field)+" present",dim,.04),semanticDense:projectSemanticVector(field.semanticVector,dim)}));
 }
-function vectorFromCompiled(compiledFields,record,dim,prefixSparse=null){
-  const out=new Float32Array(dim);if(prefixSparse)addSparse(out,prefixSparse,1);
+function vectorFromCompiled(compiledFields,record,dim,prefixSparse=null,prefixDense=null){
+  const out=new Float32Array(dim);if(prefixSparse)addSparse(out,prefixSparse,1);if(prefixDense)addDense(out,prefixDense,.9);
   for(const compiled of compiledFields){
     const {field}=compiled;if(record==null||!Object.prototype.hasOwnProperty.call(record,field.id))continue;
-    addSparse(out,compiled.valueSparse,normalizeValue(record[field.id],field));addSparse(out,compiled.presentSparse,1);
+    const normalized=normalizeValue(record[field.id],field);addSparse(out,compiled.valueSparse,normalized);addDense(out,compiled.semanticDense,normalized*.9);addSparse(out,compiled.presentSparse,1);
   }
   return out;
 }
 function actionVector(action,dim,compiledActionFields=[]){
   const text=[action.label,action.description].filter(Boolean).join(" ")||action.id,out=new Float32Array(dim);
-  addSparse(out,compileSparse(text,dim,1));
+  addSparse(out,compileSparse(text,dim,1));addDense(out,projectSemanticVector(action.semanticVector,dim),1.15);
   const params=action.params||action.values||{};
   for(const compiled of compiledActionFields){
     const {field}=compiled;if(!Object.prototype.hasOwnProperty.call(params,field.id))continue;
@@ -94,9 +106,9 @@ export class NeuralSetResidualQ{
   }
   reset(){this.initialize()}
   setSchema(schema){
-    this.schema=schema;this.compiledGlobals=compileFields(schema.fields,this.hashDim);this.compiledGlobalPrefix=compileSparse("global state",this.hashDim,.2);
-    this.compiledTemporal=(schema.fields||[]).map(field=>({field,valueSparse:compileSparse("recent change in "+descriptor(field),this.hashDim,1)}));this.compiledTemporalPrefix=compileSparse("recent temporal state change",this.hashDim,.2);
-    this.compiledCollections=(schema.collections||[]).map(collection=>({id:collection.id,fields:compileFields(collection.fields,this.hashDim),prefixSparse:compileSparse([collection.label,collection.description].filter(Boolean).join(" ")||collection.id,this.hashDim,.2)}));
+    this.schema=schema;this.compiledGlobals=compileFields(schema.fields,this.hashDim);this.compiledGlobalPrefix=compileSparse("global state objective "+(schema.objective||""),this.hashDim,.25);this.compiledGlobalSemantic=projectSemanticVector(schema.objectiveSemanticVector,this.hashDim);
+    this.compiledTemporal=(schema.fields||[]).map(field=>({field,valueSparse:compileSparse("recent change in "+descriptor(field),this.hashDim,1),semanticDense:projectSemanticVector(field.semanticVector,this.hashDim)}));this.compiledTemporalPrefix=compileSparse("recent temporal state change",this.hashDim,.2);
+    this.compiledCollections=(schema.collections||[]).map(collection=>({id:collection.id,fields:compileFields(collection.fields,this.hashDim),prefixSparse:compileSparse([collection.label,collection.description].filter(Boolean).join(" ")||collection.id,this.hashDim,.2),prefixDense:projectSemanticVector(collection.semanticVector,this.hashDim)}));
     this.compiledActionFields=compileFields(schema.actionFields||[],this.actionDim);
     if(this.actions)this.actionEmbeddings=this.actions.map(a=>actionVector(a,this.actionDim,this.compiledActionFields));
     return this;
@@ -107,16 +119,16 @@ export class NeuralSetResidualQ{
   apply(lr=this.lr){for(const layer of this.layers)layer.step(lr,this.l2)}
 
   encodeState(observation,{cache=false,temporal=null}={}){
-    const globalRaw=vectorFromCompiled(this.compiledGlobals,observation,this.hashDim,this.compiledGlobalPrefix),globalCache=this.globalLayer.forward(globalRaw);
+    const globalRaw=vectorFromCompiled(this.compiledGlobals,observation,this.hashDim,this.compiledGlobalPrefix,this.compiledGlobalSemantic),globalCache=this.globalLayer.forward(globalRaw);
     const temporalRaw=new Float32Array(this.hashDim);addSparse(temporalRaw,this.compiledTemporalPrefix,1);
-    if(temporal)for(let i=0;i<this.compiledTemporal.length;i++){const v=Number(temporal[i+1]??0);if(Number.isFinite(v)&&v!==0)addSparse(temporalRaw,this.compiledTemporal[i].valueSparse,clamp(v,-1,1))}
+    if(temporal)for(let i=0;i<this.compiledTemporal.length;i++){const v=Number(temporal[i+1]??0);if(Number.isFinite(v)&&v!==0){const x=clamp(v,-1,1);addSparse(temporalRaw,this.compiledTemporal[i].valueSparse,x);addDense(temporalRaw,this.compiledTemporal[i].semanticDense,x*.9)}}
     const temporalCache=this.temporalLayer.forward(temporalRaw);
     const mean=new Float32Array(this.entityDim),max=new Float32Array(this.entityDim),maxIndex=new Int32Array(this.entityDim),latents=[],records=[],recordCaches=cache?[]:null;
     max.fill(-Infinity);maxIndex.fill(-1);let collectionCount=0;
     for(const collection of this.compiledCollections){
       const source=observation?._collections?.[collection.id]||[];if(source.length)collectionCount++;
       for(let ri=0;ri<source.length;ri++){
-        const record=source[ri],raw=vectorFromCompiled(collection.fields,record,this.hashDim,collection.prefixSparse),c1=this.entityLayer1.forward(raw),c2=this.entityLayer2.forward(c1.out),z=c2.out,r=latents.length;
+        const record=source[ri],raw=vectorFromCompiled(collection.fields,record,this.hashDim,collection.prefixSparse,collection.prefixDense),c1=this.entityLayer1.forward(raw),c2=this.entityLayer2.forward(c1.out),z=c2.out,r=latents.length;
         latents.push(z);records.push({collectionId:collection.id,index:ri,record});
         for(let d=0;d<this.entityDim;d++){mean[d]+=z[d];if(z[d]>max[d]){max[d]=z[d];maxIndex[d]=r}}
         if(cache)recordCaches.push({c1,c2});
