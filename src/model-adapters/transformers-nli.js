@@ -28,13 +28,17 @@ function fieldStats(field,records){
     raw.push(v);norm.push(normalized(v,field));
   }
   if(!raw.length)return null;
-  const mean=raw.reduce((a,b)=>a+b,0)/raw.length,nmean=norm.reduce((a,b)=>a+b,0)/norm.length;
+  const mean=raw.reduce((a,b)=>a+b,0)/raw.length,nmean=norm.reduce((s,v)=>s+v,0)/norm.length;
   const variance=norm.reduce((s,v)=>s+(v-nmean)*(v-nmean),0)/norm.length;
+  const categorical=!!field.enum;
+  const categoryCounts=categorical?raw.reduce((map,v)=>{
+    const label=field.enum?.[String(v)]??("code "+v);map.set(label,(map.get(label)||0)+1);return map;
+  },new Map()):null;
   const explicitBoolean=field.type==="boolean"||field.kind==="boolean";
-  const binaryValues=field.min===0&&field.max===1&&raw.every(v=>Math.abs(v)<1e-9||Math.abs(v-1)<1e-9);
+  const binaryValues=!categorical&&field.min===0&&field.max===1&&raw.every(v=>Math.abs(v)<1e-9||Math.abs(v-1)<1e-9);
   const booleanish=explicitBoolean||binaryValues;
   const active=booleanish?raw.filter(v=>v>.5).length:0;
-  return{field,mean,min:Math.min(...raw),max:Math.max(...raw),variance,booleanish,active,count:raw.length};
+  return{field,mean,min:Math.min(...raw),max:Math.max(...raw),variance,categorical,categoryCounts,booleanish,active,count:raw.length};
 }
 function representativeRecords(records,stats,count=2){
   if(!records.length||!stats.length)return[];
@@ -57,19 +61,26 @@ function representativeRecords(records,stats,count=2){
 }
 export function summarizeCollection(collection,records,{maxFields=8,representatives=2,maxFlags=4}={}){
   const all=(collection.fields||[]).map(field=>fieldStats(field,records)).filter(Boolean);
-  const flags=all.filter(s=>s.booleanish&&s.active>0).sort((a,b)=>(b.active/b.count)-(a.active/a.count)||String(a.field.id).localeCompare(String(b.field.id))).slice(0,maxFlags);
-  const chosen=new Set(flags.map(s=>s.field.id));
+  const categories=all.filter(s=>s.categorical).sort((a,b)=>b.variance-a.variance);
+  const flags=all.filter(s=>!s.categorical&&s.booleanish&&s.active>0).sort((a,b)=>(b.active/b.count)-(a.active/a.count)||String(a.field.id).localeCompare(String(b.field.id))).slice(0,maxFlags);
+  const chosen=new Set([...categories,...flags].map(s=>s.field.id));
   const numeric=all.filter(s=>!chosen.has(s.field.id)).sort((a,b)=>b.variance-a.variance);
-  const stats=[...flags,...numeric].slice(0,maxFields);
+  const stats=[...categories,...flags,...numeric].slice(0,maxFields);
   const label=collection.label||collection.id,description=collection.description?" ("+collection.description+")":"";
   const lines=[label+description+": "+records.length+" records."];
   if(stats.length)lines.push("stats: "+stats.map(s=>{
     const name=s.field.label||s.field.id;
+    if(s.categorical){
+      const top=[...s.categoryCounts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5);
+      return name+" categories="+top.map(([label,count])=>label+":"+count).join(", ");
+    }
     if(s.booleanish)return name+" active="+s.active+"/"+s.count+" ("+Math.round(100*s.active/s.count)+"%)";
     return name+" mean="+s.mean.toFixed(2)+" min="+s.min.toFixed(2)+" max="+s.max.toFixed(2);
   }).join("; "));
   const reps=representativeRecords(records,stats,representatives);
-  reps.forEach((record,i)=>lines.push("representative "+(i+1)+": {"+stats.map(s=>(s.field.label||s.field.id)+":"+Number(record[s.field.id]??0).toFixed(2)).join(", ")+"}"));
+  reps.forEach((record,i)=>lines.push("representative "+(i+1)+": {"+stats.map(s=>{
+    const value=record[s.field.id]??0;return(s.field.label||s.field.id)+":"+fieldValueText(s.field,value);
+  }).join(", ")+"}"));
   return lines.join("\n");
 }
 
