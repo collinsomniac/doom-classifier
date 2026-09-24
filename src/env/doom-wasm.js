@@ -62,7 +62,7 @@ export class DoomWasmArena{
     try{({default:createModule}=await import(blobUrl))}finally{URL.revokeObjectURL(blobUrl)}
     if(typeof createModule!=="function")throw new Error("Chocolate Doom module factory was not exported");
     const module=await createModule({
-      canvas,keyboardListeningElement:canvas,wasmBinary,getPreloadedPackage:()=>dataPackage,noInitialRun:true,
+      canvas,keyboardListeningElement:canvas,wasmBinary,locateFile:path=>RAW_BASE+"/"+path,getPreloadedPackage:()=>dataPackage,noInitialRun:true,
       preRun:[m=>{
         mkdir(m.FS,"/config");mkdir(m.FS,"/savegames");
         m.FS.writeFile("/config/default.cfg","fullscreen 0\ngrabmouse 0\nuse_mouse 0\n");
