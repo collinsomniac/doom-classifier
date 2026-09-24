@@ -1,6 +1,6 @@
 import {test,expect} from "@playwright/test";
 
-test.setTimeout(300000);
+test.setTimeout(420000);
 
 test("real DOOM boots, primes MobileBERT, then keeps the control tick neural-fast",async({page})=>{
   const consoleErrors=[];page.on("pageerror",error=>consoleErrors.push("pageerror: "+String(error)));page.on("console",message=>{if(message.type()==="error")consoleErrors.push("console: "+message.text())});
@@ -25,6 +25,15 @@ test("real DOOM boots, primes MobileBERT, then keeps the control tick neural-fas
   const start=Date.now();await page.locator("#stepBtn").click();await expect(page.locator("#steps")).toHaveText("1",{timeout:5000});
   const wallMs=Date.now()-start;expect(wallMs).toBeLessThan(5000);
   await expect(page.locator("#chosenAction")).not.toHaveText("—");await expect(page.locator("#eventLog")).toContainText("s0001");
+
+  await expect(page.locator("#schemaCompileBtn")).toBeEnabled();
+  await page.locator("#schemaCompileBtn").click();
+  await page.waitForFunction(()=>{const text=document.querySelector("#schemaStatus")?.textContent||"";return text.includes("MiniLM compiled")||text.includes("schema compile failed")},null,{timeout:180000});
+  const schemaStatus=(await page.locator("#schemaStatus").textContent())||"";
+  if(schemaStatus.includes("failed"))throw new Error("MiniLM schema compile failed. status="+schemaStatus+" browser="+consoleErrors.join(" | "));
+  await expect(page.locator("#schemaStatus")).toContainText("MiniLM compiled");
+  await expect(page.locator("#steps")).toHaveText("0");
+  await page.locator("#stepBtn").click();await expect(page.locator("#steps")).toHaveText("1",{timeout:5000});
 
   if(consoleErrors.length)throw new Error("Browser errors after successful learned-model step: "+consoleErrors.join(" | "));
 });
