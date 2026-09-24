@@ -57,9 +57,9 @@ export function summarizeCollection(collection,records,{maxFields=6,representati
 }
 
 export class TransformersNLIAdapter{
-  constructor({preset="mobilebert",onProgress=()=>{},maxStateChars=5000}={}){
+  constructor({preset="mobilebert",onProgress=()=>{},maxStateChars=5000,maxPremiseTokens=384}={}){
     if(!NLI_PRESETS[preset])throw new Error("Unknown NLI preset: "+preset);
-    this.presetKey=preset;this.preset=NLI_PRESETS[preset];this.name=this.preset.label;this.onProgress=onProgress;this.maxStateChars=maxStateChars;
+    this.presetKey=preset;this.preset=NLI_PRESETS[preset];this.name=this.preset.label;this.onProgress=onProgress;this.maxStateChars=maxStateChars;this.maxPremiseTokens=maxPremiseTokens;
     this.schema=null;this.actions=null;this.labels=null;this.classifier=null;this.backend="unloaded";
   }
   compile(schema,actions){this.schema=schema;this.actions=actions;this.labels=actions.map(a=>a.label+" — "+a.description)}
@@ -99,9 +99,24 @@ export class TransformersNLIAdapter{
     const text=lines.join("\n");
     return text.length<=this.maxStateChars?text:text.slice(0,this.maxStateChars)+"\n[bounded teacher synopsis truncated]";
   }
+  boundedPremise(observation){
+    const text=this.stateText(observation),tokenizer=this.classifier?.tokenizer;
+    if(!tokenizer)return text;
+    try{
+      const encoded=tokenizer(text,{return_tensor:false,truncation:true,max_length:this.maxPremiseTokens});
+      let ids=encoded?.input_ids??encoded;
+      if(Array.isArray(ids)&&Array.isArray(ids[0]))ids=ids[0];
+      if(Array.isArray(ids)&&typeof tokenizer.decode==="function"){
+        return tokenizer.decode(ids,{skip_special_tokens:true});
+      }
+    }catch(error){
+      console.warn("[semantic teacher] tokenizer pre-truncation failed; using character-bounded premise",error);
+    }
+    return text;
+  }
   async score(observation){
     if(!this.classifier)await this.load();
-    const output=await this.classifier(this.stateText(observation),this.labels,{multi_label:false,hypothesis_template:"For the stated objective and current state, choosing {} is an appropriate next action."});
+    const output=await this.classifier(this.boundedPremise(observation),this.labels,{multi_label:false,hypothesis_template:"For the stated objective and current state, choosing {} is an appropriate next action."});
     const scores=new Map(output.labels.map((label,i)=>[label,output.scores[i]])),floor=1e-7;
     return this.labels.map(label=>Math.log(Math.max(floor,scores.get(label)??floor)));
   }
