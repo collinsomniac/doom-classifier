@@ -72,7 +72,7 @@
 
 <details class="panel advanced-panel"><summary>Advanced / ablation controls</summary>
   <p class="help">These controls are useful for experiments, not required for the recommended run.</p>
-  <div class="advanced-grid"><div><h2>Semantic teacher</h2><div class="model-controls"><select id="modelSelect"><option value="hash">Hash baseline — not semantic</option><option value="mobilebert">MobileBERT-MNLI (~26 MB WASM)</option><option value="distilbert">DistilBERT-MNLI (~67 MB WASM)</option></select><button id="loadModelBtn" class="secondary" disabled>Load teacher</button></div><progress id="modelProgress" max="100" value="0"></progress><div id="modelStatus" class="model-status">No learned teacher loaded.</div></div>
+  <div class="advanced-grid"><div><h2>Semantic teacher</h2><div class="model-controls"><select id="modelSelect"><option value="hash">Hash baseline — not semantic</option><option value="mobilebert">MobileBERT-MNLI (~26 MB WASM)</option><option value="distilbert">DistilBERT-MNLI (~67 MB WASM)</option><option value="deberta">DeBERTa-v3-xsmall NLI (~90 MB WASM, experimental)</option></select><button id="loadModelBtn" class="secondary" disabled>Load teacher</button></div><progress id="modelProgress" max="100" value="0"></progress><div id="modelStatus" class="model-status">No learned teacher loaded.</div></div>
   <div><h2>Schema compiler</h2><button id="schemaCompileBtn" class="secondary" disabled>Compile with MiniLM (~23 MB)</button><div id="schemaStatus" class="model-status">Lexical feature hash only.</div></div></div>
 </details>
 
