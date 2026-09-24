@@ -29,7 +29,9 @@ function fieldStats(field,records){
   if(!raw.length)return null;
   const mean=raw.reduce((a,b)=>a+b,0)/raw.length,nmean=norm.reduce((a,b)=>a+b,0)/norm.length;
   const variance=norm.reduce((s,v)=>s+(v-nmean)*(v-nmean),0)/norm.length;
-  const booleanish=field.min===0&&field.max===1;
+  const explicitBoolean=field.type==="boolean"||field.kind==="boolean";
+  const binaryValues=field.min===0&&field.max===1&&raw.every(v=>Math.abs(v)<1e-9||Math.abs(v-1)<1e-9);
+  const booleanish=explicitBoolean||binaryValues;
   const active=booleanish?raw.filter(v=>v>.5).length:0;
   return{field,mean,min:Math.min(...raw),max:Math.max(...raw),variance,booleanish,active,count:raw.length};
 }
