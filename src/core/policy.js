@@ -102,7 +102,7 @@ export class SemanticResidualPolicy{
   }
   calibrateTemperature(obs,teacherScores,temporal=null,{blend=.35}={}){
     if(!teacherScores?.length)return null;
-    const logits=this.residualScores(obs,null,temporal),target=softmax(teacherScores,1);
+    const encoded=this.encode(obs,true,false),logits=this.residualScores(obs,encoded.features,temporal),target=softmax(teacherScores,1);
     let bestT=this.temperature,bestLoss=Infinity;
     const candidates=[.30,.40,.50,.65,.80,1.0,1.25,1.5];
     for(const t of candidates){const loss=crossEntropy(target,softmax(logits,t));if(loss<bestLoss){bestLoss=loss;bestT=t}}
