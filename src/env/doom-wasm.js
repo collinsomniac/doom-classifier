@@ -3,22 +3,27 @@ const RUNTIME_COMMIT="318c32a24851444c1170bf083671c38723f3a35a";
 const RAW_BASE="https://raw.githubusercontent.com/"+RUNTIME_REPOSITORY+"/"+RUNTIME_COMMIT+"/public/engine";
 
 const BITS=Object.freeze({FORWARD:1,BACK:2,TURN_LEFT:4,TURN_RIGHT:8,STRAFE_LEFT:16,STRAFE_RIGHT:32,FIRE:64,USE:128});
+const controls=(mask)=>Object.freeze({
+  forward:(mask&BITS.FORWARD)?1:0,back:(mask&BITS.BACK)?1:0,turn_left:(mask&BITS.TURN_LEFT)?1:0,turn_right:(mask&BITS.TURN_RIGHT)?1:0,
+  strafe_left:(mask&BITS.STRAFE_LEFT)?1:0,strafe_right:(mask&BITS.STRAFE_RIGHT)?1:0,fire:(mask&BITS.FIRE)?1:0,use:(mask&BITS.USE)?1:0
+});
+const action=(id,label,description,mask)=>Object.freeze({id,label,description,mask,params:controls(mask)});
 const ACTION_SPECS=Object.freeze([
-  {id:"forward",label:"forward",description:"hold forward movement",mask:BITS.FORWARD},
-  {id:"back",label:"back",description:"hold backward movement",mask:BITS.BACK},
-  {id:"turn_left",label:"turn left",description:"turn the view left",mask:BITS.TURN_LEFT},
-  {id:"turn_right",label:"turn right",description:"turn the view right",mask:BITS.TURN_RIGHT},
-  {id:"strafe_left",label:"strafe left",description:"move sideways left while keeping the current view direction",mask:BITS.STRAFE_LEFT},
-  {id:"strafe_right",label:"strafe right",description:"move sideways right while keeping the current view direction",mask:BITS.STRAFE_RIGHT},
-  {id:"fire",label:"fire",description:"fire the currently equipped weapon",mask:BITS.FIRE},
-  {id:"forward_fire",label:"forward + fire",description:"hold forward movement and weapon fire at the same time",mask:BITS.FORWARD|BITS.FIRE},
-  {id:"back_fire",label:"back + fire",description:"hold backward movement and weapon fire at the same time",mask:BITS.BACK|BITS.FIRE},
-  {id:"strafe_left_fire",label:"strafe left + fire",description:"hold left strafe and weapon fire at the same time",mask:BITS.STRAFE_LEFT|BITS.FIRE},
-  {id:"strafe_right_fire",label:"strafe right + fire",description:"hold right strafe and weapon fire at the same time",mask:BITS.STRAFE_RIGHT|BITS.FIRE},
-  {id:"turn_left_fire",label:"turn left + fire",description:"turn left and fire the equipped weapon at the same time",mask:BITS.TURN_LEFT|BITS.FIRE},
-  {id:"turn_right_fire",label:"turn right + fire",description:"turn right and fire the equipped weapon at the same time",mask:BITS.TURN_RIGHT|BITS.FIRE},
-  {id:"use",label:"use",description:"activate or interact with something directly in front of the player",mask:BITS.USE},
-  {id:"wait",label:"wait",description:"apply no movement, turning, firing, or use input for this decision interval",mask:0}
+  action("forward","forward","hold forward movement",BITS.FORWARD),
+  action("back","back","hold backward movement",BITS.BACK),
+  action("turn_left","turn left","turn the view left",BITS.TURN_LEFT),
+  action("turn_right","turn right","turn the view right",BITS.TURN_RIGHT),
+  action("strafe_left","strafe left","move sideways left while keeping the current view direction",BITS.STRAFE_LEFT),
+  action("strafe_right","strafe right","move sideways right while keeping the current view direction",BITS.STRAFE_RIGHT),
+  action("fire","fire","fire the currently equipped weapon",BITS.FIRE),
+  action("forward_fire","forward + fire","hold forward movement and weapon fire at the same time",BITS.FORWARD|BITS.FIRE),
+  action("back_fire","back + fire","hold backward movement and weapon fire at the same time",BITS.BACK|BITS.FIRE),
+  action("strafe_left_fire","strafe left + fire","hold left strafe and weapon fire at the same time",BITS.STRAFE_LEFT|BITS.FIRE),
+  action("strafe_right_fire","strafe right + fire","hold right strafe and weapon fire at the same time",BITS.STRAFE_RIGHT|BITS.FIRE),
+  action("turn_left_fire","turn left + fire","turn left and fire the equipped weapon at the same time",BITS.TURN_LEFT|BITS.FIRE),
+  action("turn_right_fire","turn right + fire","turn right and fire the equipped weapon at the same time",BITS.TURN_RIGHT|BITS.FIRE),
+  action("use","use","activate or interact with something directly in front of the player",BITS.USE),
+  action("wait","wait","apply no movement, turning, firing, or use input for this decision interval",0)
 ]);
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
@@ -41,6 +46,16 @@ export class DoomWasmArena{
     this.actionMasks=Object.fromEntries(ACTION_SPECS.map(action=>[action.id,action.mask]));
     this.schema={
       objective:"Stay alive, neutralize hostile threats, conserve useful resources, interact with the environment when appropriate, and make progress through the level.",
+      actionFields:[
+        {id:"forward",label:"forward control",description:"whether this candidate holds forward movement",min:0,max:1},
+        {id:"back",label:"backward control",description:"whether this candidate holds backward movement",min:0,max:1},
+        {id:"turn_left",label:"turn left control",description:"whether this candidate turns the view left",min:0,max:1},
+        {id:"turn_right",label:"turn right control",description:"whether this candidate turns the view right",min:0,max:1},
+        {id:"strafe_left",label:"strafe left control",description:"whether this candidate moves sideways left",min:0,max:1},
+        {id:"strafe_right",label:"strafe right control",description:"whether this candidate moves sideways right",min:0,max:1},
+        {id:"fire",label:"weapon fire control",description:"whether this candidate fires the equipped weapon",min:0,max:1},
+        {id:"use",label:"use interaction control",description:"whether this candidate activates or uses the environment",min:0,max:1}
+      ],
       fields:[
         {id:"health",label:"health",description:"remaining player vitality",min:0,max:200},
         {id:"armor",label:"armor",description:"remaining protective armor",min:0,max:200},
