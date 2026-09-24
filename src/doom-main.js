@@ -10,10 +10,10 @@ const ui={
   boot:$("bootBtn"),prepare:$("prepareBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),runtime:$("runtimeStatus"),runtimeTitle:$("runtimeTitle"),bootStatus:$("bootStatus"),
   iwad:$("iwadInput"),iwadStatus:$("iwadStatus"),engineChip:$("engineChip"),schemaChip:$("schemaChip"),teacherChip:$("teacherChip"),policyChip:$("policyChip"),prepareStatus:$("prepareStatus"),
   profile:$("profileSelect"),applyProfile:$("applyProfileBtn"),profileHint:$("profileHint"),teacherMode:$("teacherModeSelect"),useNeural:$("useNeuralToggle"),learn:$("learnToggle"),memory:$("memoryToggle"),explore:$("exploreToggle"),
-  tune:$("tuneBtn"),tuneSteps:$("tuneSteps"),tuneProgress:$("tuneProgress"),tuneStatus:$("tuneStatus"),tuneBadge:$("tuneBadge"),
+  tune:$("tuneBtn"),eval:$("evalBtn"),evalResults:$("evalResults"),tuneSteps:$("tuneSteps"),tuneProgress:$("tuneProgress"),tuneStatus:$("tuneStatus"),tuneBadge:$("tuneBadge"),
   actionMs:$("actionMs"),actionMsOut:$("actionMsOut"),manualAction:$("manualActionSelect"),manual:$("manualBtn"),manualStatus:$("manualStatus"),weaponState:$("weaponState"),
   bars:$("actionBars"),chosen:$("chosenAction"),entropy:$("entropy"),margin:$("margin"),epistemic:$("epistemic"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),
-  attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),
+  attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),decodeTemp:$("decodeTemp"),replaySize:$("replaySize"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),
   schemaCompile:$("schemaCompileBtn"),schemaStatus:$("schemaStatus"),state:$("stateTable"),objective:$("objectiveText"),steps:$("steps"),episodes:$("episodes"),ret:$("return"),updates:$("updates"),lastReward:$("lastReward"),damageDealt:$("damageDealt"),damageReceived:$("damageReceived"),
   log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot")
 };
@@ -39,7 +39,7 @@ function updateReadiness(){
   setChip(ui.policyChip,prepared?"ready":"warn",prepared?"ready to play":"not prepared");
   const lock=busy||!engineReady;
   ui.prepare.disabled=lock;ui.loadModel.disabled=lock;ui.schemaCompile.disabled=lock;ui.manual.disabled=lock;ui.manualAction.disabled=lock;ui.reset.disabled=lock;ui.export.disabled=lock;
-  for(const element of [ui.profile,ui.applyProfile,ui.teacherMode,ui.useNeural,ui.learn,ui.memory,ui.explore,ui.tune,ui.tuneSteps,ui.start,ui.step])element.disabled=busy||!prepared;
+  for(const element of [ui.profile,ui.applyProfile,ui.teacherMode,ui.useNeural,ui.learn,ui.memory,ui.explore,ui.tune,ui.eval,ui.tuneSteps,ui.start,ui.step])element.disabled=busy||!prepared;
   if(controller?.state==="RUNNING")ui.start.disabled=false;
 }
 function setBusy(value){busy=value;updateReadiness()}
@@ -80,7 +80,7 @@ function render(){
   if(!env||!controller||!policy)return;
   const obs=env.lastObservation||env.observe();ui.objective.textContent=policy.schema.objective||env.schema.objective;ui.weaponState.textContent=weaponLabel(obs);
   ui.state.innerHTML=(policy.schema.fields||env.schema.fields).map(field=>'<div class="state-row"><span>'+field.label+'</span><strong>'+displayField(field,obs[field.id])+'</strong></div>').join("");
-  ui.steps.textContent=controller.steps;ui.episodes.textContent=controller.episodes;ui.ret.textContent=controller.episodeReturn.toFixed(3);ui.updates.textContent=policy.q.updates;ui.teacherCalls.textContent=policy.teacherCalls;
+  ui.steps.textContent=controller.steps;ui.episodes.textContent=controller.episodes;ui.ret.textContent=controller.episodeReturn.toFixed(3);ui.updates.textContent=policy.q.updates;ui.teacherCalls.textContent=policy.teacherCalls;ui.decodeTemp.textContent=policy.temperature.toFixed(3);ui.replaySize.textContent=String(policy.replay?.length||0);
   ui.backbone.textContent=(policy.q.name||"neural")+" · "+policy.q.parameterCount()+" params";
   const lat=controller.latencySummary();ui.latLast.textContent=lat.last.toFixed(2)+" ms";ui.latP95.textContent=lat.p95.toFixed(2)+" ms";ui.latSemantic.textContent=(policy.lastTeacherLatencyMs||0).toFixed(1)+" ms";
   const outcome=controller.lastDecision?.outcome||env.lastOutcome;ui.damageDealt.textContent=Number(outcome?.damageDealt||0).toFixed(0);ui.damageReceived.textContent=Math.max(0,-Number(outcome?.healthDelta||0)).toFixed(0);
@@ -188,6 +188,38 @@ async function tuneAgent(){
   }catch(error){ui.tuneStatus.textContent="training failed · "+String(error?.message||error);setRuntime("TRAINING ERROR",true)}
   finally{setBusy(false)}
 }
+async function evaluateFrozen(){
+  if(!prepared||!controller)return;
+  controller.pause();setBusy(true);applyProfile("frozen");ui.profile.value="frozen";ui.evalResults.innerHTML="<span>Running 48 teacher-off decisions from a fresh encounter…</span>";
+  try{
+    await controller.reset({learning:false});syncRuntimeConfig();
+    const teacherBefore=policy.teacherCalls,actions={},samples=[];let reward=0,damageDealt=0,damageReceived=0,kills=0,fireActions=0;
+    for(let i=0;i<48;i++){
+      const ok=await controller.tick();if(!ok&&controller.state==="ERROR")throw new Error("controller error during evaluation");
+      const d=controller.lastDecision;if(!d)continue;
+      reward+=Number(d.reward||0);damageDealt+=Number(d.outcome?.damageDealt||0);damageReceived+=Math.max(0,-Number(d.outcome?.healthDelta||0));kills+=Number(d.outcome?.killDelta||0);
+      actions[d.action.id]=(actions[d.action.id]||0)+1;if(d.action.id.includes("fire"))fireActions++;
+      samples.push({maxP:Math.max(...d.probs),entropy:d.uncertainty.entropy});
+    }
+    const mean=key=>samples.length?samples.reduce((s,x)=>s+x[key],0)/samples.length:0,lat=controller.latencySummary();
+    const dominant=Object.entries(actions).sort((a,b)=>b[1]-a[1])[0]||["—",0],diversity=Object.keys(actions).length,teacherDelta=policy.teacherCalls-teacherBefore;
+    ui.evalResults.innerHTML=
+      '<div><span>return</span><strong>'+reward.toFixed(3)+'</strong></div>'+
+      '<div><span>damage dealt / received</span><strong>'+damageDealt.toFixed(0)+' / '+damageReceived.toFixed(0)+'</strong></div>'+
+      '<div><span>kills</span><strong>'+kills.toFixed(0)+'</strong></div>'+
+      '<div><span>fire-capable choices</span><strong>'+fireActions+' / 48</strong></div>'+
+      '<div><span>action diversity</span><strong>'+diversity+' / '+policy.actions.length+'</strong></div>'+
+      '<div><span>dominant action</span><strong>'+dominant[0]+' · '+dominant[1]+'</strong></div>'+
+      '<div><span>mean max probability</span><strong>'+mean("maxP").toFixed(3)+'</strong></div>'+
+      '<div><span>mean entropy</span><strong>'+mean("entropy").toFixed(3)+'</strong></div>'+
+      '<div><span>p95 decision</span><strong>'+lat.p95.toFixed(2)+' ms</strong></div>'+
+      '<div><span>teacher calls</span><strong>'+teacherDelta+'</strong></div>';
+    ui.tuneStatus.textContent="Frozen evaluation complete. Teacher calls must remain 0; compare this panel before/after training.";
+    setRuntime("FROZEN EVALUATION COMPLETE");render();
+  }catch(error){ui.evalResults.innerHTML="<span>Evaluation failed · "+String(error?.message||error)+"</span>";setRuntime("EVALUATION ERROR",true)}
+  finally{setBusy(false)}
+}
+
 async function manualPrimitive(){
   if(!engineReady)return;controller.pause();setBusy(true);
   try{
@@ -199,7 +231,7 @@ async function manualPrimitive(){
 }
 
 ui.iwad.addEventListener("change",()=>{const file=ui.iwad.files?.[0];ui.iwadStatus.textContent=file?"Selected local IWAD: "+file.name+" · "+(file.size/1048576).toFixed(1)+" MB":"Default: Freedoom 0.13.0"});
-ui.boot.addEventListener("click",boot);ui.prepare.addEventListener("click",prepareRecommended);ui.tune.addEventListener("click",tuneAgent);ui.manual.addEventListener("click",manualPrimitive);
+ui.boot.addEventListener("click",boot);ui.prepare.addEventListener("click",prepareRecommended);ui.tune.addEventListener("click",tuneAgent);ui.eval.addEventListener("click",evaluateFrozen);ui.manual.addEventListener("click",manualPrimitive);
 ui.start.addEventListener("click",()=>{if(!controller)return;if(controller.state==="RUNNING")controller.pause();else{syncRuntimeConfig();controller.start()}});
 ui.step.addEventListener("click",async()=>{if(!controller||!prepared)return;if(controller.state==="RUNNING")controller.pause();syncRuntimeConfig();await controller.tick()});
 ui.reset.addEventListener("click",async()=>{if(controller){await controller.reset({learning:false});render()}});
