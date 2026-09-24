@@ -31,6 +31,8 @@ jobs:
         run: node tests/neural-set-benchmark.mjs
       - name: Run adaptive teacher invariants
         run: node tests/adaptive-teacher.mjs
+      - name: Run semantic collection summary
+        run: node tests/nli-state-summary.mjs
       - name: Run adaptation benchmark
         run: node tests/benchmark.mjs
 
