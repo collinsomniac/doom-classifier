@@ -41,6 +41,8 @@ jobs:
         run: node tests/experience-replay.mjs
       - name: Run target network invariants
         run: node tests/target-network.mjs
+      - name: Run semantic/value separation invariants
+        run: node tests/semantic-value-separation.mjs
       - name: Run temperature calibration invariants
         run: node tests/temperature-calibration.mjs
       - name: Run semantic collection summary
