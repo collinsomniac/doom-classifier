@@ -101,17 +101,19 @@ export class TransformersNLIAdapter{
   }
   stateText(observation){
     const objective=this.schema?.objective||"choose the action that best advances the environment objective";
-    const lines=["Objective: "+objective,"Global state:"];
-    for(const field of this.schema.fields){
+    const scalar=(this.schema.fields||[]).map(field=>{
       const value=Number(observation[field.id]??0),label=field.label||field.id;
       let relative="";
-      if(Number.isFinite(field.min)&&Number.isFinite(field.max)&&field.max!==field.min)relative=" ["+Math.round(((value-field.min)/(field.max-field.min))*100)+"% of declared range]";
-      lines.push("- "+label+"="+fieldValueText(field,value)+(field.enum?"":relative)+(field.description?" ("+field.description+")":""));
-    }
-    for(const collection of this.schema.collections||[]){
+      if(!field.enum&&Number.isFinite(field.min)&&Number.isFinite(field.max)&&field.max!==field.min)relative=" ["+Math.round(((value-field.min)/(field.max-field.min))*100)+"%]";
+      return label+"="+fieldValueText(field,value)+relative;
+    });
+    const lines=["Objective: "+objective,"Current scalar state: "+scalar.join("; ")];
+    const collections=(this.schema.collections||[]).map(collection=>{
       const records=observation?._collections?.[collection.id]||[];
-      lines.push("Collection: "+summarizeCollection(collection,records));
-    }
+      return{records,text:"Collection: "+summarizeCollection(collection,records)};
+    });
+    for(const item of collections.filter(x=>x.records.length))lines.push(item.text);
+    for(const item of collections.filter(x=>!x.records.length))lines.push(item.text);
     const text=lines.join("\n");
     return text.length<=this.maxStateChars?text:text.slice(0,this.maxStateChars)+"\n[bounded teacher synopsis truncated]";
   }
