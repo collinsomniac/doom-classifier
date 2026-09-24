@@ -88,7 +88,7 @@ export class NeuralSetResidualQ{
   constructor(schema,actions,{seed=2026,hashDim=48,globalDim=16,temporalDim=8,entityHidden=24,entityDim=16,actionDim=24,headDim=32,ensembleSize=3,bootstrapProbability=.8,lr=.008,gamma=.96,l2=1e-6}={}){
     this.schema=schema;this.actions=actions;this.seed=seed;this.hashDim=hashDim;this.globalDim=globalDim;this.temporalDim=temporalDim;this.entityHidden=entityHidden;this.entityDim=entityDim;this.actionDim=actionDim;this.headDim=headDim;this.ensembleSize=ensembleSize;this.bootstrapProbability=bootstrapProbability;
     this.lr=lr;this.gamma=gamma;this.l2=l2;this.name="SchemaHashAttentionSetNet";
-    this.contextDim=globalDim+temporalDim+entityDim*2+2;this.headInputDim=this.contextDim+entityDim+actionDim;
+    this.attentionStateDim=globalDim+temporalDim;this.queryInputDim=actionDim+this.attentionStateDim;this.contextDim=globalDim+temporalDim+entityDim*2+2;this.headInputDim=this.contextDim+entityDim+actionDim;
     this.setSchema(schema);this.setActions(actions);this.initialize();
   }
   initialize(){
@@ -97,7 +97,7 @@ export class NeuralSetResidualQ{
     this.temporalLayer=new Dense(this.hashDim,this.temporalDim,rng);
     this.entityLayer1=new Dense(this.hashDim,this.entityHidden,rng);
     this.entityLayer2=new Dense(this.entityHidden,this.entityDim,rng);
-    this.queryLayer=new Dense(this.actionDim,this.entityDim,rng,{activation:"tanh"});
+    this.queryLayer=new Dense(this.queryInputDim,this.entityDim,rng,{activation:"tanh"});
     this.headLayer=new Dense(this.headInputDim,this.headDim,rng);
     this.outLayers=Array.from({length:this.ensembleSize},()=>new Dense(this.headDim,1,rng,{activation:"linear"}));
     this.bootstrapRng=mulberry32((this.seed^0x9e3779b9)>>>0);
@@ -140,7 +140,8 @@ export class NeuralSetResidualQ{
     return{context,latents,records,cache:cache?{globalCache,temporalCache,recordCaches,maxIndex,recordCount}:null};
   }
   attention(state,actionIndex){
-    const queryCache=this.queryLayer.forward(this.actionEmbeddings[actionIndex]),query=queryCache.out,n=state.latents.length,weights=new Float32Array(n),attended=new Float32Array(this.entityDim);
+    const queryInput=new Float32Array(this.queryInputDim);queryInput.set(this.actionEmbeddings[actionIndex],0);queryInput.set(state.context.slice(0,this.attentionStateDim),this.actionDim);
+    const queryCache=this.queryLayer.forward(queryInput),query=queryCache.out,n=state.latents.length,weights=new Float32Array(n),attended=new Float32Array(this.entityDim);
     if(!n)return{queryCache,weights,attended};
     const logits=new Float32Array(n),scale=1/Math.sqrt(this.entityDim);let peak=-Infinity;
     for(let r=0;r<n;r++){let s=0,z=state.latents[r];for(let d=0;d<this.entityDim;d++)s+=query[d]*z[d];s*=scale;logits[r]=s;if(s>peak)peak=s}
@@ -183,7 +184,8 @@ export class NeuralSetResidualQ{
           gradQuery[d]+=gradLogit*z[d]*scale;
         }
       }
-      this.queryLayer.backward(forward.queryCache,gradQuery);
+      const gradQueryInput=this.queryLayer.backward(forward.queryCache,gradQuery);
+      for(let d=0;d<this.attentionStateDim;d++)gradContext[d]+=gradQueryInput[this.actionDim+d];
     }
     return gradContext;
   }
