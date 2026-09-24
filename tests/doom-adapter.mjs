@@ -9,14 +9,16 @@ const raw={
     entities:[
       {id:7,type:1,x:200,y:200,z:8,vx:1,vy:0,radius:20,height:56,health:60,distance:100,relative_x:100,relative_y:0,relative_angle:1073741824,visible:true,enemy:true,pickup:false,targeting_player:false},
       {id:8,type:2,x:120,y:180,z:8,vx:0,vy:0,radius:20,height:56,health:30,distance:28,relative_x:20,relative_y:-20,relative_angle:-536870912,visible:true,enemy:true,pickup:false,targeting_player:true},
-      {id:9,type:3,x:110,y:200,z:8,vx:0,vy:0,radius:8,height:16,health:0,distance:10,relative_x:10,relative_y:0,relative_angle:0,visible:true,enemy:false,pickup:true,targeting_player:false}
+      {id:9,type:3,x:110,y:200,z:8,vx:0,vy:0,radius:8,height:16,health:0,distance:10,relative_x:10,relative_y:0,relative_angle:0,visible:true,enemy:false,pickup:true,targeting_player:false},
+      {id:10,type:31,x:150,y:200,z:8,vx:-6,vy:0,radius:6,height:8,health:1000,distance:50,relative_x:50,relative_y:0,relative_angle:0,visible:true,enemy:false,pickup:false,targeting_player:false}
     ],
     lines:[{id:4,x1:80,y1:180,x2:160,y2:180,flags:1,blocking:true,special:0,tag:0}]
   }
 };
 const flat=arena.flatten(raw);
-assert.equal(flat.health,87);assert.equal(flat.weapon,1);assert.equal(flat.under_fire,1);assert.equal(flat.player_z,8);assert.equal(flat._collections.entities.length,3);assert.equal(flat._collections.geometry.length,1);
+assert.equal(flat.health,87);assert.equal(flat.weapon,1);assert.equal(flat.under_fire,1);assert.equal(flat.player_z,8);assert.equal(flat._collections.entities.length,4);assert.equal(flat._collections.geometry.length,1);
 assert.equal(flat._collections.entities[1].engine_record_id,8);assert.equal(flat._collections.entities[1].targeting_player,1);assert.equal(flat._collections.entities[2].pickup,1);
+assert.equal(flat._collections.entities[1].kind,1);assert.equal(flat._collections.entities[2].kind,3);assert.equal(flat._collections.entities[3].kind,2);
 assert.equal(flat._collections.geometry[0].line_id,4);assert.equal(flat._collections.geometry[0].flags,1);assert.equal(flat._collections.geometry[0].x1,-20);
 
 const damaged=structuredClone(raw);damaged.world.entities[1].health=15;
