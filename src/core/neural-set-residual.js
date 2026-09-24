@@ -102,9 +102,9 @@ class Dense{
 function zeroEntityGrads(n,dim){return Array.from({length:n},()=>new Float32Array(dim))}
 
 export class NeuralSetResidualQ{
-  constructor(schema,actions,{seed=2026,hashDim=48,globalDim=16,temporalDim=8,entityHidden=24,entityDim=16,actionDim=24,headDim=32,ensembleSize=3,bootstrapProbability=.8,lr=.008,gamma=.96,l2=1e-6}={}){
+  constructor(schema,actions,{seed=2026,hashDim=48,globalDim=16,temporalDim=8,entityHidden=24,entityDim=16,actionDim=24,headDim=32,ensembleSize=3,bootstrapProbability=.8,lr=.008,gamma=.96,l2=1e-6,useTargetNetwork=true,targetSyncInterval=24}={}){
     this.schema=schema;this.actions=actions;this.seed=seed;this.hashDim=hashDim;this.globalDim=globalDim;this.temporalDim=temporalDim;this.entityHidden=entityHidden;this.entityDim=entityDim;this.actionDim=actionDim;this.headDim=headDim;this.ensembleSize=ensembleSize;this.bootstrapProbability=bootstrapProbability;
-    this.lr=lr;this.gamma=gamma;this.l2=l2;this.name="SchemaHashAttentionSetNet";
+    this.lr=lr;this.gamma=gamma;this.l2=l2;this.useTargetNetwork=useTargetNetwork;this.targetSyncInterval=Math.max(1,Math.floor(targetSyncInterval));this.name="SchemaHashAttentionSetNet";
     this.attentionStateDim=globalDim+temporalDim;this.queryInputDim=actionDim+this.attentionStateDim;this.contextDim=globalDim+temporalDim+entityDim*2+2;this.headInputDim=this.contextDim+entityDim+actionDim;
     this.setSchema(schema);this.setActions(actions);this.initialize();
   }
@@ -119,18 +119,43 @@ export class NeuralSetResidualQ{
     this.outLayers=Array.from({length:this.ensembleSize},()=>new Dense(this.headDim,1,rng,{activation:"linear"}));
     this.bootstrapRng=mulberry32((this.seed^0x9e3779b9)>>>0);
     this.layers=[this.globalLayer,this.temporalLayer,this.entityLayer1,this.entityLayer2,this.queryLayer,this.headLayer,...this.outLayers];
-    this.updates=0;this.distillUpdates=0;
+    this.updates=0;this.distillUpdates=0;this.targetSyncs=0;
+    if(this.useTargetNetwork){
+      if(!this.targetNet){
+        this.targetNet=new NeuralSetResidualQ(this.schema,this.actions,{
+          seed:this.seed,hashDim:this.hashDim,globalDim:this.globalDim,temporalDim:this.temporalDim,entityHidden:this.entityHidden,entityDim:this.entityDim,actionDim:this.actionDim,headDim:this.headDim,
+          ensembleSize:this.ensembleSize,bootstrapProbability:this.bootstrapProbability,lr:this.lr,gamma:this.gamma,l2:this.l2,useTargetNetwork:false,targetSyncInterval:this.targetSyncInterval
+        });
+      }else{
+        this.targetNet.setSchema(this.schema);this.targetNet.setActions(this.actions);
+      }
+      this.syncTarget();
+    }
   }
   reset(){this.initialize()}
+  copyParametersFrom(source){
+    if(!source?.layers||source.layers.length!==this.layers.length)throw new Error("Target network shape mismatch");
+    for(let i=0;i<this.layers.length;i++){
+      const from=source.layers[i],to=this.layers[i];
+      if(from.w.length!==to.w.length||from.b.length!==to.b.length)throw new Error("Target layer shape mismatch");
+      to.w.set(from.w);to.b.set(from.b);to.zeroGrad();
+    }
+    return this;
+  }
+  syncTarget(){
+    if(!this.targetNet)return false;
+    this.targetNet.copyParametersFrom(this);this.targetSyncs++;return true;
+  }
   setSchema(schema){
     this.schema=schema;this.compiledGlobals=compileFields(schema.fields,this.hashDim);this.compiledGlobalPrefix=compileSparse("global state objective "+(schema.objective||""),this.hashDim,.25);this.compiledGlobalSemantic=projectSemanticVector(schema.objectiveSemanticVector,this.hashDim);
     this.compiledTemporal=(schema.fields||[]).map(field=>({field,valueSparse:compileSparse("recent change in "+descriptor(field),this.hashDim,1),semanticDense:projectSemanticVector(field.semanticVector,this.hashDim)}));this.compiledTemporalPrefix=compileSparse("recent temporal state change",this.hashDim,.2);
     this.compiledCollections=(schema.collections||[]).map(collection=>({id:collection.id,fields:compileFields(collection.fields,this.hashDim),prefixSparse:compileSparse([collection.label,collection.description].filter(Boolean).join(" ")||collection.id,this.hashDim,.2),prefixDense:projectSemanticVector(collection.semanticVector,this.hashDim)}));
     this.compiledActionFields=compileFields(schema.actionFields||[],this.actionDim);
     if(this.actions)this.actionEmbeddings=this.actions.map(a=>actionVector(a,this.actionDim,this.compiledActionFields));
+    if(this.targetNet)this.targetNet.setSchema(schema);
     return this;
   }
-  setActions(actions){this.actions=actions;this.actionEmbeddings=actions.map(a=>actionVector(a,this.actionDim,this.compiledActionFields));return this}
+  setActions(actions){this.actions=actions;this.actionEmbeddings=actions.map(a=>actionVector(a,this.actionDim,this.compiledActionFields));if(this.targetNet)this.targetNet.setActions(actions);return this}
   parameterCount(){return this.layers.reduce((n,l)=>n+l.count(),0)}
   zeroGrad(){for(const layer of this.layers)layer.zeroGrad()}
   apply(lr=this.lr){for(const layer of this.layers)layer.step(lr,this.l2)}
@@ -217,10 +242,12 @@ export class NeuralSetResidualQ{
     }
   }
   updateTransition({observation,temporal=null,actionIndex,reward,nextObservation,nextTemporal=null,done=false}){
-    const current=this.encodeState(observation,{cache:true,temporal}),chosen=this.actionForward(current,actionIndex),nextScores=done?[]:this.scoresObservation(nextObservation,{temporal:nextTemporal});
+    const current=this.encodeState(observation,{cache:true,temporal}),chosen=this.actionForward(current,actionIndex);
+    const bootstrapModel=this.targetNet||this,nextScores=done?[]:bootstrapModel.scoresObservation(nextObservation,{temporal:nextTemporal});
     const target=reward+(done?0:this.gamma*Math.max(...nextScores)),td=clamp(target-chosen.score,-4,4),entityExtra=zeroEntityGrads(current.latents.length,this.entityDim);
     this.zeroGrad();const gradContext=this.backwardAction(chosen,-td,entityExtra,{bootstrap:true});this.backwardState(current,gradContext,entityExtra);this.apply();this.updates++;
-    return{td,target,q:chosen.score};
+    if(this.targetNet&&this.updates%this.targetSyncInterval===0)this.syncTarget();
+    return{td,target,q:chosen.score,targetNetwork:!!this.targetNet,targetSyncs:this.targetSyncs};
   }
   distill(observation,teacherScores,{strength=.35,temporal=null}={}){
     if(!teacherScores||teacherScores.length!==this.actions.length)return null;
