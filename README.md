@@ -2,157 +2,203 @@
 
 Browser-native research harness for **ultra-low-latency structured-state → typed-decision neural policies**.
 
-Live lab: https://collinsomniac.github.io/doom-classifier/
+**Live real-DOOM lab:** https://collinsomniac.github.io/doom-classifier/
 
-DOOM is the first real harness, not the architecture. The project is testing whether a very small neural controller can consume native structured state, score a request-time set of typed actions with useful uncertainty, learn consequences online, and borrow semantic knowledge from a larger model without paying that model's latency on every control tick.
+DOOM is the first real harness, not the architecture. The project asks whether a very small neural controller can consume native structured state, score request-time typed actions, preserve semantic priors, learn action consequences online, and use a larger semantic model only when that extra compute is worth paying for.
 
-## Current architecture
+## How to use the live lab
 
-The real-time controller now combines:
+The main page now opens the real Chocolate Doom experiment. The old synthetic arena is retained at `synthetic.html` for controlled ablations.
 
-- **schema-conditioned numeric encoding** — static field/action metadata is compiled once;
-- **optional MiniLM semantic compilation** — a ~23 MB int8 sentence model embeds the objective, fields, collections, action fields and action descriptions once, then can be disposed;
-- **variable-record neural set encoding** — globals plus arbitrary collections such as actors, geometry, candidates or events;
-- **temporal channel** — recent normalized state deltas are encoded separately from instantaneous state;
-- **action-conditioned attention** — each candidate action asks a different question of the record set;
-- **typed numeric action parameters** — candidate values such as coordinates, strength, price, threshold, velocity or other numbers are part of the action representation without changing network shape;
-- **three-head bootstrap value ensemble** — shared encoder/attention, independent scalar heads for an epistemic disagreement signal;
-- **online reward learning** — tiny bootstrapped TD updates adapt the controller to actual consequences;
-- **adaptive semantic teacher** — MobileBERT-MNLI / DistilBERT-MNLI can supervise only on bootstrap, periodic refresh, novelty, ambiguity or ensemble disagreement;
-- **teacher distillation** — expensive semantic calls update the tiny controller instead of becoming a permanent inference dependency;
-- **policy-blind orchestration** — runtime state machines handle lifecycle/timing but contain no gameplay strategy.
+Recommended workflow:
 
-The fast network currently has **6,803 trainable parameters**. Schema/action cardinality does not change that parameter count.
+1. **Boot engine.** Freedoom is included. If you own Doom, you can select a local `DOOM.WAD` / `DOOM2.WAD`; it stays in browser memory and is not uploaded.
+2. **Prepare Recommended.** MiniLM compiles static schema/action meanings once, then MobileBERT supplies a bounded semantic teacher distribution that is distilled into the tiny policy.
+3. **Choose a run profile.**
+   - **Adaptive assisted:** neural fast path; teacher only on uncertainty/novelty.
+   - **Teacher-only zero-shot:** semantic baseline; slowest.
+   - **Online learning:** adaptive teacher + reward learning + exploration.
+   - **Frozen neural evaluation:** no teacher, no learning, no random exploration.
+4. **Optional browser fine-tune.** Run 64/128/256 real transitions, then freeze.
+5. **Evaluate frozen.** This is the cleanest small-model measurement: teacher calls are disabled and weights do not change.
 
-## Experiments
+A manual primitive tester is also available after engine boot so FIRE/movement can be verified independently of the model.
 
-### Experiment 001 — synthetic decision lab
+## Current fast controller
 
-The synthetic arena is the controlled ablation surface. It supports:
+Current model: **`SchemaSemanticValueSetNet`**, **7,316 trainable parameters**.
 
-- semantic-only, neural-only and hybrid policies;
-- frozen vs online adaptation;
-- temporal memory on/off;
-- action/schema reordering and renaming tests;
-- action-cardinality scaling;
-- trace export and latency distributions.
+The controller contains:
 
-An early linear-residual baseline improved from -0.03711 mean reward/step to -0.01105 when frozen and evaluated on a different seed. That result is retained as a historical floor, not the current architecture.
+- compiled lexical + optional MiniLM schema semantics;
+- scalar/global-state encoder;
+- learned temporal-delta channel;
+- shared variable-record encoder;
+- permutation-invariant mean/max set summary;
+- action + state + temporal-conditioned record attention;
+- request-time typed action embeddings;
+- a **semantic-prior head** trained only by teacher distillation;
+- a separate **consequence-value branch** trained only by reward TD updates;
+- three bootstrapped value heads for epistemic disagreement;
+- bounded replay buffer + delayed target value network.
 
-### Experiment 002 — real DOOM primitive policy
+The semantic/value separation is deliberate. Reward learning cannot overwrite the semantic-prior logits; tests assert semantic drift is exactly zero under reward-only TD updates.
 
-`doom.html` boots a pinned Chocolate Doom 3.1.1 + Freedoom 0.13.0 WebAssembly runtime and reads native structured telemetry.
+## DOOM control surface
 
-The controller sees:
+The policy receives native structured engine state, including:
 
-- global player/resource state;
+- health, armor, ammunition, equipped weapon name;
+- recent damage and damage dealt;
+- position, velocity, heading, kills;
+- coarse exploration novelty / visited cells;
 - variable world-entity records;
 - variable map-geometry records;
-- recent temporal deltas.
+- factual entity categories such as hostile actor, collectible, and projectile/attack effect;
+- named Chocolate Doom entity types where available.
 
-It may choose only player-level primitives:
+The action set contains literal player inputs, including simultaneous button combinations:
 
 - forward / back;
 - turn left / right;
 - strafe left / right;
 - fire;
-- use;
-- wait.
+- use/interact;
+- wait;
+- forward+fire, back+fire, strafe+fire, turn+fire variants.
 
-There is deliberately no `MOVE_TO_ENEMY`, `RETREAT`, `FACE_ENEMY`, pathfinding policy, or distance-triggered firing rule. Those would move competence out of the learned policy and into deterministic software.
+Every compound action is also represented as typed primitive fields such as `fire=1`, `strafe_left=1`. The UI therefore reports both exact compound-action probabilities and primitive marginals such as **P(fire)** and **P(strafe)**.
 
-The live page also exposes chosen-action record attention so we can inspect which native records most influenced the currently selected action.
+There is deliberately no `MOVE_TO_ENEMY`, `RETREAT`, `FACE_ENEMY`, pathfinder policy, or “enemy visible → fire” rule.
 
-## Fast-path measurements
+## Semantic path
 
-Current GitHub Actions CPU benchmark, 768 structured records and 12 actions:
+Static language is moved off the tick loop:
 
-- p50: ~5.49 ms
-- p95: ~7.42 ms
-- parameters: 6,803
+- **MiniLM schema compiler** embeds objective, fields, enum/category meanings, collections and actions once, projects them into the fixed-size policy representation, then can be disposed.
+- **MobileBERT-MNLI** is the current practical browser teacher.
+- **DistilBERT-MNLI** and **DeBERTa-v3-xsmall NLI** are available as heavier experimental teachers.
+- teacher state serialization is bounded and preserves categorical flags / named enum values.
+- NLI actions are scored independently (entailment vs contradiction log-odds) rather than being forced into a single-label 100% distribution.
 
-Action-cardinality benchmark on the same tiny fixed-size network:
+The current NLI teacher is useful but not yet a reliable affordance oracle. MobileBERT strongly associates FIRE with the objective even in deliberately empty probe states. That limitation is measured openly rather than hidden behind a hand-coded action mask.
 
-- 8 actions: ~1.10 ms p50
-- 128 actions: ~2.88 ms p50
-- 512 actions: ~9.27 ms p50
-- 1,024 actions: ~17.82 ms p50
+## Training
 
-These are engineering microbenchmarks, not a claim of equivalent accuracy to Jev or Laya. The important result is that native structured state can be scored without serializing the changing environment back through a large language encoder every tick.
+The browser learner uses:
 
-## Semantic compile path
+- TD consequence learning on the value branch;
+- replay buffer;
+- delayed target value network;
+- semantic-only target synchronization after teacher refreshes;
+- teacher-guided decode-temperature calibration;
+- optional epsilon exploration during training;
+- policy-blind reward from real consequences.
 
-The default fast schema representation includes a cheap lexical feature-hash channel.
+Current DOOM reward includes:
 
-The optional **MiniLM schema compiler** adds sentence-level semantic vectors for static metadata. It batch-embeds schema/action language, compresses those vectors into the controller's fixed schema space, reconfigures the policy, clears incompatible learned weights, and disposes the compiler model.
+- hostile HP decrease;
+- kills;
+- player damage/death;
+- a small step cost;
+- a small first-visit spatial novelty bonus.
 
-This gives the fast controller a way to begin with useful relationships between paraphrased concepts while preserving a tiny per-tick network.
+The novelty bonus provides a progress signal without telling the policy which door, corridor or direction is correct.
 
-## Confidence / escalation
+## Current measurements
 
-The lab intentionally separates several notions that are often incorrectly called "confidence":
+Latest GitHub Actions CPU sample, 768 structured records:
 
-- **entropy** — how diffuse the selected policy distribution is;
-- **margin** — top-1 vs top-2 action separation;
-- **novelty** — online deviation from previously observed scalar state;
-- **epistemic disagreement** — Jensen-Shannon-style disagreement among bootstrap value heads.
+- parameters: **7,316**
+- p50: **~7.45 ms**
+- p95: **~9.82 ms**
 
-Adaptive teacher scheduling can use all four signals. Teacher-assisted traces remain distinguishable from teacher-off evaluation.
+Action-cardinality microbenchmark:
+
+| candidates | p50 | p95 |
+|---:|---:|---:|
+| 8 | 1.18 ms | 2.47 ms |
+| 32 | 1.45 ms | 2.66 ms |
+| 128 | 2.95 ms | 3.41 ms |
+| 256 | 5.32 ms | 5.97 ms |
+| 512 | 9.37 ms | 12.95 ms |
+| 1,024 | 17.61 ms | 20.00 ms |
+
+These are compute microbenchmarks, not claims of Jev/Laya-equivalent decision quality.
+
+### Current real-DOOM frozen benchmark
+
+On the split semantic/value architecture, a 24-decision teacher-off evaluation from the starting encounter produced:
+
+- **65 hostile damage**
+- **1 kill**
+- **0 player damage received**
+- **+2.526 return**
+- **24/24 fire-capable actions**
+- dominant exact action: `back+fire`
+
+A 64-transition browser fine-tune preserved the kill/damage behavior instead of collapsing away from firing, but exact-action diversity remains poor. Improving state-conditioned action separation is therefore a current research target.
+
+## Confidence / observability
+
+The UI keeps several concepts separate:
+
+- **entropy** — distribution diffuseness;
+- **margin** — top-1 vs top-2 separation;
+- **novelty** — online state novelty;
+- **epistemic disagreement** — bootstrap value-head disagreement;
+- **semantic prior score** — teacher-distilled action applicability;
+- **learned value score** — reward-trained consequence residual;
+- **combined score** — value used for neural decoding.
+
+Chosen-action record attention is also shown as a diagnostic, not a complete causal explanation.
+
+## State machine boundary
+
+The runtime state machine may manage:
+
+- boot/readiness;
+- running / paused / reset / tuning / error;
+- action timing;
+- episode boundaries;
+- logging;
+- teacher availability;
+- training/evaluation mode;
+- compute budgets.
+
+It must not encode strategy.
+
+**The state machine understands program state, never gameplay policy.**
 
 ## Run locally
 
-Serve the repository over HTTP:
-
     python -m http.server 8000
 
-Open:
+Then open:
 
-- http://localhost:8000/ — synthetic lab
-- http://localhost:8000/doom.html — real-engine lab
-
-The DOOM page downloads the pinned engine/Freedoom runtime on first boot. Learned semantic components are opt-in downloads.
-
-## Tests
-
-Important CI checks include:
-
-    node tests/smoke.mjs
-    node tests/doom-adapter.mjs
-    node tests/neural-set.mjs
-    node tests/neural-temporal.mjs
-    node tests/epistemic-ensemble.mjs
-    node tests/action-attention.mjs
-    node tests/schema-transfer.mjs
-    node tests/semantic-vectors.mjs
-    node tests/typed-action-params.mjs
-    node tests/action-cardinality.mjs
-    node tests/adaptive-teacher.mjs
-    node tests/nli-state-summary.mjs
-    node tests/benchmark.mjs
-
-A separate Playwright workflow boots real DOOM in Chromium, activates MobileBERT, verifies a neural-fast control tick, and exercises the compile-time semantic path.
+- `http://localhost:8000/` — real DOOM lab
+- `http://localhost:8000/synthetic.html` — legacy synthetic ablation lab
 
 ## Research invariants
 
-1. The state machine may understand program lifecycle, never strategy.
-2. Environment adapters expose facts, mechanics and reward, never a behavioral policy.
-3. Static semantics should be compiled; changing numeric state should dominate per-tick compute.
-4. Request-time action sets and numeric action parameters must not require changing model size.
-5. Online adaptation must remain tiny, separable and disableable.
-6. Teacher calls must never become an invisible requirement for evaluation.
-7. Confidence must distinguish policy ambiguity from epistemic uncertainty.
-8. DOOM-specific signals must not leak into the core policy API.
-9. Meaningful components must remain ablatable.
-10. Transfer tests should prefer semantic equivalence over identical field names.
+1. Environment adapters may expose facts, mechanics and reward, but not behavioral rules.
+2. Static semantics should be compiled; changing numeric state should dominate per-tick compute.
+3. Request-time action count / parameters must not change model size.
+4. Teacher usage must remain visible, optional and disableable.
+5. Frozen evaluation must make zero teacher calls and zero weight updates.
+6. Reward learning must not erase semantic priors.
+7. Confidence must distinguish action ambiguity from epistemic uncertainty.
+8. DOOM-specific facts may live in the DOOM adapter; DOOM strategy must not leak into the core policy.
+9. Important mechanisms remain ablatable.
+10. Transfer tests should prefer semantic equivalence over identical identifiers.
 
-## Next research steps
+## Highest-value next experiments
 
-The highest-value next work is:
-
-1. train/evaluate the neural controller across many real DOOM episodes rather than smoke-test steps;
-2. add proper calibration metrics (ECE/Brier/log score) and calibrate ensemble/teacher probabilities;
-3. build our own minimal telemetry-enabled engine artifact from pinned source instead of borrowing a neighboring runtime binary;
-4. add identity-aware temporal tracking for variable entities, not only global temporal deltas;
-5. create non-DOOM structured environments to measure true zero-shot schema/action transfer;
-6. distill teacher-generated supervision offline into a portable tiny checkpoint;
-7. compare accuracy, calibration, throughput and teacher-query rate against Laya/Jev-style typed-decision baselines.
+- multi-seed, multi-episode real-DOOM training/evaluation;
+- better decision-specialized semantic teacher or generic decision fine-tune;
+- previous-action and identity-aware record memory;
+- calibration metrics: Brier, log score, ECE / reliability;
+- owned telemetry-enabled Chocolate Doom build with richer native events;
+- non-DOOM structured environments for true transfer tests;
+- portable offline-distilled tiny checkpoints;
+- controlled comparison against Laya / Jev-style typed-decision baselines.
