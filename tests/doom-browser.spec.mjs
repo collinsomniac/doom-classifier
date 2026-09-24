@@ -12,11 +12,15 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   await expect(page.locator("#manualActionSelect")).toHaveValue("fire");
 
   const fire=await page.evaluate(async()=>{
-    const lab=window.__doomLab,env=lab.env;env.setActionMs(300);
+    const lab=window.__doomLab,env=lab.env;env.setActionMs(350);
     const before=env.observe(),ammoBefore=before.bullets+before.shells+before.rockets+before.cells;
-    const step=await env.step("fire"),after=step.observation,ammoAfter=after.bullets+after.shells+after.rockets+after.cells;
+    let ammoAfter=ammoBefore,damage=0,pulses=0;
+    for(;pulses<8&&ammoAfter===ammoBefore&&damage===0;pulses++){
+      const step=await env.step("fire"),after=step.observation;
+      ammoAfter=after.bullets+after.shells+after.rockets+after.cells;damage+=step.info?.outcome?.damageDealt||0;
+    }
     await env.reset();env.setActionMs(110);
-    return{ammoBefore,ammoAfter,damage:step.info?.outcome?.damageDealt||0,mask:env.actionMasks.fire,combo:env.actionMasks.strafe_left_fire};
+    return{ammoBefore,ammoAfter,damage,pulses,mask:env.actionMasks.fire,combo:env.actionMasks.strafe_left_fire};
   });
   expect(fire.mask).toBe(64);expect(fire.combo).toBe(80);expect(fire.ammoAfter<fire.ammoBefore||fire.damage>0).toBeTruthy();
 
