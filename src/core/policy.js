@@ -113,6 +113,7 @@ export class SemanticResidualPolicy{
     if(!this.q.distill)return null;
     let result=null;
     for(let i=0;i<steps;i++)result=this.q.distill(obs,scores,{strength:.5,temporal});
+    this.q.syncTarget?.();
     return result;
   }
   async primeTeacher(obs,{steps=Math.max(4,this.distillSteps),temporal=null}={}){
