@@ -43,6 +43,8 @@ jobs:
         run: node tests/schema-transfer.mjs
       - name: Run compiled semantic vector invariants
         run: node tests/semantic-vectors.mjs
+      - name: Run categorical semantic invariants
+        run: node tests/categorical-semantics.mjs
       - name: Benchmark action cardinality
         run: node tests/action-cardinality.mjs
       - name: Run adaptation benchmark

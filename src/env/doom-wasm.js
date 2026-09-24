@@ -2,7 +2,24 @@ const RUNTIME_REPOSITORY="lukaske/jev-doom-agent";
 const RUNTIME_COMMIT="318c32a24851444c1170bf083671c38723f3a35a";
 const RAW_BASE="https://raw.githubusercontent.com/"+RUNTIME_REPOSITORY+"/"+RUNTIME_COMMIT+"/public/engine";
 
-const CONTROL=Object.freeze({forward:1,back:2,turn_left:4,turn_right:8,strafe_left:16,strafe_right:32,fire:64,use:128,wait:0});
+const BITS=Object.freeze({FORWARD:1,BACK:2,TURN_LEFT:4,TURN_RIGHT:8,STRAFE_LEFT:16,STRAFE_RIGHT:32,FIRE:64,USE:128});
+const ACTION_SPECS=Object.freeze([
+  {id:"forward",label:"forward",description:"hold forward movement",mask:BITS.FORWARD},
+  {id:"back",label:"back",description:"hold backward movement",mask:BITS.BACK},
+  {id:"turn_left",label:"turn left",description:"turn the view left",mask:BITS.TURN_LEFT},
+  {id:"turn_right",label:"turn right",description:"turn the view right",mask:BITS.TURN_RIGHT},
+  {id:"strafe_left",label:"strafe left",description:"move sideways left while keeping the current view direction",mask:BITS.STRAFE_LEFT},
+  {id:"strafe_right",label:"strafe right",description:"move sideways right while keeping the current view direction",mask:BITS.STRAFE_RIGHT},
+  {id:"fire",label:"fire",description:"fire the currently equipped weapon",mask:BITS.FIRE},
+  {id:"forward_fire",label:"forward + fire",description:"hold forward movement and weapon fire at the same time",mask:BITS.FORWARD|BITS.FIRE},
+  {id:"back_fire",label:"back + fire",description:"hold backward movement and weapon fire at the same time",mask:BITS.BACK|BITS.FIRE},
+  {id:"strafe_left_fire",label:"strafe left + fire",description:"hold left strafe and weapon fire at the same time",mask:BITS.STRAFE_LEFT|BITS.FIRE},
+  {id:"strafe_right_fire",label:"strafe right + fire",description:"hold right strafe and weapon fire at the same time",mask:BITS.STRAFE_RIGHT|BITS.FIRE},
+  {id:"turn_left_fire",label:"turn left + fire",description:"turn left and fire the equipped weapon at the same time",mask:BITS.TURN_LEFT|BITS.FIRE},
+  {id:"turn_right_fire",label:"turn right + fire",description:"turn right and fire the equipped weapon at the same time",mask:BITS.TURN_RIGHT|BITS.FIRE},
+  {id:"use",label:"use",description:"activate or interact with something directly in front of the player",mask:BITS.USE},
+  {id:"wait",label:"wait",description:"apply no movement, turning, firing, or use input for this decision interval",mask:0}
+]);
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
 
@@ -12,35 +29,34 @@ async function fetchAsset(name,type="arrayBuffer"){
   return type==="text"?response.text():response.arrayBuffer();
 }
 function mkdir(fs,path){try{fs.mkdir(path)}catch{}}
+function hostileHealth(raw){
+  return (raw?.world?.entities||[]).reduce((sum,e)=>sum+(e.enemy&&Number(e.health)>0?Number(e.health):0),0);
+}
 
 export class DoomWasmArena{
-  constructor(module,{actionMs=120,settleMs=20}={}){
-    this.module=module;this.actionMs=actionMs;this.settleMs=settleMs;
+  constructor(module,{actionMs=110,settleMs=16,contentName="Freedoom 0.13.0"}={}){
+    this.module=module;this.actionMs=actionMs;this.settleMs=settleMs;this.contentName=contentName;
     this.runtime={repository:RUNTIME_REPOSITORY,commit:RUNTIME_COMMIT};
-    this.actions=[
-      {id:"forward",label:"forward",description:"move straight ahead using the current view direction"},
-      {id:"back",label:"back",description:"move backward away from the current view direction"},
-      {id:"turn_left",label:"turn left",description:"rotate the player's view to the left"},
-      {id:"turn_right",label:"turn right",description:"rotate the player's view to the right"},
-      {id:"strafe_left",label:"strafe left",description:"move sideways to the left without intentionally changing view direction"},
-      {id:"strafe_right",label:"strafe right",description:"move sideways to the right without intentionally changing view direction"},
-      {id:"fire",label:"fire",description:"fire the currently equipped weapon"},
-      {id:"use",label:"use",description:"activate or interact with something directly in front of the player"},
-      {id:"wait",label:"wait",description:"apply no movement, turning, firing, or use input for this decision interval"}
-    ];
+    this.actions=ACTION_SPECS.map(({mask,...action})=>action);
+    this.actionMasks=Object.fromEntries(ACTION_SPECS.map(action=>[action.id,action.mask]));
     this.schema={
-      objective:"Stay alive, avoid unnecessary damage, neutralize hostile threats when useful, use resources efficiently, and continue making progress through the environment.",
+      objective:"Stay alive, neutralize hostile threats, conserve useful resources, interact with the environment when appropriate, and make progress through the level.",
       fields:[
         {id:"health",label:"health",description:"remaining player vitality",min:0,max:200},
         {id:"armor",label:"armor",description:"remaining protective armor",min:0,max:200},
-        {id:"bullets",label:"bullets",description:"available bullet ammunition",min:0,max:400},
-        {id:"shells",label:"shells",description:"available shotgun shell ammunition",min:0,max:100},
-        {id:"rockets",label:"rockets",description:"available rocket ammunition",min:0,max:100},
-        {id:"cells",label:"cells",description:"available energy-cell ammunition",min:0,max:600},
-        {id:"recent_damage",label:"recent damage",description:"damage registered by the engine in the recent combat window",min:0,max:100},
-        {id:"weapon",label:"equipped weapon",description:"numeric engine identifier of the currently equipped weapon",min:0,max:8},
+        {id:"bullets",label:"bullets",description:"available pistol or chaingun ammunition",min:0,max:400},
+        {id:"shells",label:"shells",description:"available shotgun ammunition",min:0,max:100},
+        {id:"rockets",label:"rockets",description:"available rocket launcher ammunition",min:0,max:100},
+        {id:"cells",label:"cells",description:"available plasma or BFG energy ammunition",min:0,max:600},
+        {id:"recent_damage",label:"recent damage received",description:"damage registered on the player in the recent engine combat window",min:0,max:100},
+        {id:"recent_damage_dealt",label:"recent hostile damage dealt",description:"hostile hit points removed during the previous control interval",min:0,max:200},
+        {id:"under_fire",label:"under fire",description:"whether the engine currently reports recent incoming damage",min:0,max:1},
+        {id:"weapon",label:"equipped weapon",description:"weapon currently equipped by the player",enum:{
+          0:"fist",1:"pistol",2:"shotgun",3:"chaingun",4:"rocket launcher",5:"plasma rifle",6:"BFG 9000",7:"chainsaw",8:"super shotgun"
+        }},
         {id:"player_x",label:"player x position",description:"player world x coordinate",scale:2048},
         {id:"player_y",label:"player y position",description:"player world y coordinate",scale:2048},
+        {id:"player_z",label:"player z position",description:"player world vertical coordinate",scale:256},
         {id:"velocity_x",label:"player x velocity",description:"player horizontal x momentum",scale:32},
         {id:"velocity_y",label:"player y velocity",description:"player horizontal y momentum",scale:32},
         {id:"heading",label:"player heading",description:"player view angle as a signed normalized turn",min:-1,max:1},
@@ -48,9 +64,13 @@ export class DoomWasmArena{
       ],
       collections:[
         {
-          id:"entities",label:"world entities",description:"dynamic actors, objects and pickups represented relative to the player",
+          id:"entities",label:"world entities",description:"dynamic actors, objects and pickups represented with absolute and player-relative state",
           fields:[
-            {id:"type",label:"entity type",description:"numeric engine object type identifier",scale:64},
+            {id:"engine_record_id",label:"engine record id",description:"numeric record identifier supplied by the engine",scale:128},
+            {id:"type",label:"entity type",description:"numeric engine object type identifier",scale:128},
+            {id:"x",label:"entity x position",description:"entity absolute world x coordinate",scale:2048},
+            {id:"y",label:"entity y position",description:"entity absolute world y coordinate",scale:2048},
+            {id:"z",label:"entity z position",description:"entity absolute world vertical coordinate",scale:256},
             {id:"relative_x",label:"relative x",description:"entity x displacement from the player",scale:1024},
             {id:"relative_y",label:"relative y",description:"entity y displacement from the player",scale:1024},
             {id:"relative_z",label:"relative z",description:"entity z displacement from the player",scale:256},
@@ -62,7 +82,7 @@ export class DoomWasmArena{
             {id:"distance",label:"distance",description:"distance from player to entity",scale:1024},
             {id:"relative_angle",label:"relative angle",description:"signed angular displacement from the player's view",min:-1,max:1},
             {id:"visible",label:"line of sight",description:"whether the engine reports direct line of sight",min:0,max:1},
-            {id:"countkill",label:"kill-count actor flag",description:"whether this engine actor counts toward the level kill total",min:0,max:1},
+            {id:"countkill",label:"hostile actor flag",description:"whether this actor counts toward the level hostile kill total",min:0,max:1},
             {id:"pickup",label:"collectible flag",description:"whether this engine object is collectible or special",min:0,max:1},
             {id:"targeting_player",label:"targets player",description:"whether this actor currently targets the player",min:0,max:1}
           ]
@@ -70,10 +90,12 @@ export class DoomWasmArena{
         {
           id:"geometry",label:"world geometry",description:"map line segments represented relative to the player",
           fields:[
+            {id:"line_id",label:"line id",description:"numeric map line identifier",scale:2048},
             {id:"x1",label:"line endpoint one x",description:"first endpoint x displacement from player",scale:1024},
             {id:"y1",label:"line endpoint one y",description:"first endpoint y displacement from player",scale:1024},
             {id:"x2",label:"line endpoint two x",description:"second endpoint x displacement from player",scale:1024},
             {id:"y2",label:"line endpoint two y",description:"second endpoint y displacement from player",scale:1024},
+            {id:"flags",label:"line flags",description:"numeric engine bit flags attached to this map line",scale:1024},
             {id:"blocking",label:"blocking geometry",description:"whether this line blocks player movement",min:0,max:1},
             {id:"special",label:"interactive line special",description:"numeric engine special action attached to the line",scale:32},
             {id:"tag",label:"line tag",description:"numeric map linkage tag attached to the line",scale:32}
@@ -81,10 +103,10 @@ export class DoomWasmArena{
         }
       ]
     };
-    this.lastRaw=null;this.lastObservation=null;
+    this.lastRaw=null;this.lastObservation=null;this.lastDamageDealt=0;this.lastOutcome=null;
   }
 
-  static async boot({canvas,onProgress=()=>{},actionMs=120}={}){
+  static async boot({canvas,onProgress=()=>{},actionMs=110,iwadFile=null,contentName=null}={}){
     if(!canvas)throw new Error("DoomWasmArena.boot requires a canvas");
     onProgress("fetching pinned Chocolate Doom runtime");
     const [source,wasmBinary,dataPackage]=await Promise.all([fetchAsset("chocolate-doom.js","text"),fetchAsset("chocolate-doom.wasm"),fetchAsset("chocolate-doom.data")]);
@@ -92,18 +114,26 @@ export class DoomWasmArena{
     const blobUrl=URL.createObjectURL(new Blob([source],{type:"text/javascript"}));
     let createModule;try{({default:createModule}=await import(blobUrl))}finally{URL.revokeObjectURL(blobUrl)}
     if(typeof createModule!=="function")throw new Error("Chocolate Doom module factory was not exported");
+    const useCustom=!!iwadFile;
     const module=await createModule({
       canvas,keyboardListeningElement:canvas,wasmBinary,locateFile:path=>RAW_BASE+"/"+path,getPreloadedPackage:()=>dataPackage,noInitialRun:true,
-      preRun:[m=>{mkdir(m.FS,"/config");mkdir(m.FS,"/savegames");m.FS.writeFile("/config/default.cfg","fullscreen 0\ngrabmouse 0\nuse_mouse 0\n");m.FS.writeFile("/config/chocolate-doom.cfg","aspect_ratio_correct 1\ninteger_scaling 0\nscreenblocks 10\nsmooth_pixel_scaling 0\nforce_software_renderer 1\n")}],
+      preRun:[m=>{
+        mkdir(m.FS,"/config");mkdir(m.FS,"/savegames");mkdir(m.FS,"/iwads");
+        m.FS.writeFile("/config/default.cfg","fullscreen 0\ngrabmouse 0\nuse_mouse 0\n");
+        m.FS.writeFile("/config/chocolate-doom.cfg","aspect_ratio_correct 1\ninteger_scaling 0\nscreenblocks 10\nsmooth_pixel_scaling 0\nforce_software_renderer 1\n");
+        if(useCustom)m.FS.writeFile("/iwads/user.wad",new Uint8Array(iwadFile));
+      }],
       print:()=>{},printErr:message=>console.warn("[doom]",message)
     });
-    onProgress("starting Freedoom");
-    try{module.callMain(["-window","-iwad","/iwads/freedoom2.wad","-warp","1","-skill","1","-nomusic","-nosound","-config","/config/default.cfg","-extraconfig","/config/chocolate-doom.cfg"])}
+    const iwadPath=useCustom?"/iwads/user.wad":"/iwads/freedoom2.wad";
+    onProgress("starting "+(useCustom?(contentName||"user IWAD"):"Freedoom"));
+    try{module.callMain(["-window","-iwad",iwadPath,"-warp","1","-skill","1","-nomusic","-nosound","-config","/config/default.cfg","-extraconfig","/config/chocolate-doom.cfg"])}
     catch(error){const message=String(error);if(!message.includes("unwind")&&!message.includes("SimulateInfiniteLoop"))throw error}
-    const arena=new DoomWasmArena(module,{actionMs});await arena.waitUntilReady();await arena.reset();onProgress("ready");return arena;
+    const arena=new DoomWasmArena(module,{actionMs,contentName:useCustom?(contentName||"user-provided IWAD"):"Freedoom 0.13.0"});
+    await arena.waitUntilReady();await arena.reset();onProgress("ready");return arena;
   }
 
-  setActionMs(ms){this.actionMs=clamp(Number(ms)||120,35,1000)}
+  setActionMs(ms){this.actionMs=clamp(Number(ms)||110,35,1000)}
   readRaw(){
     const json=this.module.ccall("PromptFPS_Observation","string",[],[]);
     const raw=JSON.parse(String(json));if(!raw.ready)throw new Error("Doom telemetry bridge is not ready");return raw;
@@ -117,33 +147,47 @@ export class DoomWasmArena{
     const p=raw.player||{},all=raw.world?.entities||[],lines=raw.world?.lines||[];
     const heading=((Number(p.angle||0)>>>0)/4294967296)*2-1;
     const entities=all.map(e=>({
-      type:Number(e.type||0),relative_x:Number(e.relative_x||0),relative_y:Number(e.relative_y||0),relative_z:Number(e.z||0)-Number(p.z||0),
+      engine_record_id:Number(e.id||0),type:Number(e.type||0),x:Number(e.x||0),y:Number(e.y||0),z:Number(e.z||0),
+      relative_x:Number(e.relative_x||0),relative_y:Number(e.relative_y||0),relative_z:Number(e.z||0)-Number(p.z||0),
       velocity_x:Number(e.vx||0),velocity_y:Number(e.vy||0),radius:Number(e.radius||0),height:Number(e.height||0),health:Number(e.health||0),
       distance:Number(e.distance||0),relative_angle:clamp(Number(e.relative_angle||0)/2147483648,-1,1),visible:e.visible?1:0,countkill:e.enemy?1:0,pickup:e.pickup?1:0,targeting_player:e.targeting_player?1:0
     }));
     const geometry=lines.map(line=>({
-      x1:Number(line.x1||0)-Number(p.x||0),y1:Number(line.y1||0)-Number(p.y||0),x2:Number(line.x2||0)-Number(p.x||0),y2:Number(line.y2||0)-Number(p.y||0),
-      blocking:line.blocking?1:0,special:Number(line.special||0),tag:Number(line.tag||0)
+      line_id:Number(line.id||0),x1:Number(line.x1||0)-Number(p.x||0),y1:Number(line.y1||0)-Number(p.y||0),x2:Number(line.x2||0)-Number(p.x||0),y2:Number(line.y2||0)-Number(p.y||0),
+      flags:Number(line.flags||0),blocking:line.blocking?1:0,special:Number(line.special||0),tag:Number(line.tag||0)
     }));
     return{
       health:Number(p.health||0),armor:Number(p.armor||0),bullets:Number(p.ammo?.bullets||0),shells:Number(p.ammo?.shells||0),rockets:Number(p.ammo?.rockets||0),cells:Number(p.ammo?.cells||0),
-      recent_damage:Number(p.recent_damage||0),weapon:Number(p.weapon||0),player_x:Number(p.x||0),player_y:Number(p.y||0),velocity_x:Number(p.vx||0),velocity_y:Number(p.vy||0),heading,kills:Number(p.kills||0),
+      recent_damage:Number(p.recent_damage||0),recent_damage_dealt:Number(this.lastDamageDealt||0),under_fire:p.under_fire?1:0,weapon:Number(p.weapon||0),
+      player_x:Number(p.x||0),player_y:Number(p.y||0),player_z:Number(p.z||0),velocity_x:Number(p.vx||0),velocity_y:Number(p.vy||0),heading,kills:Number(p.kills||0),
       _collections:{entities,geometry}
     };
   }
   observe(){const raw=this.readRaw();this.lastRaw=raw;this.lastObservation=this.flatten(raw);return this.lastObservation}
-  reward(previous,next){
-    const prev=previous?.player||{},cur=next?.player||{};const healthDelta=Number(cur.health||0)-Number(prev.health||0),killDelta=Math.max(0,Number(cur.kills||0)-Number(prev.kills||0));
-    let reward=-.002+killDelta*2;if(healthDelta<0)reward+=healthDelta/50;else if(healthDelta>0)reward+=healthDelta/200;if(Number(cur.health||0)<=0)reward-=2;return reward;
+  outcome(previous,next){
+    const prev=previous?.player||{},cur=next?.player||{};
+    const healthDelta=Number(cur.health||0)-Number(prev.health||0);
+    const killDelta=Math.max(0,Number(cur.kills||0)-Number(prev.kills||0));
+    const damageDealt=Math.max(0,hostileHealth(previous)-hostileHealth(next));
+    let reward=-.001+damageDealt*.02+killDelta*1.25;
+    if(healthDelta<0)reward+=healthDelta*.03;else if(healthDelta>0)reward+=healthDelta*.005;
+    if(Number(cur.health||0)<=0)reward-=2;
+    return{reward,damageDealt,healthDelta,killDelta,dead:Number(cur.health||0)<=0};
   }
+  reward(previous,next){return this.outcome(previous,next).reward}
   async step(actionId){
-    if(!(actionId in CONTROL))throw new Error("Unsupported Doom action: "+actionId);
-    const before=this.lastRaw||this.readRaw();this.module.ccall("PromptFPS_SetControls",null,["number"],[CONTROL[actionId]]);
+    if(!(actionId in this.actionMasks))throw new Error("Unsupported Doom action: "+actionId);
+    const before=this.lastRaw||this.readRaw();
+    this.module.ccall("PromptFPS_SetControls",null,["number"],[this.actionMasks[actionId]]);
     await sleep(this.actionMs);this.module.ccall("PromptFPS_SetControls",null,["number"],[0]);if(this.settleMs)await sleep(this.settleMs);
-    const after=this.readRaw();this.lastRaw=after;this.lastObservation=this.flatten(after);
-    return{observation:this.lastObservation,reward:this.reward(before,after),done:Number(after.player?.health||0)<=0,info:{raw:after,engine:after.engine||"Chocolate Doom"}};
+    const after=this.readRaw(),outcome=this.outcome(before,after);
+    this.lastDamageDealt=outcome.damageDealt;this.lastOutcome=outcome;this.lastRaw=after;this.lastObservation=this.flatten(after);
+    return{observation:this.lastObservation,reward:outcome.reward,done:outcome.dead,info:{raw:after,outcome,engine:after.engine||"Chocolate Doom"}};
   }
-  async reset(){this.module.ccall("PromptFPS_SetControls",null,["number"],[0]);this.module.ccall("PromptFPS_SetStart",null,[],[]);await sleep(100);const raw=await this.waitUntilReady();this.lastRaw=raw;this.lastObservation=this.flatten(raw);return this.lastObservation}
+  async reset(){
+    this.module.ccall("PromptFPS_SetControls",null,["number"],[0]);this.module.ccall("PromptFPS_SetStart",null,[],[]);
+    this.lastDamageDealt=0;this.lastOutcome=null;await sleep(100);const raw=await this.waitUntilReady();this.lastRaw=raw;this.lastObservation=this.flatten(raw);return this.lastObservation;
+  }
 }
 
 export const DOOM_RUNTIME_PROVENANCE=Object.freeze({repository:RUNTIME_REPOSITORY,commit:RUNTIME_COMMIT,engine:"Chocolate Doom 3.1.1",content:"Freedoom 0.13.0",note:"Runtime is fetched from a pinned public research build; policy/controller code is implemented independently in doom-classifier."});

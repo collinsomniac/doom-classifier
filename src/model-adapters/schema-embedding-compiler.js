@@ -31,9 +31,9 @@ function rowsFromTensor(output,count){
 function cloneSchema(schema){
   return{
     ...schema,
-    fields:(schema.fields||[]).map(field=>({...field})),
-    actionFields:(schema.actionFields||[]).map(field=>({...field})),
-    collections:(schema.collections||[]).map(collection=>({...collection,fields:(collection.fields||[]).map(field=>({...field}))}))
+    fields:(schema.fields||[]).map(field=>({...field,enum:field.enum?{...field.enum}:field.enum})),
+    actionFields:(schema.actionFields||[]).map(field=>({...field,enum:field.enum?{...field.enum}:field.enum})),
+    collections:(schema.collections||[]).map(collection=>({...collection,fields:(collection.fields||[]).map(field=>({...field,enum:field.enum?{...field.enum}:field.enum}))}))
   };
 }
 
@@ -88,12 +88,19 @@ export class MiniLMSchemaCompiler{
     const jobs=[];
     const add=(target,key,text)=>{const normalized=String(text||"").trim();if(normalized)jobs.push({target,key,text:normalized})};
 
+    const addField=field=>{
+      const base=describeField(field);add(field,"semanticVector",base);
+      if(field.enum){
+        field.enumSemanticVectors={};
+        for(const [value,label] of Object.entries(field.enum))add(field.enumSemanticVectors,value,base+" category "+label);
+      }
+    };
     add(nextSchema,"objectiveSemanticVector",nextSchema.objective||"environment objective");
-    for(const field of nextSchema.fields)add(field,"semanticVector",describeField(field));
-    for(const field of nextSchema.actionFields)add(field,"semanticVector",describeField(field));
+    for(const field of nextSchema.fields)addField(field);
+    for(const field of nextSchema.actionFields)addField(field);
     for(const collection of nextSchema.collections){
       add(collection,"semanticVector",describeCollection(collection));
-      for(const field of collection.fields)add(field,"semanticVector",describeField(field));
+      for(const field of collection.fields)addField(field);
     }
     for(const action of nextActions)add(action,"semanticVector",describeAction(action));
 

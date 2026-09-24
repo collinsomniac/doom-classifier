@@ -35,13 +35,30 @@ function normalizeValue(value,field={}){
   const scale=Math.max(1e-6,Number(field.scale)||1),x=v/scale;return x/(1+Math.abs(x));
 }
 function compileFields(fields,dim){
-  return(fields||[]).map(field=>({field,valueSparse:compileSparse(descriptor(field),dim,1),presentSparse:compileSparse(descriptor(field)+" present",dim,.04),semanticDense:projectSemanticVector(field.semanticVector,dim)}));
+  return(fields||[]).map(field=>({
+    field,
+    valueSparse:compileSparse(descriptor(field),dim,1),
+    presentSparse:compileSparse(descriptor(field)+" present",dim,.04),
+    semanticDense:projectSemanticVector(field.semanticVector,dim),
+    enumValues:Object.fromEntries(Object.entries(field.enum||{}).map(([key,label])=>[String(key),{
+      label,
+      sparse:compileSparse(descriptor(field)+" category "+label,dim,1),
+      semanticDense:projectSemanticVector(field.enumSemanticVectors?.[key],dim)
+    }]))
+  }));
 }
 function vectorFromCompiled(compiledFields,record,dim,prefixSparse=null,prefixDense=null){
   const out=new Float32Array(dim);if(prefixSparse)addSparse(out,prefixSparse,1);if(prefixDense)addDense(out,prefixDense,.9);
   for(const compiled of compiledFields){
     const {field}=compiled;if(record==null||!Object.prototype.hasOwnProperty.call(record,field.id))continue;
-    const normalized=normalizeValue(record[field.id],field);addSparse(out,compiled.valueSparse,normalized);addDense(out,compiled.semanticDense,normalized*.9);addSparse(out,compiled.presentSparse,1);
+    const raw=record[field.id],enumValue=compiled.enumValues?.[String(raw)];
+    addSparse(out,compiled.presentSparse,1);
+    if(enumValue){
+      addSparse(out,compiled.valueSparse,.2);addDense(out,compiled.semanticDense,.2);
+      addSparse(out,enumValue.sparse,1);addDense(out,enumValue.semanticDense,1.1);
+    }else{
+      const normalized=normalizeValue(raw,field);addSparse(out,compiled.valueSparse,normalized);addDense(out,compiled.semanticDense,normalized*.9);
+    }
   }
   return out;
 }

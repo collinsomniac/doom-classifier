@@ -10,6 +10,10 @@ function normalizeProgress(info){
   if(Number.isFinite(info.loaded)&&Number.isFinite(info.total)&&info.total>0)return Math.max(0,Math.min(100,100*info.loaded/info.total));
   return null;
 }
+function fieldValueText(field,value){
+  const category=field?.enum?.[String(value)];
+  return category!==undefined?String(category)+" (code "+value+")":Number(value).toFixed(3);
+}
 function normalized(v,field={}){
   v=Number(v);if(!Number.isFinite(v))v=0;
   if(Number.isFinite(field.min)&&Number.isFinite(field.max)&&field.max!==field.min)return Math.max(-1,Math.min(1,((v-field.min)/(field.max-field.min))*2-1));
@@ -90,7 +94,7 @@ export class TransformersNLIAdapter{
       const value=Number(observation[field.id]??0),label=field.label||field.id;
       let relative="";
       if(Number.isFinite(field.min)&&Number.isFinite(field.max)&&field.max!==field.min)relative=" ["+Math.round(((value-field.min)/(field.max-field.min))*100)+"% of declared range]";
-      lines.push("- "+label+"="+value.toFixed(3)+relative+(field.description?" ("+field.description+")":""));
+      lines.push("- "+label+"="+fieldValueText(field,value)+(field.enum?"":relative)+(field.description?" ("+field.description+")":""));
     }
     for(const collection of this.schema.collections||[]){
       const records=observation?._collections?.[collection.id]||[];
