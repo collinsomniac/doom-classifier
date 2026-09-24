@@ -3,12 +3,13 @@ import {HashSemanticAdapter} from "./core/semantic.js";
 import {SemanticResidualPolicy} from "./core/policy.js";
 import {ExperimentController} from "./core/controller.js";
 import {TransformersNLIAdapter,NLI_PRESETS} from "./model-adapters/transformers-nli.js";
+import {MiniLMSchemaCompiler,SCHEMA_EMBEDDING_PRESET} from "./model-adapters/schema-embedding-compiler.js";
 
 const $=id=>document.getElementById(id);
-const ui={boot:$("bootBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),runtime:$("runtimeStatus"),bootStatus:$("bootStatus"),path:$("pathSelect"),residual:$("residualToggle"),training:$("trainingToggle"),memory:$("memoryToggle"),explore:$("exploreToggle"),actionMs:$("actionMs"),actionMsOut:$("actionMsOut"),bars:$("actionBars"),chosen:$("chosenAction"),entropy:$("entropy"),margin:$("margin"),epistemic:$("epistemic"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),state:$("stateTable"),objective:$("objectiveText"),steps:$("steps"),episodes:$("episodes"),ret:$("return"),updates:$("updates"),lastReward:$("lastReward"),log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot")};
-let env=null,policy=null,controller=null,hashSemantic=null;
+const ui={boot:$("bootBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),runtime:$("runtimeStatus"),bootStatus:$("bootStatus"),path:$("pathSelect"),residual:$("residualToggle"),training:$("trainingToggle"),memory:$("memoryToggle"),explore:$("exploreToggle"),actionMs:$("actionMs"),actionMsOut:$("actionMsOut"),bars:$("actionBars"),chosen:$("chosenAction"),entropy:$("entropy"),margin:$("margin"),epistemic:$("epistemic"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),schemaCompile:$("schemaCompileBtn"),schemaStatus:$("schemaStatus"),state:$("stateTable"),objective:$("objectiveText"),steps:$("steps"),episodes:$("episodes"),ret:$("return"),updates:$("updates"),lastReward:$("lastReward"),log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot")};
+let env=null,policy=null,controller=null,hashSemantic=null,schemaCompiled=false;
 
-function setReadyControls(ready){for(const el of [ui.start,ui.step,ui.reset,ui.loadModel,ui.export,ui.path])el.disabled=!ready}
+function setReadyControls(ready){for(const el of [ui.start,ui.step,ui.reset,ui.loadModel,ui.schemaCompile,ui.export,ui.path])el.disabled=!ready}
 function setRuntime(text,error=false){ui.runtime.textContent=text;ui.dot.style.background=error?"#ff6b6b":"#d9ff5a"}
 function buildBars(){ui.bars.innerHTML="";if(!env)return;for(const a of env.actions){const row=document.createElement("div");row.className="bar-row";const label=document.createElement("span");label.textContent=a.label;const track=document.createElement("div");track.className="bar-track";const fill=document.createElement("div");fill.className="bar-fill";track.append(fill);const value=document.createElement("span");value.textContent="0.000";row.append(label,track,value);ui.bars.append(row)}}
 function render(){
@@ -48,9 +49,30 @@ async function boot(){
     controller=new ExperimentController({environment:env,policy,hz:8});controller.useResidual=ui.residual.checked;controller.training=ui.training.checked;controller.memory=ui.memory.checked;controller.explore=ui.explore.checked;
     await primeCurrentTeacher("hash teacher");bindController();buildBars();setReadyControls(true);setRuntime("READY");
     const counts=env.lastObservation?._collections||{};ui.bootStatus.textContent=DOOM_RUNTIME_PROVENANCE.engine+" + "+DOOM_RUNTIME_PROVENANCE.content+" · "+policy.q.parameterCount()+" neural params · "+(counts.entities?.length||0)+" entities + "+(counts.geometry?.length||0)+" geometry records";
-    ui.modelStatus.textContent="adaptive hash teacher ready · bootstrap "+policy.lastTeacherLatencyMs.toFixed(1)+" ms";render();
+    ui.modelStatus.textContent="adaptive hash teacher ready · bootstrap "+policy.lastTeacherLatencyMs.toFixed(1)+" ms";ui.schemaStatus.textContent="lexical schema projection · optional MiniLM compile";render();
   }catch(error){ui.boot.disabled=false;setRuntime("BOOT FAILED",true);ui.bootStatus.textContent=String(error?.message||error);ui.log.textContent=String(error?.stack||error)}
 }
+async function compileSchemaSemantics(){
+  if(!policy||!controller||!env)return;
+  controller.pause();setReadyControls(false);ui.schemaStatus.textContent="loading "+SCHEMA_EMBEDDING_PRESET.label+" · "+SCHEMA_EMBEDDING_PRESET.approx;
+  const compiler=new MiniLMSchemaCompiler({onProgress:info=>{ui.schemaStatus.textContent=(info.status||"working")+(info.message?" · "+info.message:"")}});
+  try{
+    await compiler.load();
+    const compiled=await compiler.compile(env.schema,env.actions);
+    policy.reconfigure({schema:compiled.schema,actions:compiled.actions});policy.resetLearning();await controller.reset({learning:false});
+    const prime=await primeCurrentTeacher("compiled schema");
+    schemaCompiled=true;
+    ui.schemaStatus.textContent="MiniLM compiled · "+compiled.meta.bindings+" bindings · "+compiled.meta.dimensions+"D → fixed neural schema · "+compiled.meta.backend;
+    ui.modelStatus.textContent=ui.path.value+" "+policy.semantic.name+" ready · bootstrap "+prime.ms.toFixed(1)+" ms";
+    render();
+  }catch(error){
+    ui.schemaStatus.textContent="schema compile failed · "+String(error?.message||error);
+  }finally{
+    await compiler.dispose().catch(()=>{});
+    setReadyControls(true);
+  }
+}
+
 async function switchBackbone(){
   if(!policy||!controller)return;controller.pause();setReadyControls(false);ui.modelProgress.value=0;const selected=ui.modelSelect.value,previous=policy.semantic;
   try{
@@ -75,7 +97,7 @@ async function switchBackbone(){
 
 ui.boot.addEventListener("click",boot);ui.start.addEventListener("click",()=>controller?.state==="RUNNING"?controller.pause():controller?.start());
 ui.step.addEventListener("click",async()=>{if(!controller)return;if(controller.state==="RUNNING")controller.pause();await controller.tick()});
-ui.reset.addEventListener("click",async()=>{if(controller)await controller.reset({learning:false});render()});ui.loadModel.addEventListener("click",switchBackbone);
+ui.reset.addEventListener("click",async()=>{if(controller)await controller.reset({learning:false});render()});ui.loadModel.addEventListener("click",switchBackbone);ui.schemaCompile.addEventListener("click",compileSchemaSemantics);
 ui.path.addEventListener("change",()=>{if(policy){policy.setInferenceMode(ui.path.value);ui.modelStatus.textContent=ui.path.value+" inference · "+policy.semantic.name}});
 ui.residual.addEventListener("change",()=>{if(controller)controller.useResidual=ui.residual.checked});ui.training.addEventListener("change",()=>{if(controller)controller.training=ui.training.checked});ui.memory.addEventListener("change",()=>{if(controller)controller.memory=ui.memory.checked});ui.explore.addEventListener("change",()=>{if(controller)controller.explore=ui.explore.checked});ui.actionMs.addEventListener("input",()=>{ui.actionMsOut.value=ui.actionMs.value+" ms";env?.setActionMs(ui.actionMs.value)});
 ui.export.addEventListener("click",()=>{if(!controller)return;const blob=new Blob([controller.exportTrace()],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="doom-real-trace-"+Date.now()+".json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)});
