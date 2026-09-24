@@ -134,7 +134,7 @@ export class TransformersNLIAdapter{
   }
   async score(observation){
     if(!this.classifier)await this.load();
-    const output=await this.classifier(this.boundedPremise(observation),this.labels,{multi_label:false,hypothesis_template:"For the stated objective and current state, choosing {} is an appropriate next action."});
+    const output=await this.classifier(this.boundedPremise(observation),this.labels,{multi_label:false,hypothesis_template:"Given only the stated current state and objective, without assuming unobserved facts, choosing {} is useful, feasible, and justified now."});
     const scores=new Map(output.labels.map((label,i)=>[label,output.scores[i]])),floor=1e-7;
     return this.labels.map(label=>Math.log(Math.max(floor,scores.get(label)??floor)));
   }
