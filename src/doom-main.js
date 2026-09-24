@@ -6,98 +6,206 @@ import {TransformersNLIAdapter,NLI_PRESETS} from "./model-adapters/transformers-
 import {MiniLMSchemaCompiler,SCHEMA_EMBEDDING_PRESET} from "./model-adapters/schema-embedding-compiler.js";
 
 const $=id=>document.getElementById(id);
-const ui={boot:$("bootBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),runtime:$("runtimeStatus"),bootStatus:$("bootStatus"),path:$("pathSelect"),residual:$("residualToggle"),training:$("trainingToggle"),memory:$("memoryToggle"),explore:$("exploreToggle"),actionMs:$("actionMs"),actionMsOut:$("actionMsOut"),bars:$("actionBars"),chosen:$("chosenAction"),entropy:$("entropy"),margin:$("margin"),epistemic:$("epistemic"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),schemaCompile:$("schemaCompileBtn"),schemaStatus:$("schemaStatus"),state:$("stateTable"),objective:$("objectiveText"),steps:$("steps"),episodes:$("episodes"),ret:$("return"),updates:$("updates"),lastReward:$("lastReward"),log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot")};
-let env=null,policy=null,controller=null,hashSemantic=null,schemaCompiled=false;
+const ui={
+  boot:$("bootBtn"),prepare:$("prepareBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),runtime:$("runtimeStatus"),runtimeTitle:$("runtimeTitle"),bootStatus:$("bootStatus"),
+  iwad:$("iwadInput"),iwadStatus:$("iwadStatus"),engineChip:$("engineChip"),schemaChip:$("schemaChip"),teacherChip:$("teacherChip"),policyChip:$("policyChip"),prepareStatus:$("prepareStatus"),
+  profile:$("profileSelect"),applyProfile:$("applyProfileBtn"),profileHint:$("profileHint"),teacherMode:$("teacherModeSelect"),useNeural:$("useNeuralToggle"),learn:$("learnToggle"),memory:$("memoryToggle"),explore:$("exploreToggle"),
+  tune:$("tuneBtn"),tuneSteps:$("tuneSteps"),tuneProgress:$("tuneProgress"),tuneStatus:$("tuneStatus"),tuneBadge:$("tuneBadge"),
+  actionMs:$("actionMs"),actionMsOut:$("actionMsOut"),manualAction:$("manualActionSelect"),manual:$("manualBtn"),manualStatus:$("manualStatus"),weaponState:$("weaponState"),
+  bars:$("actionBars"),chosen:$("chosenAction"),entropy:$("entropy"),margin:$("margin"),epistemic:$("epistemic"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),
+  attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),
+  schemaCompile:$("schemaCompileBtn"),schemaStatus:$("schemaStatus"),state:$("stateTable"),objective:$("objectiveText"),steps:$("steps"),episodes:$("episodes"),ret:$("return"),updates:$("updates"),lastReward:$("lastReward"),damageDealt:$("damageDealt"),damageReceived:$("damageReceived"),
+  log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot")
+};
+let env=null,policy=null,controller=null,hashSemantic=null;
+let engineReady=false,schemaCompiled=false,teacherReady=false,busy=false,prepared=false;
 
-function setReadyControls(ready){for(const el of [ui.start,ui.step,ui.reset,ui.loadModel,ui.schemaCompile,ui.export,ui.path])el.disabled=!ready}
+const PROFILES={
+  assisted:{label:"Adaptive assisted",teacher:"adaptive",neural:true,learning:false,memory:true,explore:false,hint:"Fast neural decisions every tick; MobileBERT is scheduled only when uncertainty/novelty warrants it."},
+  teacher:{label:"Teacher-only zero-shot",teacher:"every",neural:false,learning:false,memory:true,explore:false,hint:"MobileBERT scores every decision. Useful semantic baseline, but it pays teacher latency every tick."},
+  learning:{label:"Online learning",teacher:"adaptive",neural:true,learning:true,memory:true,explore:true,hint:"The neural controller learns from real consequences while an adaptive teacher supplies semantic supervision."},
+  frozen:{label:"Frozen neural evaluation",teacher:"off",neural:true,learning:false,memory:true,explore:false,hint:"No teacher calls, no weight updates, no random exploration. This is the clean small-model evaluation mode."}
+};
+
+function setChip(element,state,text){
+  element.className="ready-chip "+state;element.textContent=text;
+}
+function isLearnedTeacher(){return teacherReady&&policy?.semantic&&policy.semantic!==hashSemantic}
+function updateReadiness(){
+  prepared=engineReady&&schemaCompiled&&isLearnedTeacher();
+  setChip(ui.engineChip,engineReady?"ready":"off",engineReady?"engine ready":"engine");
+  setChip(ui.schemaChip,schemaCompiled?"ready":"off",schemaCompiled?"schema compiled":"schema semantics");
+  setChip(ui.teacherChip,isLearnedTeacher()?"ready":"off",isLearnedTeacher()?"teacher loaded":"teacher");
+  setChip(ui.policyChip,prepared?"ready":"warn",prepared?"ready to play":"not prepared");
+  const lock=busy||!engineReady;
+  ui.prepare.disabled=lock;ui.loadModel.disabled=lock;ui.schemaCompile.disabled=lock;ui.manual.disabled=lock;ui.manualAction.disabled=lock;ui.reset.disabled=lock;ui.export.disabled=lock;
+  for(const element of [ui.profile,ui.applyProfile,ui.teacherMode,ui.useNeural,ui.learn,ui.memory,ui.explore,ui.tune,ui.tuneSteps,ui.start,ui.step])element.disabled=busy||!prepared;
+  if(controller?.state==="RUNNING")ui.start.disabled=false;
+}
+function setBusy(value){busy=value;updateReadiness()}
 function setRuntime(text,error=false){ui.runtime.textContent=text;ui.dot.style.background=error?"#ff6b6b":"#d9ff5a"}
-function buildBars(){ui.bars.innerHTML="";if(!env)return;for(const a of env.actions){const row=document.createElement("div");row.className="bar-row";const label=document.createElement("span");label.textContent=a.label;const track=document.createElement("div");track.className="bar-track";const fill=document.createElement("div");fill.className="bar-fill";track.append(fill);const value=document.createElement("span");value.textContent="0.000";row.append(label,track,value);ui.bars.append(row)}}
+function displayField(field,value){
+  const category=field.enum?.[String(value)];
+  if(category!==undefined)return category+" ("+value+")";
+  const n=Number(value);return Number.isFinite(n)?n.toFixed(Math.abs(n)<10?3:1):String(value??"—");
+}
+function weaponLabel(obs){
+  const field=env?.schema.fields.find(f=>f.id==="weapon"),value=obs?.weapon,category=field?.enum?.[String(value)]||("weapon "+value);
+  const ammo=value===1||value===3?obs.bullets:value===2||value===8?obs.shells:value===4?obs.rockets:value===5||value===6?obs.cells:"∞";
+  return category+" · ammo "+ammo;
+}
+function buildBars(){
+  ui.bars.innerHTML="";ui.manualAction.innerHTML="";
+  if(!env)return;
+  for(const a of env.actions){
+    const row=document.createElement("div");row.className="bar-row";
+    const label=document.createElement("span");label.textContent=a.label;
+    const track=document.createElement("div");track.className="bar-track";const fill=document.createElement("div");fill.className="bar-fill";track.append(fill);
+    const value=document.createElement("span");value.textContent="0.000";row.append(label,track,value);ui.bars.append(row);
+    const option=document.createElement("option");option.value=a.id;option.textContent=a.label;ui.manualAction.append(option);
+  }
+  if([...ui.manualAction.options].some(o=>o.value==="fire"))ui.manualAction.value="fire";
+}
+function syncRuntimeConfig(){
+  if(!controller||!policy)return;
+  if(ui.teacherMode.value==="off"&&!ui.useNeural.checked)ui.useNeural.checked=true;
+  controller.useResidual=ui.useNeural.checked;controller.training=ui.learn.checked;controller.memory=ui.memory.checked;controller.explore=ui.explore.checked;
+  policy.setInferenceMode(ui.teacherMode.value==="off"?"neural":ui.teacherMode.value==="every"?"hybrid":"adaptive");
+}
+function applyProfile(id=ui.profile.value){
+  const cfg=PROFILES[id]||PROFILES.assisted;ui.profile.value=id;ui.teacherMode.value=cfg.teacher;ui.useNeural.checked=cfg.neural;ui.learn.checked=cfg.learning;ui.memory.checked=cfg.memory;ui.explore.checked=cfg.explore;
+  ui.profileHint.textContent=cfg.label+" — "+cfg.hint;syncRuntimeConfig();
+}
 function render(){
-  if(!env||!controller||!policy)return;const obs=env.lastObservation||env.observe();ui.objective.textContent=env.schema.objective;
-  ui.state.innerHTML=env.schema.fields.map(({id})=>'<div class="state-row"><span>'+id+'</span><strong>'+Number(obs[id]??0).toFixed(3)+'</strong></div>').join("");
+  if(!env||!controller||!policy)return;
+  const obs=env.lastObservation||env.observe();ui.objective.textContent=policy.schema.objective||env.schema.objective;ui.weaponState.textContent=weaponLabel(obs);
+  ui.state.innerHTML=(policy.schema.fields||env.schema.fields).map(field=>'<div class="state-row"><span>'+field.label+'</span><strong>'+displayField(field,obs[field.id])+'</strong></div>').join("");
   ui.steps.textContent=controller.steps;ui.episodes.textContent=controller.episodes;ui.ret.textContent=controller.episodeReturn.toFixed(3);ui.updates.textContent=policy.q.updates;ui.teacherCalls.textContent=policy.teacherCalls;
-  ui.backbone.textContent=policy.semantic.name+(policy.semantic.backend?" · "+policy.semantic.backend:"")+" + "+(policy.q.name||policy.q.constructor.name);
-  const lat=controller.latencySummary();ui.latLast.textContent=lat.last.toFixed(2)+" ms";ui.latP95.textContent=lat.p95.toFixed(2)+" ms";
+  ui.backbone.textContent=(policy.q.name||"neural")+" · "+policy.q.parameterCount()+" params";
+  const lat=controller.latencySummary();ui.latLast.textContent=lat.last.toFixed(2)+" ms";ui.latP95.textContent=lat.p95.toFixed(2)+" ms";ui.latSemantic.textContent=(policy.lastTeacherLatencyMs||0).toFixed(1)+" ms";
+  const outcome=controller.lastDecision?.outcome||env.lastOutcome;ui.damageDealt.textContent=Number(outcome?.damageDealt||0).toFixed(0);ui.damageReceived.textContent=Math.max(0,-Number(outcome?.healthDelta||0)).toFixed(0);
   const d=controller.lastDecision;
   if(d){
     const decisionObs=controller.trace.at(-1)?.observation||obs;
-    const attended=policy.q.inspectAttention?.(decisionObs,d.actionIndex,{topK:6})||[];
+    const attended=policy.q.inspectAttention?.(decisionObs,d.actionIndex,{topK:6,temporal:d.temporal})||[];
     ui.attentionCount.textContent=attended.length+" records";
     ui.attention.innerHTML=attended.length?attended.map(item=>{
       const interesting=Object.entries(item.record||{}).filter(([,value])=>typeof value==="number"&&Number.isFinite(value)&&value!==0).sort((a,b)=>Math.abs(Number(b[1]))-Math.abs(Number(a[1]))).slice(0,5);
       const detail=interesting.map(([key,value])=>key+"="+Number(value).toFixed(Math.abs(value)<10?2:0)).join(" · ");
       return '<div class="attention-row"><div><strong>'+item.collectionId+'['+item.index+']</strong><small>'+detail+'</small></div><span>'+(item.weight*100).toFixed(1)+'%</span></div>';
     }).join(""):'<div class="attention-empty">No structured records in this observation.</div>';
-    ui.latSemantic.textContent=(d.semanticLatencyMs||policy.lastTeacherLatencyMs||0).toFixed(2)+" ms";ui.lastReward.textContent=d.reward.toFixed(3);ui.chosen.textContent=d.action.label;ui.entropy.textContent=d.uncertainty.entropy.toFixed(3);ui.margin.textContent=d.uncertainty.margin.toFixed(3);ui.epistemic.textContent=(d.uncertainty.epistemic||0).toFixed(3);ui.novelty.textContent=d.uncertainty.novelty.toFixed(3);
+    ui.lastReward.textContent=d.reward.toFixed(3);ui.chosen.textContent=d.action.label;ui.entropy.textContent=d.uncertainty.entropy.toFixed(3);ui.margin.textContent=d.uncertainty.margin.toFixed(3);ui.epistemic.textContent=(d.uncertainty.epistemic||0).toFixed(3);ui.novelty.textContent=d.uncertainty.novelty.toFixed(3);
     [...ui.bars.children].forEach((row,i)=>{row.querySelector(".bar-fill").style.width=(d.probs[i]*100).toFixed(1)+"%";row.lastElementChild.textContent=d.probs[i].toFixed(3)});
-    ui.log.textContent=controller.trace.slice(-12).reverse().map(t=>"s"+String(t.step).padStart(4,"0")+" "+(t.teacherUsed?"Q":t.teacherPending?"…":"·")+" "+t.action.padEnd(13)+" p="+Math.max(...Object.values(t.probabilities)).toFixed(3)+" r="+t.reward.toFixed(3)+" neural="+t.residualLatencyMs.toFixed(2)+"ms total="+t.latencyMs.toFixed(1)+"ms").join("\n");
+    ui.log.textContent=controller.trace.slice(-14).reverse().map(t=>"s"+String(t.step).padStart(4,"0")+" "+(t.teacherUsed?"Q":t.teacherPending?"…":"·")+" "+t.action.padEnd(19)+" p="+Math.max(...Object.values(t.probabilities)).toFixed(3)+" r="+t.reward.toFixed(3)+" dmg="+Number(t.outcome?.damageDealt||0).toFixed(0)+" "+t.residualLatencyMs.toFixed(1)+"ms").join("\n");
   }
+  updateReadiness();
 }
-function bindController(){controller.addEventListener("tick",render);controller.addEventListener("state",event=>{ui.start.textContent=event.detail==="RUNNING"?"Pause agent":"Start agent";setRuntime(event.detail)});controller.addEventListener("error",event=>{setRuntime("ERROR",true);ui.log.textContent="ERROR: "+event.detail.message+"\n"+ui.log.textContent})}
-async function primeCurrentTeacher(label){
-  const obs=env.lastObservation||env.observe();ui.modelStatus.textContent=label+" · semantic bootstrap in progress";
-  const prime=await policy.primeTeacher(obs,{steps:8});
-  if(prime?.stale)throw new Error("Semantic bootstrap became stale");
-  return prime;
+function bindController(){
+  controller.addEventListener("tick",render);
+  controller.addEventListener("state",event=>{ui.start.textContent=event.detail==="RUNNING"?"Pause":"Play";setRuntime(event.detail);updateReadiness()});
+  controller.addEventListener("error",event=>{setRuntime("ERROR",true);ui.log.textContent="ERROR: "+event.detail.message+"\n"+ui.log.textContent});
 }
-async function boot(){
-  ui.boot.disabled=true;setRuntime("LOADING");ui.bootStatus.textContent="Fetching pinned engine + Freedoom runtime…";
-  try{
-    env=await DoomWasmArena.boot({canvas:ui.canvas,actionMs:Number(ui.actionMs.value),onProgress:message=>{ui.bootStatus.textContent=message}});
-    hashSemantic=new HashSemanticAdapter();hashSemantic.backend="local-js";
-    policy=new SemanticResidualPolicy({schema:env.schema,actions:env.actions,semantic:hashSemantic,residual:"neural-set",seed:1993,inferenceMode:ui.path.value});
-    controller=new ExperimentController({environment:env,policy,hz:8});controller.useResidual=ui.residual.checked;controller.training=ui.training.checked;controller.memory=ui.memory.checked;controller.explore=ui.explore.checked;
-    await primeCurrentTeacher("hash teacher");bindController();buildBars();setReadyControls(true);setRuntime("READY");
-    const counts=env.lastObservation?._collections||{};ui.bootStatus.textContent=DOOM_RUNTIME_PROVENANCE.engine+" + "+DOOM_RUNTIME_PROVENANCE.content+" · "+policy.q.parameterCount()+" neural params · "+(counts.entities?.length||0)+" entities + "+(counts.geometry?.length||0)+" geometry records";
-    ui.modelStatus.textContent="adaptive hash teacher ready · bootstrap "+policy.lastTeacherLatencyMs.toFixed(1)+" ms";ui.schemaStatus.textContent="lexical schema projection · optional MiniLM compile";render();
-  }catch(error){ui.boot.disabled=false;setRuntime("BOOT FAILED",true);ui.bootStatus.textContent=String(error?.message||error);ui.log.textContent=String(error?.stack||error)}
+async function primeCurrentTeacher(label,steps=12){
+  const obs=env.lastObservation||env.observe();ui.modelStatus.textContent=label+" · distilling current state";
+  const prime=await policy.primeTeacher(obs,{steps});if(prime?.stale)throw new Error("Semantic bootstrap became stale");return prime;
 }
-async function compileSchemaSemantics(){
-  if(!policy||!controller||!env)return;
-  controller.pause();setReadyControls(false);ui.schemaStatus.textContent="loading "+SCHEMA_EMBEDDING_PRESET.label+" · "+SCHEMA_EMBEDDING_PRESET.approx;
+async function compileSchemaOnly(){
+  ui.schemaStatus.textContent="loading "+SCHEMA_EMBEDDING_PRESET.label+" · "+SCHEMA_EMBEDDING_PRESET.approx;
   const compiler=new MiniLMSchemaCompiler({onProgress:info=>{ui.schemaStatus.textContent=(info.status||"working")+(info.message?" · "+info.message:"")}});
   try{
-    await compiler.load();
-    const compiled=await compiler.compile(env.schema,env.actions);
-    policy.reconfigure({schema:compiled.schema,actions:compiled.actions});policy.resetLearning();await controller.reset({learning:false});
-    const prime=await primeCurrentTeacher("compiled schema");
-    schemaCompiled=true;
-    ui.schemaStatus.textContent="MiniLM compiled · "+compiled.meta.bindings+" bindings · "+compiled.meta.dimensions+"D → fixed neural schema · "+compiled.meta.backend;
-    ui.modelStatus.textContent=ui.path.value+" "+policy.semantic.name+" ready · bootstrap "+prime.ms.toFixed(1)+" ms";
-    render();
-  }catch(error){
-    ui.schemaStatus.textContent="schema compile failed · "+String(error?.message||error);
-  }finally{
-    await compiler.dispose().catch(()=>{});
-    setReadyControls(true);
+    await compiler.load();const compiled=await compiler.compile(env.schema,env.actions);policy.reconfigure({schema:compiled.schema,actions:compiled.actions});schemaCompiled=true;
+    ui.schemaStatus.textContent="compiled · "+compiled.meta.bindings+" semantic bindings · "+compiled.meta.backend;return compiled.meta;
+  }finally{await compiler.dispose().catch(()=>{})}
+}
+async function loadTeacherOnly(selected){
+  if(selected==="hash"){
+    if(policy.semantic!==hashSemantic&&policy.semantic?.dispose)await policy.semantic.dispose();policy.setSemantic(hashSemantic);teacherReady=false;return null;
   }
+  const preset=NLI_PRESETS[selected];ui.modelStatus.textContent="loading "+preset.label+" · "+preset.approx;
+  const candidate=new TransformersNLIAdapter({preset:selected,maxStateChars:3000,onProgress:info=>{
+    if(Number.isFinite(info.normalizedProgress))ui.modelProgress.value=info.normalizedProgress;
+    ui.modelStatus.textContent=(info.status||"loading")+(info.file?" · "+info.file:"");
+  }});
+  candidate.compile(policy.schema,policy.actions);await candidate.load();
+  if(policy.semantic!==hashSemantic&&policy.semantic?.dispose)await policy.semantic.dispose();
+  policy.setSemantic(candidate);teacherReady=true;ui.modelProgress.value=100;return candidate;
 }
-
-async function switchBackbone(){
-  if(!policy||!controller)return;controller.pause();setReadyControls(false);ui.modelProgress.value=0;const selected=ui.modelSelect.value,previous=policy.semantic;
+async function boot(){
+  setBusy(true);ui.boot.disabled=true;setRuntime("LOADING");ui.bootStatus.textContent="Fetching pinned Chocolate Doom runtime…";
   try{
-    if(selected==="hash"){
-      if(previous!==hashSemantic&&previous.dispose)await previous.dispose();policy.setSemantic(hashSemantic);policy.resetLearning();await controller.reset({learning:false});
-      const prime=await primeCurrentTeacher("hash teacher");ui.modelStatus.textContent=ui.path.value+" hash teacher ready · bootstrap "+prime.ms.toFixed(1)+" ms · neural weights primed";render();return;
-    }
-    const preset=NLI_PRESETS[selected];ui.modelStatus.textContent="loading "+preset.label+" · "+preset.approx;
-    const candidate=new TransformersNLIAdapter({preset:selected,maxStateChars:2600,onProgress:info=>{
-      if(Number.isFinite(info.normalizedProgress))ui.modelProgress.value=info.normalizedProgress;
-      const status=info.status==="ready"?"model loaded":(info.status||"loading");
-      ui.modelStatus.textContent=status+(info.file?" · "+info.file:"");
-    }});
-    candidate.compile(env.schema,env.actions);if(previous!==hashSemantic&&previous.dispose)await previous.dispose();policy.setSemantic(hashSemantic);await candidate.load();
-    policy.setSemantic(candidate);policy.resetLearning();await controller.reset({learning:false});const prime=await primeCurrentTeacher(preset.label);
-    ui.modelProgress.value=100;ui.modelStatus.textContent=preset.label+" "+ui.path.value+" teacher ready · bootstrap "+prime.ms.toFixed(1)+" ms · fast ticks are neural";render();
-  }catch(error){
-    policy.setSemantic(hashSemantic);policy.resetLearning();await controller.reset({learning:false});await primeCurrentTeacher("hash teacher").catch(()=>null);
-    ui.modelSelect.value="hash";ui.modelProgress.value=0;ui.modelStatus.textContent="load/bootstrap failed; hash restored · "+String(error?.message||error);render();
-  }finally{setReadyControls(true)}
+    const file=ui.iwad.files?.[0]||null;if(file&&file.size>128*1024*1024)throw new Error("IWAD is larger than the 128 MB browser safety limit");
+    const iwadFile=file?await file.arrayBuffer():null;
+    env=await DoomWasmArena.boot({canvas:ui.canvas,actionMs:Number(ui.actionMs.value),iwadFile,contentName:file?.name||null,onProgress:message=>{ui.bootStatus.textContent=message}});
+    hashSemantic=new HashSemanticAdapter();hashSemantic.backend="local-js";
+    policy=new SemanticResidualPolicy({schema:env.schema,actions:env.actions,semantic:hashSemantic,residual:"neural-set",seed:1993,inferenceMode:"adaptive"});
+    controller=new ExperimentController({environment:env,policy,hz:8});controller.training=false;controller.explore=false;controller.memory=true;controller.useResidual=true;
+    bindController();buildBars();engineReady=true;ui.runtimeTitle.textContent="Chocolate Doom · "+env.contentName;
+    const counts=env.lastObservation?._collections||{};ui.bootStatus.textContent=DOOM_RUNTIME_PROVENANCE.engine+" · "+env.contentName+" · "+policy.q.parameterCount()+" params · "+(counts.entities?.length||0)+" entities · "+(counts.geometry?.length||0)+" lines";
+    ui.prepareStatus.textContent="Engine ready. Prepare Recommended before model-controlled play.";ui.schemaStatus.textContent="Lexical feature hash only.";ui.modelStatus.textContent="No learned teacher loaded.";
+    applyProfile("assisted");setRuntime("ENGINE READY");window.__doomLab={get env(){return env},get policy(){return policy},get controller(){return controller}};render();
+  }catch(error){ui.boot.disabled=false;setRuntime("BOOT FAILED",true);ui.bootStatus.textContent=String(error?.message||error);ui.log.textContent=String(error?.stack||error)}
+  finally{setBusy(false)}
+}
+async function prepareRecommended(){
+  if(!engineReady)return;controller.pause();setBusy(true);ui.prepareStatus.textContent="Preparing semantic schema…";
+  try{
+    if(!schemaCompiled)await compileSchemaOnly();
+    ui.prepareStatus.textContent="Loading MobileBERT semantic teacher…";ui.modelSelect.value="mobilebert";
+    if(!isLearnedTeacher()||policy.semantic.presetKey!=="mobilebert")await loadTeacherOnly("mobilebert");
+    policy.resetLearning();await controller.reset({learning:false});const prime=await primeCurrentTeacher("MobileBERT",16);
+    applyProfile("assisted");ui.prepareStatus.textContent="READY TO PLAY · schema compiled · MobileBERT primed in "+prime.ms.toFixed(0)+" ms · fast path is neural";
+    ui.tuneStatus.textContent="Optional: run a short real-Doom training burst, then evaluate teacher-off.";setRuntime("READY TO PLAY");render();
+  }catch(error){ui.prepareStatus.textContent="Preparation failed · "+String(error?.message||error);setRuntime("PREP FAILED",true)}
+  finally{setBusy(false)}
+}
+async function compileSchemaSemantics(){
+  if(!engineReady)return;controller.pause();setBusy(true);
+  try{
+    await compileSchemaOnly();policy.resetLearning();await controller.reset({learning:false});
+    if(isLearnedTeacher())await primeCurrentTeacher("compiled schema",12);
+    ui.prepareStatus.textContent=isLearnedTeacher()?"Schema recompiled and teacher re-primed.":"Schema compiled. Load a learned teacher to complete preparation.";render();
+  }catch(error){ui.schemaStatus.textContent="compile failed · "+String(error?.message||error)}
+  finally{setBusy(false)}
+}
+async function switchTeacher(){
+  if(!engineReady)return;controller.pause();setBusy(true);ui.modelProgress.value=0;
+  try{
+    await loadTeacherOnly(ui.modelSelect.value);policy.resetLearning();await controller.reset({learning:false});
+    if(isLearnedTeacher()){const prime=await primeCurrentTeacher(policy.semantic.name,12);ui.modelStatus.textContent=policy.semantic.name+" ready · bootstrap "+prime.ms.toFixed(0)+" ms"}
+    else ui.modelStatus.textContent="Hash baseline selected — useful only for ablation.";
+    render();
+  }catch(error){policy.setSemantic(hashSemantic);teacherReady=false;ui.modelSelect.value="hash";ui.modelProgress.value=0;ui.modelStatus.textContent="teacher load failed · "+String(error?.message||error);render()}
+  finally{setBusy(false)}
+}
+async function tuneAgent(){
+  if(!prepared)return;controller.pause();setBusy(true);applyProfile("learning");ui.tuneProgress.value=0;ui.tuneBadge.textContent="training";
+  const steps=Number(ui.tuneSteps.value)||128,startUpdates=policy.q.updates,startTeacher=policy.teacherCalls;
+  try{
+    const result=await controller.trainBurst({steps,epsilon:.16,onProgress:p=>{ui.tuneProgress.value=p.ratio*100;ui.tuneStatus.textContent="training "+p.completed+"/"+p.total+" · updates "+(p.updates-startUpdates)+" · episodes "+p.episodes}});
+    applyProfile("frozen");ui.profile.value="frozen";ui.tuneBadge.textContent="frozen neural";
+    ui.tuneStatus.textContent="TRAINING COMPLETE · "+result.completed+" decisions · "+result.updates+" reward updates · "+(policy.teacherCalls-startTeacher)+" teacher refreshes · ready for teacher-off playback";
+    setRuntime("TRAINED · FROZEN");render();
+  }catch(error){ui.tuneStatus.textContent="training failed · "+String(error?.message||error);setRuntime("TRAINING ERROR",true)}
+  finally{setBusy(false)}
+}
+async function manualPrimitive(){
+  if(!engineReady)return;controller.pause();setBusy(true);
+  try{
+    const id=ui.manualAction.value,result=await env.step(id);policy.resetEpisode();
+    ui.manualStatus.textContent=id+" executed · reward "+result.reward.toFixed(3)+" · damage dealt "+Number(result.info?.outcome?.damageDealt||0).toFixed(0);
+    if(result.done)await env.reset();render();
+  }catch(error){ui.manualStatus.textContent="manual action failed · "+String(error?.message||error)}
+  finally{setBusy(false)}
 }
 
-ui.boot.addEventListener("click",boot);ui.start.addEventListener("click",()=>controller?.state==="RUNNING"?controller.pause():controller?.start());
-ui.step.addEventListener("click",async()=>{if(!controller)return;if(controller.state==="RUNNING")controller.pause();await controller.tick()});
-ui.reset.addEventListener("click",async()=>{if(controller)await controller.reset({learning:false});render()});ui.loadModel.addEventListener("click",switchBackbone);ui.schemaCompile.addEventListener("click",compileSchemaSemantics);
-ui.path.addEventListener("change",()=>{if(policy){policy.setInferenceMode(ui.path.value);ui.modelStatus.textContent=ui.path.value+" inference · "+policy.semantic.name}});
-ui.residual.addEventListener("change",()=>{if(controller)controller.useResidual=ui.residual.checked});ui.training.addEventListener("change",()=>{if(controller)controller.training=ui.training.checked});ui.memory.addEventListener("change",()=>{if(controller)controller.memory=ui.memory.checked});ui.explore.addEventListener("change",()=>{if(controller)controller.explore=ui.explore.checked});ui.actionMs.addEventListener("input",()=>{ui.actionMsOut.value=ui.actionMs.value+" ms";env?.setActionMs(ui.actionMs.value)});
-ui.export.addEventListener("click",()=>{if(!controller)return;const blob=new Blob([controller.exportTrace()],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="doom-real-trace-"+Date.now()+".json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)});
+ui.iwad.addEventListener("change",()=>{const file=ui.iwad.files?.[0];ui.iwadStatus.textContent=file?"Selected local IWAD: "+file.name+" · "+(file.size/1048576).toFixed(1)+" MB":"Default: Freedoom 0.13.0"});
+ui.boot.addEventListener("click",boot);ui.prepare.addEventListener("click",prepareRecommended);ui.tune.addEventListener("click",tuneAgent);ui.manual.addEventListener("click",manualPrimitive);
+ui.start.addEventListener("click",()=>{if(!controller)return;if(controller.state==="RUNNING")controller.pause();else{syncRuntimeConfig();controller.start()}});
+ui.step.addEventListener("click",async()=>{if(!controller||!prepared)return;if(controller.state==="RUNNING")controller.pause();syncRuntimeConfig();await controller.tick()});
+ui.reset.addEventListener("click",async()=>{if(controller){await controller.reset({learning:false});render()}});
+ui.applyProfile.addEventListener("click",()=>applyProfile());ui.profile.addEventListener("change",()=>{ui.profileHint.textContent=(PROFILES[ui.profile.value]||PROFILES.assisted).hint});
+for(const element of [ui.teacherMode,ui.useNeural,ui.learn,ui.memory,ui.explore])element.addEventListener("change",syncRuntimeConfig);
+ui.loadModel.addEventListener("click",switchTeacher);ui.schemaCompile.addEventListener("click",compileSchemaSemantics);
+ui.actionMs.addEventListener("input",()=>{ui.actionMsOut.value=ui.actionMs.value+" ms";env?.setActionMs(ui.actionMs.value)});
+ui.export.addEventListener("click",()=>{if(!controller)return;const blob=new Blob([controller.exportTrace()],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="doom-neural-trace-"+Date.now()+".json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)});
+updateReadiness();

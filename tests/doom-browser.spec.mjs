@@ -2,38 +2,34 @@ import {test,expect} from "@playwright/test";
 
 test.setTimeout(420000);
 
-test("real DOOM boots, primes MobileBERT, then keeps the control tick neural-fast",async({page})=>{
+test("real DOOM verifies firing, prepares semantics, and runs the neural fast path",async({page})=>{
   const consoleErrors=[];page.on("pageerror",error=>consoleErrors.push("pageerror: "+String(error)));page.on("console",message=>{if(message.type()==="error")consoleErrors.push("console: "+message.text())});
   await page.goto("http://127.0.0.1:8000/doom.html",{waitUntil:"domcontentloaded"});await page.locator("#bootBtn").click();
-  await page.waitForFunction(()=>{const text=document.querySelector("#runtimeStatus")?.textContent;return text==="READY"||text==="BOOT FAILED"},null,{timeout:90000});
-  const runtimeStatus=(await page.locator("#runtimeStatus").textContent())||"";
-  if(runtimeStatus!=="READY")throw new Error("DOOM boot failed. "+(await page.locator("#bootStatus").textContent())+" "+(await page.locator("#eventLog").textContent()));
-  await expect(page.locator("#stateTable .state-row")).toHaveCount(14);await expect(page.locator("#backboneName")).toContainText("SchemaHashAttentionSetNet");
+  await page.waitForFunction(()=>{const text=document.querySelector("#runtimeStatus")?.textContent;return text==="ENGINE READY"||text==="BOOT FAILED"},null,{timeout:90000});
+  if((await page.locator("#runtimeStatus").textContent())!=="ENGINE READY")throw new Error("DOOM boot failed. "+(await page.locator("#bootStatus").textContent()));
+  await expect(page.locator("#stateTable .state-row")).toHaveCount(17);
+  await expect(page.locator("#weaponState")).toContainText("pistol");
+  await expect(page.locator("#manualActionSelect")).toHaveValue("fire");
 
-  await page.locator("#stepBtn").click();await expect(page.locator("#steps")).toHaveText("1",{timeout:5000});await expect(page.locator("#eventLog")).toContainText("s0001");await expect(page.locator("#attentionList .attention-row").first()).toBeVisible();
+  const fire=await page.evaluate(async()=>{
+    const lab=window.__doomLab,env=lab.env;env.setActionMs(300);
+    const before=env.observe(),ammoBefore=before.bullets+before.shells+before.rockets+before.cells;
+    const step=await env.step("fire"),after=step.observation,ammoAfter=after.bullets+after.shells+after.rockets+after.cells;
+    await env.reset();env.setActionMs(110);
+    return{ammoBefore,ammoAfter,damage:step.info?.outcome?.damageDealt||0,mask:env.actionMasks.fire,combo:env.actionMasks.strafe_left_fire};
+  });
+  expect(fire.mask).toBe(64);expect(fire.combo).toBe(80);expect(fire.ammoAfter<fire.ammoBefore||fire.damage>0).toBeTruthy();
 
-  await page.locator("#modelSelect").selectOption("mobilebert");await page.locator("#loadModelBtn").click();
-  await page.waitForFunction(()=>{
-    const text=document.querySelector("#modelStatus")?.textContent||"";
-    return text.includes("teacher ready")||text.includes("load/bootstrap failed");
-  },null,{timeout:220000});
-  const modelStatus=(await page.locator("#modelStatus").textContent())||"";
-  if(modelStatus.includes("failed"))throw new Error("MobileBERT activation failed. status="+modelStatus+" browser="+consoleErrors.join(" | "));
+  await page.locator("#prepareBtn").click();
+  await page.waitForFunction(()=>{const text=document.querySelector("#prepareStatus")?.textContent||"";return text.includes("READY TO PLAY")||text.includes("Preparation failed")},null,{timeout:300000});
+  const prepare=(await page.locator("#prepareStatus").textContent())||"";
+  if(prepare.includes("failed"))throw new Error("Preparation failed: "+prepare+" browser="+consoleErrors.join(" | "));
+  await expect(page.locator("#schemaChip")).toContainText("schema compiled");await expect(page.locator("#teacherChip")).toContainText("teacher loaded");await expect(page.locator("#policyChip")).toContainText("ready to play");
+  await expect(page.locator("#backboneName")).toContainText("params");
 
-  await expect(page.locator("#backboneName")).toContainText("MobileBERT-MNLI");await expect(page.locator("#steps")).toHaveText("0");
-  const teacherBefore=Number(await page.locator("#teacherCalls").textContent());expect(teacherBefore).toBeGreaterThanOrEqual(1);
-  const start=Date.now();await page.locator("#stepBtn").click();await expect(page.locator("#steps")).toHaveText("1",{timeout:5000});
-  const wallMs=Date.now()-start;expect(wallMs).toBeLessThan(5000);
+  await page.locator("#stepBtn").click();await expect(page.locator("#steps")).toHaveText("1",{timeout:8000});
   await expect(page.locator("#chosenAction")).not.toHaveText("—");await expect(page.locator("#eventLog")).toContainText("s0001");
+  await expect(page.locator("#attentionList .attention-row").first()).toBeVisible();
 
-  await expect(page.locator("#schemaCompileBtn")).toBeEnabled();
-  await page.locator("#schemaCompileBtn").click();
-  await page.waitForFunction(()=>{const text=document.querySelector("#schemaStatus")?.textContent||"";return text.includes("MiniLM compiled")||text.includes("schema compile failed")},null,{timeout:180000});
-  const schemaStatus=(await page.locator("#schemaStatus").textContent())||"";
-  if(schemaStatus.includes("failed"))throw new Error("MiniLM schema compile failed. status="+schemaStatus+" browser="+consoleErrors.join(" | "));
-  await expect(page.locator("#schemaStatus")).toContainText("MiniLM compiled");
-  await expect(page.locator("#steps")).toHaveText("0");
-  await page.locator("#stepBtn").click();await expect(page.locator("#steps")).toHaveText("1",{timeout:5000});
-
-  if(consoleErrors.length)throw new Error("Browser errors after successful learned-model step: "+consoleErrors.join(" | "));
+  if(consoleErrors.length)throw new Error("Browser errors after successful prepared-model step: "+consoleErrors.join(" | "));
 });

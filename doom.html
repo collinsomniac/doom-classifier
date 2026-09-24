@@ -1,21 +1,81 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" /><meta name="theme-color" content="#0a0c10" /><title>DOOM Primitive Policy Lab</title><link rel="stylesheet" href="./styles.css" /></head>
+<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" /><meta name="theme-color" content="#0a0c10" /><title>DOOM Neural Decision Lab</title><link rel="stylesheet" href="./styles.css" /></head>
 <body><main class="shell">
-<header class="hero"><div><p class="eyebrow">REAL DOOM / PRIMITIVE CONTROL / EXPERIMENT 002</p><h1>Primitive Policy vs. DOOM</h1><p class="lede">Full structured world state → compiled neural set controller → typed primitive actions. The semantic model can supervise on uncertainty instead of running every tick.</p></div><a class="badge" href="./index.html">synthetic lab</a></header>
-<section class="toolbar panel">
-<button id="bootBtn">Boot Doom (~31 MB)</button><button id="startBtn" disabled>Start agent</button><button id="stepBtn" class="secondary" disabled>Step</button><button id="resetBtn" class="secondary" disabled>Reset episode</button>
-<label>inference <select id="pathSelect"><option value="adaptive" selected>adaptive neural + teacher</option><option value="hybrid">semantic every step + neural</option><option value="neural">neural only</option></select></label>
-<label><input id="residualToggle" type="checkbox" checked /> neural controller</label><label><input id="trainingToggle" type="checkbox" checked /> reward learning</label><label><input id="memoryToggle" type="checkbox" checked /> temporal memory</label><label><input id="exploreToggle" type="checkbox" checked /> exploration</label>
+<header class="hero"><div><p class="eyebrow">REAL CHOCOLATE DOOM / STRUCTURED STATE / TYPED NEURAL CONTROL</p><h1>DOOM Neural Decision Lab</h1><p class="lede">Prepare semantic priors once, optionally learn from real game consequences, then evaluate a tiny neural controller making sub-second primitive decisions.</p></div><div class="status-pill"><span id="statusDot"></span><span id="runtimeStatus">ENGINE OFFLINE</span></div></header>
+
+<section class="workflow panel">
+  <article class="workflow-step">
+    <div class="step-number">1</div><div class="step-body"><p class="kicker">ENGINE</p><h2>Boot real Doom mechanics</h2>
+    <p class="help">Freedoom is included legally. If you own Doom, choose your local <strong>DOOM.WAD</strong> or <strong>DOOM2.WAD</strong>; it stays in browser memory and is never uploaded.</p>
+    <label class="file-row"><input id="iwadInput" type="file" accept=".wad,application/octet-stream" /><span id="iwadStatus">Default: Freedoom 0.13.0</span></label>
+    <button id="bootBtn">Boot engine (~31 MB)</button></div>
+  </article>
+  <article class="workflow-step">
+    <div class="step-number">2</div><div class="step-body"><p class="kicker">PREPARE</p><h2>Give the tiny model semantic priors</h2>
+    <p class="help">Recommended downloads MiniLM once to compile schema meanings, then MobileBERT as the optional semantic teacher. Neither is required on frozen neural ticks.</p>
+    <button id="prepareBtn" disabled>Prepare Recommended (~50 MB)</button>
+    <div class="readiness"><span id="engineChip" class="ready-chip off">engine</span><span id="schemaChip" class="ready-chip off">schema semantics</span><span id="teacherChip" class="ready-chip off">teacher</span><span id="policyChip" class="ready-chip off">ready to play</span></div>
+    <div id="prepareStatus" class="model-status">Boot the engine first.</div></div>
+  </article>
+  <article class="workflow-step">
+    <div class="step-number">3</div><div class="step-body"><p class="kicker">RUN PROFILE</p><h2>Choose what is allowed to help</h2>
+    <div class="model-controls"><select id="profileSelect" disabled>
+      <option value="assisted" selected>Adaptive assisted — fast neural + teacher on uncertainty</option>
+      <option value="teacher">Teacher-only zero-shot — semantic baseline, slowest</option>
+      <option value="learning">Online learning — adaptive teacher + reward updates + exploration</option>
+      <option value="frozen">Frozen neural evaluation — no teacher, no learning</option>
+    </select><button id="applyProfileBtn" class="secondary" disabled>Apply</button></div>
+    <div id="profileHint" class="model-status">Prepare the agent to enable run profiles.</div>
+    <div class="run-buttons"><button id="startBtn" disabled>Play</button><button id="stepBtn" class="secondary" disabled>One decision</button><button id="resetBtn" class="secondary" disabled>Reset episode</button></div></div>
+  </article>
 </section>
-<section class="grid">
-<article class="panel arena-panel"><div class="panel-head"><div><p class="kicker">REAL ENGINE</p><h2>Chocolate Doom / Freedoom</h2></div><div class="status-pill"><span id="statusDot"></span><span id="runtimeStatus">NOT LOADED</span></div></div><canvas id="doomCanvas" tabindex="0" width="640" height="400"></canvas><div class="model-status" id="bootStatus">Runtime is fetched from a pinned public GPL Chocolate Doom research build; no commercial Doom WAD is used.</div><label class="range-row">action hold <input id="actionMs" type="range" min="60" max="300" value="120" /><output id="actionMsOut">120 ms</output></label></article>
-<article class="panel"><div class="panel-head"><div><p class="kicker">DECISION</p><h2>Primitive action distribution</h2></div><div id="chosenAction" class="choice">—</div></div><div id="actionBars" class="bars"></div><div class="attention-block"><div class="attention-head"><span>chosen-action attention</span><span id="attentionCount">0 records</span></div><div id="attentionList" class="attention-list"><div class="attention-empty">No decision yet.</div></div></div><div class="triplet"><div><span>entropy</span><strong id="entropy">0.000</strong></div><div><span>margin</span><strong id="margin">0.000</strong></div><div><span>epistemic</span><strong id="epistemic">0.000</strong></div><div><span>novelty</span><strong id="novelty">0.000</strong></div></div></article>
-<article class="panel"><p class="kicker">FAST PATH</p><h2>Policy latency</h2><div class="metric-grid"><div><span>last</span><strong id="latLast">0.00 ms</strong></div><div><span>semantic/teacher</span><strong id="latSemantic">0.00 ms</strong></div><div><span>p95</span><strong id="latP95">0.00 ms</strong></div><div><span>teacher calls</span><strong id="teacherCalls">0</strong></div></div></article>
-<article class="panel"><p class="kicker">SEMANTIC BACKBONE</p><h2 id="backboneName">not initialized</h2><div class="model-controls"><select id="modelSelect"><option value="hash">Hash structural baseline</option><option value="mobilebert">MobileBERT-MNLI (~26 MB WASM / ~50 MB WebGPU)</option><option value="distilbert">DistilBERT-MNLI (~67 MB WASM / ~134 MB WebGPU)</option></select><button id="loadModelBtn" class="secondary" disabled>Switch teacher</button></div><progress id="modelProgress" max="100" value="0"></progress><div id="modelStatus" class="model-status">Boot Doom first.</div><div class="model-controls compile-row"><button id="schemaCompileBtn" class="secondary" disabled>Compile schema semantics (~23 MB)</button><div id="schemaStatus" class="model-status">lexical schema projection</div></div></article>
-<article class="panel state-panel"><div class="panel-head"><div><p class="kicker">FACTUAL TELEMETRY</p><h2>Policy observation</h2></div><div class="choice"><span id="steps">0</span> steps</div></div><div class="objective"><span>objective</span><strong id="objectiveText">—</strong></div><div id="stateTable" class="state-table"></div></article>
-<article class="panel"><p class="kicker">EXPERIENCE</p><h2>Neural learner</h2><div class="metric-grid"><div><span>episodes</span><strong id="episodes">0</strong></div><div><span>return</span><strong id="return">0.00</strong></div><div><span>reward updates</span><strong id="updates">0</strong></div><div><span>last reward</span><strong id="lastReward">0.000</strong></div></div><div class="callout"><strong>No tactical macro layer:</strong><span>the model receives native player state, variable entity records and world geometry, then chooses only primitive controls. Teacher calls distill semantics into the fast neural policy.</span></div></article>
+
+<section class="grid lab-grid">
+<article class="panel arena-panel">
+  <div class="panel-head"><div><p class="kicker">REAL ENGINE</p><h2 id="runtimeTitle">Chocolate Doom</h2></div><div id="weaponState" class="choice">weapon —</div></div>
+  <canvas id="doomCanvas" tabindex="0" width="640" height="400"></canvas>
+  <div class="model-status" id="bootStatus">Engine has not been loaded.</div>
+  <label class="range-row">primitive hold interval <input id="actionMs" type="range" min="60" max="250" value="110" /><output id="actionMsOut">110 ms</output></label>
+  <div class="manual-row"><select id="manualActionSelect" disabled></select><button id="manualBtn" class="secondary" disabled>Test primitive</button><span id="manualStatus" class="model-status">Use this to verify FIRE/movement without involving the model.</span></div>
+</article>
+
+<article class="panel control-panel">
+  <p class="kicker">WHAT IS ACTIVE?</p><h2>Decision path</h2>
+  <div class="toggle-grid">
+    <label><span>Teacher</span><select id="teacherModeSelect" disabled><option value="adaptive">Adaptive</option><option value="every">Every decision</option><option value="off">Off</option></select><small>Semantic model calls. Off is lowest-latency.</small></label>
+    <label><span>Neural value</span><input id="useNeuralToggle" type="checkbox" checked disabled /><small>The 6–7k parameter fast controller.</small></label>
+    <label><span>Reward learning</span><input id="learnToggle" type="checkbox" disabled /><small>Updates neural weights from game consequences.</small></label>
+    <label><span>Temporal memory</span><input id="memoryToggle" type="checkbox" checked disabled /><small>Recent state changes enter the neural query.</small></label>
+    <label><span>Exploration</span><input id="exploreToggle" type="checkbox" disabled /><small>Occasional random action during learning only.</small></label>
+  </div>
+  <div class="callout"><strong>Recommended demonstration:</strong><span>Prepare → Train a short burst → Frozen neural evaluation. This shows what the small model retained without teacher calls.</span></div>
+</article>
+
+<article class="panel tune-panel">
+  <div class="panel-head"><div><p class="kicker">OPTIONAL BROWSER FINE-TUNE</p><h2>Learn from real Doom transitions</h2></div><div id="tuneBadge" class="choice">not trained</div></div>
+  <p class="help">Training uses the same primitive actions. Reward comes from consequences—hostile damage/kills, player damage, survival cost—not rules such as “enemy visible → fire.”</p>
+  <div class="model-controls"><select id="tuneSteps" disabled><option value="64">64 decisions — quick</option><option value="128" selected>128 decisions — recommended</option><option value="256">256 decisions — longer</option></select><button id="tuneBtn" disabled>Train then freeze</button></div>
+  <progress id="tuneProgress" max="100" value="0"></progress><div id="tuneStatus" class="model-status">Preparation required.</div>
+</article>
+
+<article class="panel decision-panel"><div class="panel-head"><div><p class="kicker">DECISION</p><h2>Typed action probabilities</h2></div><div id="chosenAction" class="choice">—</div></div><div id="actionBars" class="bars"></div><div class="triplet"><div><span>entropy</span><strong id="entropy">0.000</strong></div><div><span>margin</span><strong id="margin">0.000</strong></div><div><span>epistemic</span><strong id="epistemic">0.000</strong></div><div><span>novelty</span><strong id="novelty">0.000</strong></div></div></article>
+
+<article class="panel"><div class="panel-head"><div><p class="kicker">FAST PATH</p><h2>Latency + supervision</h2></div><div id="backboneName" class="choice">unprepared</div></div><div class="metric-grid"><div><span>last neural</span><strong id="latLast">0.00 ms</strong></div><div><span>teacher call</span><strong id="latSemantic">0.00 ms</strong></div><div><span>p95 decision</span><strong id="latP95">0.00 ms</strong></div><div><span>teacher calls</span><strong id="teacherCalls">0</strong></div></div></article>
+
+<article class="panel"><div class="panel-head"><div><p class="kicker">LEARNING</p><h2>Consequence signal</h2></div><div class="choice"><span id="steps">0</span> decisions</div></div><div class="metric-grid"><div><span>episodes</span><strong id="episodes">0</strong></div><div><span>return</span><strong id="return">0.00</strong></div><div><span>weight updates</span><strong id="updates">0</strong></div><div><span>last reward</span><strong id="lastReward">0.000</strong></div><div><span>damage dealt</span><strong id="damageDealt">0</strong></div><div><span>damage received</span><strong id="damageReceived">0</strong></div></div></article>
+
+<article class="panel"><div class="panel-head"><div><p class="kicker">ATTENTION INSPECTOR</p><h2>Records used for chosen action</h2></div><span id="attentionCount" class="choice">0 records</span></div><div id="attentionList" class="attention-list"><div class="attention-empty">No decision yet.</div></div><p class="caption">Useful diagnostic, not a complete causal explanation.</p></article>
+
+<article class="panel state-panel"><div class="panel-head"><div><p class="kicker">NATIVE TELEMETRY</p><h2>Current structured state</h2></div></div><div class="objective"><span>objective</span><strong id="objectiveText">—</strong></div><div id="stateTable" class="state-table"></div></article>
 </section>
-<section class="panel log-panel"><div class="panel-head"><div><p class="kicker">TRACE</p><h2>Recent decisions</h2></div><button id="exportBtn" class="secondary" disabled>Export trace</button></div><pre id="eventLog">boot the engine to begin.</pre></section>
-<footer><span>Native structured state → 4.8k-param neural set policy → typed primitive control</span><a href="./docs/doom-integration.md">integration notes</a></footer>
+
+<details class="panel advanced-panel"><summary>Advanced / ablation controls</summary>
+  <p class="help">These controls are useful for experiments, not required for the recommended run.</p>
+  <div class="advanced-grid"><div><h2>Semantic teacher</h2><div class="model-controls"><select id="modelSelect"><option value="hash">Hash baseline — not semantic</option><option value="mobilebert">MobileBERT-MNLI (~26 MB WASM)</option><option value="distilbert">DistilBERT-MNLI (~67 MB WASM)</option></select><button id="loadModelBtn" class="secondary" disabled>Load teacher</button></div><progress id="modelProgress" max="100" value="0"></progress><div id="modelStatus" class="model-status">No learned teacher loaded.</div></div>
+  <div><h2>Schema compiler</h2><button id="schemaCompileBtn" class="secondary" disabled>Compile with MiniLM (~23 MB)</button><div id="schemaStatus" class="model-status">Lexical feature hash only.</div></div></div>
+</details>
+
+<section class="panel log-panel"><div class="panel-head"><div><p class="kicker">TRACE</p><h2>Recent decisions</h2></div><button id="exportBtn" class="secondary" disabled>Export trace</button></div><pre id="eventLog">Boot the engine to begin.</pre></section>
+<footer><span>Chocolate Doom mechanics → native state → compiled semantics → tiny neural policy → primitive controls</span><span><a href="./docs/results.md">results</a> · <a href="./docs/architecture.md">architecture</a> · <a href="./synthetic.html">legacy synthetic benchmark</a></span></footer>
 </main><script type="module" src="./src/doom-main.js"></script></body></html>

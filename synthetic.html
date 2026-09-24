@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0c10" />
+  <title>DOOM Classifier Lab</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div><p class="eyebrow">SEMANTIC RESIDUAL POLICY / EXPERIMENT 001</p><h1>DOOM Classifier Lab</h1><p class="lede">A browser-native test bed for structured-state → typed-decision controllers.</p></div>
+      <div class="panel-head"><a class="badge" href="./doom.html">open real DOOM experiment</a><div class="status-pill"><span id="statusDot"></span><span id="fsmState">READY</span></div></div>
+    </header>
+
+    <section class="toolbar panel">
+      <button id="startBtn">Start</button><button id="stepBtn" class="secondary">Step</button><button id="resetBtn" class="secondary">Reset</button>
+      <label><input id="residualToggle" type="checkbox" checked /> use residual</label>
+      <label><input id="trainingToggle" type="checkbox" checked /> train online</label>
+      <label><input id="memoryToggle" type="checkbox" checked /> temporal memory</label>
+      <label><input id="exploreToggle" type="checkbox" checked /> exploration</label>
+      <label class="rate">decision Hz <input id="rateInput" type="range" min="1" max="60" value="20" /><output id="rateOut">20</output></label>
+    </section>
+
+    <section class="grid">
+      <article class="panel arena-panel">
+        <div class="panel-head"><div><p class="kicker">ENVIRONMENT</p><h2>Synthetic Arena</h2></div><a class="badge" href="./doom.html">real engine available</a></div>
+        <canvas id="arena" width="760" height="440" aria-label="Synthetic arena visualization"></canvas>
+        <p class="caption">Mechanics and reward live here. No behavioral state→action rule is exposed to the policy.</p>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head"><div><p class="kicker">DECISION</p><h2>Action distribution</h2></div><div id="chosenAction" class="choice">—</div></div>
+        <div id="actionBars" class="bars"></div>
+        <div class="triplet"><div><span>entropy</span><strong id="entropy">0.000</strong></div><div><span>margin</span><strong id="margin">0.000</strong></div><div><span>novelty</span><strong id="novelty">0.000</strong></div></div>
+      </article>
+
+      <article class="panel">
+        <p class="kicker">FAST PATH</p><h2>Latency</h2>
+        <div class="metric-grid"><div><span>last</span><strong id="latLast">0.00 ms</strong></div><div><span>semantic</span><strong id="latSemantic">0.00 ms</strong></div><div><span>p95</span><strong id="latP95">0.00 ms</strong></div><div><span>p99</span><strong id="latP99">0.00 ms</strong></div></div>
+      </article>
+
+      <article class="panel">
+        <p class="kicker">EXPERIENCE</p><h2>Online learner</h2>
+        <div class="metric-grid"><div><span>steps</span><strong id="steps">0</strong></div><div><span>episodes</span><strong id="episodes">0</strong></div><div><span>return</span><strong id="return">0.00</strong></div><div><span>updates</span><strong id="updates">0</strong></div></div>
+        <div class="spark-wrap"><canvas id="rewardChart" width="520" height="90"></canvas></div>
+      </article>
+
+      <article class="panel state-panel"><p class="kicker">OBSERVATION</p><h2>Structured state</h2><div class="objective"><span>objective</span><strong id="objectiveText"></strong></div><div id="stateTable" class="state-table"></div></article>
+
+      <article class="panel">
+        <p class="kicker">SEMANTIC BACKBONE</p><h2 id="backboneName">HashSemanticAdapter</h2>
+        <p class="body-copy">The hash scorer is a control baseline, not a learned model. Switch to an NLI model to test genuine zero-shot semantic action scoring in the same controller.</p>
+        <div class="model-controls">
+          <select id="modelSelect">
+            <option value="hash">Hash structural baseline (no download)</option>
+            <option value="mobilebert">MobileBERT-MNLI (~26 MB WASM / ~50 MB WebGPU)</option>
+            <option value="distilbert">DistilBERT-MNLI (~67 MB WASM / ~134 MB WebGPU)</option>
+          </select>
+          <button id="loadModelBtn" class="secondary">Switch backbone</button>
+        </div>
+        <progress id="modelProgress" max="100" value="0"></progress>
+        <div id="modelStatus" class="model-status">hash baseline ready</div>
+        <div class="callout"><strong>Benchmark rule:</strong><span>switching backbones clears learned residual weights, so semantic comparisons start clean.</span></div>
+      </article>
+    </section>
+
+    <section class="panel log-panel"><div class="panel-head"><div><p class="kicker">TRACE</p><h2>Recent decisions</h2></div><button id="exportBtn" class="secondary">Export trace</button></div><pre id="eventLog">ready.</pre></section>
+    <footer><span>Policy-blind FSM • explicit objective • swappable semantics • tiny consequence learner</span><span><a href="./docs/results.md">results</a> · <a href="./docs/architecture.md">architecture</a></span></footer>
+  </main>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
