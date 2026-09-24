@@ -43,8 +43,8 @@
 <article class="panel control-panel">
   <p class="kicker">WHAT IS ACTIVE?</p><h2>Decision path</h2>
   <div class="toggle-grid">
-    <label><span>Teacher</span><select id="teacherModeSelect" disabled><option value="adaptive">Adaptive</option><option value="every">Every decision</option><option value="off">Off</option></select><small>Semantic model calls. Off is lowest-latency.</small></label>
-    <label><span>Neural value</span><input id="useNeuralToggle" type="checkbox" checked disabled /><small>The 6–7k parameter fast controller.</small></label>
+    <label><span>Teacher</span><select id="teacherModeSelect" disabled><option value="adaptive">Adaptive</option><option value="every">Every decision</option><option value="off">Off</option></select><small>Adaptive = asynchronous supervisor for later ticks; Every decision = teacher is in the decode path; Off = neural-only lowest latency.</small></label>
+    <label><span>Neural value</span><input id="useNeuralToggle" type="checkbox" checked disabled /><small>The 7,316-parameter fast semantic-prior + consequence-value controller.</small></label>
     <label><span>Reward learning</span><input id="learnToggle" type="checkbox" disabled /><small>Updates neural weights from game consequences.</small></label>
     <label><span>Temporal memory</span><input id="memoryToggle" type="checkbox" checked disabled /><small>Recent state changes enter the neural query.</small></label>
     <label><span>Exploration</span><input id="exploreToggle" type="checkbox" disabled /><small>Occasional random action during learning only.</small></label>
@@ -54,7 +54,7 @@
 
 <article class="panel tune-panel">
   <div class="panel-head"><div><p class="kicker">OPTIONAL BROWSER FINE-TUNE</p><h2>Learn from real Doom transitions</h2></div><div id="tuneBadge" class="choice">not trained</div></div>
-  <p class="help">Training uses the same primitive actions. Reward comes from consequences—hostile damage/kills, player damage, survival cost—not rules such as “enemy visible → fire.”</p>
+  <p class="help">Training uses the same primitive actions. Reward comes from consequences—hostile damage/kills, player damage, survival cost, and a small first-visit spatial novelty bonus—not rules such as “enemy visible → fire.”</p>
   <div class="model-controls"><select id="tuneSteps" disabled><option value="64">64 decisions — quick</option><option value="128" selected>128 decisions — recommended</option><option value="256">256 decisions — longer</option></select><button id="tuneBtn" disabled>Train then freeze</button><button id="evalBtn" class="secondary" disabled>Evaluate frozen (48)</button></div>
   <progress id="tuneProgress" max="100" value="0"></progress><div id="tuneStatus" class="model-status">Preparation required.</div><div id="evalResults" class="eval-results"><span>Run a frozen evaluation before and after training to compare behavior.</span></div>
 </article>
