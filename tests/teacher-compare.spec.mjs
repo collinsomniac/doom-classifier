@@ -36,6 +36,6 @@ test("compare browser NLI teachers on identical structured DOOM probes",async({p
   const status=(await page.locator("#modelStatus").textContent())||"";
   if(status.includes("failed"))throw new Error(status);
   const distil=await probe();
-  console.log("DOOM_TEACHER_COMPARISON "+JSON.stringify({mobile,distil}));
+  console.log("DOOM_TEACHER_COMPARISON "+JSON.stringify({scoring:"independent-entailment-logodds",mobile,distil}));
   expect(mobile.teacher).toContain("MobileBERT");expect(distil.teacher).toContain("DistilBERT");
 });
