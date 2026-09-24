@@ -2,7 +2,8 @@ const TRANSFORMERS_CDN="https://cdn.jsdelivr.net/npm/@huggingface/transformers@4
 
 export const NLI_PRESETS=Object.freeze({
   mobilebert:{label:"MobileBERT-MNLI",modelId:"Xenova/mobilebert-uncased-mnli",gpuDtype:"fp16",wasmDtype:"int8",approx:"~50 MB WebGPU / ~26 MB WASM"},
-  distilbert:{label:"DistilBERT-MNLI",modelId:"Xenova/distilbert-base-uncased-mnli",gpuDtype:"fp16",wasmDtype:"int8",approx:"~134 MB WebGPU / ~67 MB WASM"}
+  distilbert:{label:"DistilBERT-MNLI",modelId:"Xenova/distilbert-base-uncased-mnli",gpuDtype:"fp16",wasmDtype:"int8",approx:"~134 MB WebGPU / ~67 MB WASM"},
+  deberta:{label:"DeBERTa-v3-xsmall NLI",modelId:"Xenova/nli-deberta-v3-xsmall",gpuDtype:"fp16",wasmDtype:"int8",approx:"~143 MB WebGPU / ~90 MB WASM"}
 });
 function normalizeProgress(info){
   if(!info||typeof info!=="object")return null;
