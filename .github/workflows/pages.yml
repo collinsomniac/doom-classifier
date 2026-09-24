@@ -27,6 +27,8 @@ jobs:
         run: node tests/doom-adapter.mjs
       - name: Run neural set invariants
         run: node tests/neural-set.mjs
+      - name: Run neural temporal invariants
+        run: node tests/neural-temporal.mjs
       - name: Run action-conditioned attention invariants
         run: node tests/action-attention.mjs
       - name: Benchmark neural set fast path
