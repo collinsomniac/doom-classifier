@@ -44,14 +44,14 @@ function confidenceStats(probs){
 export class SemanticResidualPolicy{
   constructor({
     schema,actions,semantic,residual="linear",residualWeight=.9,temperature=.8,epsilon=.08,seed=2026,
-    inferenceMode="hybrid",teacherInterval=32,teacherMinGap=8,teacherEntropy=.78,teacherMargin=.10,teacherNovelty=.85,teacherEpistemic=.025,distillSteps=4
+    inferenceMode="hybrid",teacherInterval=32,teacherMinGap=8,teacherEntropy=.78,teacherMargin=.10,teacherNovelty=.85,teacherEpistemic=.025,distillSteps=4,replayCapacity=96,replayBatch=2
   }){
     this.schema=schema;this.actions=actions;this.residualWeight=residualWeight;this.temperature=temperature;this.epsilon=epsilon;this.seed=seed;this.rng=mulberry32(seed);
     this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;
     if(typeof residual==="object")this.q=residual;
     else if(residual==="neural-set")this.q=new NeuralSetResidualQ(schema,actions,{seed});
     else this.q=new LinearResidualQ(actions.length,this.featureSize);
-    this.inferenceMode=inferenceMode;this.teacherInterval=teacherInterval;this.teacherMinGap=teacherMinGap;this.teacherEntropy=teacherEntropy;this.teacherMargin=teacherMargin;this.teacherNovelty=teacherNovelty;this.teacherEpistemic=teacherEpistemic;this.distillSteps=distillSteps;
+    this.inferenceMode=inferenceMode;this.teacherInterval=teacherInterval;this.teacherMinGap=teacherMinGap;this.teacherEntropy=teacherEntropy;this.teacherMargin=teacherMargin;this.teacherNovelty=teacherNovelty;this.teacherEpistemic=teacherEpistemic;this.distillSteps=distillSteps;this.replayCapacity=replayCapacity;this.replayBatch=replayBatch;this.replay=[];this.replayRng=mulberry32((seed^0x517cc1b7)>>>0);
     this.novelty=new NoveltyTracker(this.baseSize);
     this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherGeneration=0;this.teacherPromise=null;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;
     this.setSemantic(semantic);
@@ -69,12 +69,12 @@ export class SemanticResidualPolicy{
     this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;this.novelty=new NoveltyTracker(this.baseSize);
     if(this.q.setSchema&&this.q.setActions){this.q.setSchema(schema);this.q.setActions(actions)}
     else if(this.q instanceof LinearResidualQ){this.q=new LinearResidualQ(actions.length,this.featureSize)}
-    this.semantic.compile(schema,actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;
+    this.semantic.compile(schema,actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.replay=[];
     return this;
   }
   resetEpisode(){this.memory.reset()}
   resetLearning(){
-    this.teacherGeneration++;this.teacherPromise=null;this.q.reset();this.novelty.reset();this.rng=mulberry32(this.seed);
+    this.teacherGeneration++;this.teacherPromise=null;this.q.reset();this.novelty.reset();this.rng=mulberry32(this.seed);this.replayRng=mulberry32((this.seed^0x517cc1b7)>>>0);this.replay=[];
     this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;
   }
   encode(obs,memoryEnabled=true,commit=true){
@@ -162,8 +162,18 @@ export class SemanticResidualPolicy{
     };
   }
   learn(transition){
-    if(this.q.updateTransition)return this.q.updateTransition(transition);
-    return this.q.update(transition.features,transition.actionIndex,transition.reward,transition.nextFeatures,transition.done);
+    if(!this.q.updateTransition)return this.q.update(transition.features,transition.actionIndex,transition.reward,transition.nextFeatures,transition.done);
+    const primary=this.q.updateTransition(transition);
+    if(this.replayCapacity>0){
+      this.replay.push(transition);if(this.replay.length>this.replayCapacity)this.replay.shift();
+    }
+    let replayUpdates=0,replayAbsTd=0;
+    const candidates=Math.max(0,this.replay.length-1),count=Math.min(this.replayBatch,candidates);
+    for(let i=0;i<count;i++){
+      const index=Math.floor(this.replayRng()*candidates),sample=this.replay[index],result=this.q.updateTransition(sample);
+      replayUpdates++;replayAbsTd+=Math.abs(Number(result?.td||0));
+    }
+    return{...primary,replayUpdates,replayMeanAbsTd:replayUpdates?replayAbsTd/replayUpdates:0,replaySize:this.replay.length};
   }
   distill(observation,teacherScores,options){return this.q.distill?.(observation,teacherScores,options)||null}
 }
