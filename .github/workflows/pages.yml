@@ -39,6 +39,8 @@ jobs:
         run: node tests/adaptive-teacher.mjs
       - name: Run experience replay invariants
         run: node tests/experience-replay.mjs
+      - name: Run temperature calibration invariants
+        run: node tests/temperature-calibration.mjs
       - name: Run semantic collection summary
         run: node tests/nli-state-summary.mjs
       - name: Run schema transfer invariants
