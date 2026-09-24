@@ -5,7 +5,7 @@ import {ExperimentController} from "./core/controller.js";
 import {TransformersNLIAdapter,NLI_PRESETS} from "./model-adapters/transformers-nli.js";
 
 const $=id=>document.getElementById(id);
-const ui={boot:$("bootBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),runtime:$("runtimeStatus"),bootStatus:$("bootStatus"),path:$("pathSelect"),residual:$("residualToggle"),training:$("trainingToggle"),memory:$("memoryToggle"),explore:$("exploreToggle"),actionMs:$("actionMs"),actionMsOut:$("actionMsOut"),bars:$("actionBars"),chosen:$("chosenAction"),entropy:$("entropy"),margin:$("margin"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),teacherCalls:$("teacherCalls"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),state:$("stateTable"),objective:$("objectiveText"),steps:$("steps"),episodes:$("episodes"),ret:$("return"),updates:$("updates"),lastReward:$("lastReward"),log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot")};
+const ui={boot:$("bootBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),runtime:$("runtimeStatus"),bootStatus:$("bootStatus"),path:$("pathSelect"),residual:$("residualToggle"),training:$("trainingToggle"),memory:$("memoryToggle"),explore:$("exploreToggle"),actionMs:$("actionMs"),actionMsOut:$("actionMsOut"),bars:$("actionBars"),chosen:$("chosenAction"),entropy:$("entropy"),margin:$("margin"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),state:$("stateTable"),objective:$("objectiveText"),steps:$("steps"),episodes:$("episodes"),ret:$("return"),updates:$("updates"),lastReward:$("lastReward"),log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot")};
 let env=null,policy=null,controller=null,hashSemantic=null;
 
 function setReadyControls(ready){for(const el of [ui.start,ui.step,ui.reset,ui.loadModel,ui.export,ui.path])el.disabled=!ready}
@@ -19,6 +19,14 @@ function render(){
   const lat=controller.latencySummary();ui.latLast.textContent=lat.last.toFixed(2)+" ms";ui.latP95.textContent=lat.p95.toFixed(2)+" ms";
   const d=controller.lastDecision;
   if(d){
+    const decisionObs=controller.trace.at(-1)?.observation||obs;
+    const attended=policy.q.inspectAttention?.(decisionObs,d.actionIndex,{topK:6})||[];
+    ui.attentionCount.textContent=attended.length+" records";
+    ui.attention.innerHTML=attended.length?attended.map(item=>{
+      const interesting=Object.entries(item.record||{}).filter(([,value])=>typeof value==="number"&&Number.isFinite(value)&&value!==0).sort((a,b)=>Math.abs(Number(b[1]))-Math.abs(Number(a[1]))).slice(0,5);
+      const detail=interesting.map(([key,value])=>key+"="+Number(value).toFixed(Math.abs(value)<10?2:0)).join(" · ");
+      return '<div class="attention-row"><div><strong>'+item.collectionId+'['+item.index+']</strong><small>'+detail+'</small></div><span>'+(item.weight*100).toFixed(1)+'%</span></div>';
+    }).join(""):'<div class="attention-empty">No structured records in this observation.</div>';
     ui.latSemantic.textContent=(d.semanticLatencyMs||policy.lastTeacherLatencyMs||0).toFixed(2)+" ms";ui.lastReward.textContent=d.reward.toFixed(3);ui.chosen.textContent=d.action.label;ui.entropy.textContent=d.uncertainty.entropy.toFixed(3);ui.margin.textContent=d.uncertainty.margin.toFixed(3);ui.novelty.textContent=d.uncertainty.novelty.toFixed(3);
     [...ui.bars.children].forEach((row,i)=>{row.querySelector(".bar-fill").style.width=(d.probs[i]*100).toFixed(1)+"%";row.lastElementChild.textContent=d.probs[i].toFixed(3)});
     ui.log.textContent=controller.trace.slice(-12).reverse().map(t=>"s"+String(t.step).padStart(4,"0")+" "+(t.teacherUsed?"Q":t.teacherPending?"…":"·")+" "+t.action.padEnd(13)+" p="+Math.max(...Object.values(t.probabilities)).toFixed(3)+" r="+t.reward.toFixed(3)+" neural="+t.residualLatencyMs.toFixed(2)+"ms total="+t.latencyMs.toFixed(1)+"ms").join("\n");
