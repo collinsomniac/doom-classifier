@@ -41,6 +41,8 @@ jobs:
         run: node tests/nli-state-summary.mjs
       - name: Run schema transfer invariants
         run: node tests/schema-transfer.mjs
+      - name: Run compiled semantic vector invariants
+        run: node tests/semantic-vectors.mjs
       - name: Benchmark action cardinality
         run: node tests/action-cardinality.mjs
       - name: Run adaptation benchmark
