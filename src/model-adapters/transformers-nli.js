@@ -29,7 +29,9 @@ function fieldStats(field,records){
   if(!raw.length)return null;
   const mean=raw.reduce((a,b)=>a+b,0)/raw.length,nmean=norm.reduce((a,b)=>a+b,0)/norm.length;
   const variance=norm.reduce((s,v)=>s+(v-nmean)*(v-nmean),0)/norm.length;
-  return{field,mean,min:Math.min(...raw),max:Math.max(...raw),variance};
+  const booleanish=field.min===0&&field.max===1;
+  const active=booleanish?raw.filter(v=>v>.5).length:0;
+  return{field,mean,min:Math.min(...raw),max:Math.max(...raw),variance,booleanish,active,count:raw.length};
 }
 function representativeRecords(records,stats,count=2){
   if(!records.length||!stats.length)return[];
@@ -50,11 +52,19 @@ function representativeRecords(records,stats,count=2){
   }
   return selected;
 }
-export function summarizeCollection(collection,records,{maxFields=6,representatives=2}={}){
-  const stats=(collection.fields||[]).map(field=>fieldStats(field,records)).filter(Boolean).sort((a,b)=>b.variance-a.variance).slice(0,maxFields);
+export function summarizeCollection(collection,records,{maxFields=8,representatives=2,maxFlags=4}={}){
+  const all=(collection.fields||[]).map(field=>fieldStats(field,records)).filter(Boolean);
+  const flags=all.filter(s=>s.booleanish&&s.active>0).sort((a,b)=>(b.active/b.count)-(a.active/a.count)||String(a.field.id).localeCompare(String(b.field.id))).slice(0,maxFlags);
+  const chosen=new Set(flags.map(s=>s.field.id));
+  const numeric=all.filter(s=>!chosen.has(s.field.id)).sort((a,b)=>b.variance-a.variance);
+  const stats=[...flags,...numeric].slice(0,maxFields);
   const label=collection.label||collection.id,description=collection.description?" ("+collection.description+")":"";
   const lines=[label+description+": "+records.length+" records."];
-  if(stats.length)lines.push("stats: "+stats.map(s=>(s.field.label||s.field.id)+" mean="+s.mean.toFixed(2)+" min="+s.min.toFixed(2)+" max="+s.max.toFixed(2)).join("; "));
+  if(stats.length)lines.push("stats: "+stats.map(s=>{
+    const name=s.field.label||s.field.id;
+    if(s.booleanish)return name+" active="+s.active+"/"+s.count+" ("+Math.round(100*s.active/s.count)+"%)";
+    return name+" mean="+s.mean.toFixed(2)+" min="+s.min.toFixed(2)+" max="+s.max.toFixed(2);
+  }).join("; "));
   const reps=representativeRecords(records,stats,representatives);
   reps.forEach((record,i)=>lines.push("representative "+(i+1)+": {"+stats.map(s=>(s.field.label||s.field.id)+":"+Number(record[s.field.id]??0).toFixed(2)).join(", ")+"}"));
   return lines.join("\n");
