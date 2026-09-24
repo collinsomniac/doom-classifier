@@ -22,7 +22,7 @@ const ACTION_SPECS=Object.freeze([
   action("strafe_right_fire","strafe right + fire","hold right strafe and weapon fire at the same time",BITS.STRAFE_RIGHT|BITS.FIRE),
   action("turn_left_fire","turn left + fire","turn left and fire the equipped weapon at the same time",BITS.TURN_LEFT|BITS.FIRE),
   action("turn_right_fire","turn right + fire","turn right and fire the equipped weapon at the same time",BITS.TURN_RIGHT|BITS.FIRE),
-  action("use","use","activate or interact with something directly in front of the player",BITS.USE),
+  action("use","interact / open","press the use key to open doors, activate switches, lifts, or other usable map elements directly ahead",BITS.USE),
   action("wait","wait","apply no movement, turning, firing, or use input for this decision interval",0)
 ]);
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
