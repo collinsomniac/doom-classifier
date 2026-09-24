@@ -22,7 +22,7 @@ The real-time controller now combines:
 - **teacher distillation** — expensive semantic calls update the tiny controller instead of becoming a permanent inference dependency;
 - **policy-blind orchestration** — runtime state machines handle lifecycle/timing but contain no gameplay strategy.
 
-The fast network currently has roughly **6.4k trainable parameters**. Schema/action cardinality does not change that parameter count.
+The fast network currently has **6,803 trainable parameters**. Schema/action cardinality does not change that parameter count.
 
 ## Experiments
 
@@ -67,16 +67,16 @@ The live page also exposes chosen-action record attention so we can inspect whic
 
 Current GitHub Actions CPU benchmark, 768 structured records and 12 actions:
 
-- p50: ~4.0 ms
-- p95: ~5.2 ms
-- parameters: 6,419
+- p50: ~5.49 ms
+- p95: ~7.42 ms
+- parameters: 6,803
 
 Action-cardinality benchmark on the same tiny fixed-size network:
 
-- 8 actions: ~0.74 ms p50
-- 128 actions: ~2.06 ms p50
-- 512 actions: ~6.40 ms p50
-- 1,024 actions: ~12.37 ms p50
+- 8 actions: ~1.10 ms p50
+- 128 actions: ~2.88 ms p50
+- 512 actions: ~9.27 ms p50
+- 1,024 actions: ~17.82 ms p50
 
 These are engineering microbenchmarks, not a claim of equivalent accuracy to Jev or Laya. The important result is that native structured state can be scored without serializing the changing environment back through a large language encoder every tick.
 
