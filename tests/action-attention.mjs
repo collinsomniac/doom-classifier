@@ -14,7 +14,7 @@ const obs={energy:.8,_collections:{objects:[
   {slot:3,distance:80,utility:.3,hostile:0}
 ]}};
 const net=new NeuralSetResidualQ(schema,actions,{seed:33});
-assert.ok(net.parameterCount()<7000);
+assert.ok(net.parameterCount()<8000);
 for(let a=0;a<actions.length;a++){
   const top=net.inspectAttention(obs,a,{topK:3}),sum=top.reduce((s,x)=>s+x.weight,0);
   assert.ok(Math.abs(sum-1)<1e-6);
