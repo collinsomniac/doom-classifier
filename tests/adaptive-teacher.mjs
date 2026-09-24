@@ -13,7 +13,7 @@ class DeferredSemantic{
 const schema={fields:[{id:"x",label:"signal",description:"generic signal",min:0,max:1}],collections:[{id:"items",label:"items",description:"candidate records",fields:[{id:"v",label:"value",description:"candidate value",min:0,max:1}]}]};
 const actions=[{id:"go",label:"go",description:"perform the useful operation"},{id:"hold",label:"hold",description:"do nothing for now"}];
 const semantic=new DeferredSemantic();
-const policy=new SemanticResidualPolicy({schema,actions,semantic,residual:"neural-set",inferenceMode:"adaptive",teacherInterval:3,teacherMinGap:3,teacherEntropy:2,teacherMargin:-1,teacherNovelty:2,distillSteps:2,seed:12});
+const policy=new SemanticResidualPolicy({schema,actions,semantic,residual:"neural-set",inferenceMode:"adaptive",teacherInterval:3,teacherMinGap:3,teacherEntropy:2,teacherMargin:-1,teacherNovelty:2,teacherEpistemic:2,distillSteps:2,seed:12});
 const obs={x:.5,_collections:{items:[{v:.7},{v:.2}]}};
 
 const first=await policy.decide(obs,{useResidual:true});
