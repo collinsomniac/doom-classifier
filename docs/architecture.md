@@ -2,106 +2,271 @@
 
 ## Research target
 
-This project is not attempting to solve perception first. The primary benchmark is:
+The primary benchmark is:
 
-\[
-\text{structured environment state} \rightarrow \text{typed semantic decision}
-\]
+[
+	ext{structured environment state} ightarrow 	ext{typed decision distribution}
+]
 
-The reference point is the behavior demonstrated by Jev-like typed decision systems and open implementations such as Laya, while keeping the design sufficiently generic that DOOM is only one environment adapter.
+Perception can be added later, but the current question is deliberately narrower: if useful machine state already exists, how little learned compute is required to turn it into fast, calibrated-enough, adaptable actions?
 
-## Core decomposition
+DOOM is the first harness because it supplies rich dynamics, consequences, entities, geometry and a recognizable control surface. The core policy API must remain usable outside games.
 
-The working hypothesis is that a useful low-latency controller can be decomposed into five independently measurable pieces:
+## Design principle: language at compile time, numbers at control time
 
-1. **semantic prior** — understands field/action meaning;
-2. **temporal state** — retains cheap history without resending a textual transcript;
-3. **experience residual** — learns which semantically plausible actions actually work;
-4. **calibrated uncertainty** — detects ambiguity / novelty and optionally gates escalation;
-5. **policy-blind orchestration** — manages lifecycle and timing without encoding strategy.
+Large typed-decision models such as Laya accept text/JSON and recover semantics inside a language encoder on each request. That is flexible, but repeated state fields, action descriptions and schema prose are mostly static.
 
-The intended score is conceptually:
+doom-classifier separates two paths.
 
-\[
-L(a_t)=S_{\text{semantic}}(s_t,a_t)+\lambda Q_{\text{experience}}(h_t,a_t)
-\]
+### Compile path
 
-with
+Potentially expensive and infrequent:
 
-\[
-\pi(a_t)=\mathrm{softmax}(L(a_t)/T)
-\]
+1. read the environment objective and schema metadata;
+2. compile lexical metadata;
+3. optionally embed objective / field / collection / action language with MiniLM;
+4. compile typed numeric action-field definitions;
+5. initialize or reconfigure the small neural controller;
+6. optionally call a larger semantic teacher and distill its distribution.
 
-The current implementation contains an intentionally weak structural semantic adapter and a tiny linear residual Q learner. This is a measurement scaffold, not the final model.
+### Control path
 
-## Semantic compilation
+Bounded and repeated:
 
-Environment schemas and action descriptions are largely static. A future pretrained adapter should compile them once:
+1. receive native numeric globals and variable record collections;
+2. compute recent temporal deltas;
+3. encode globals, temporal state and records;
+4. perform action-conditioned record attention;
+5. score every request-time candidate action;
+6. aggregate the bootstrap value ensemble;
+7. softmax the resulting action preferences;
+8. optionally schedule a teacher asynchronously;
+9. execute the selected primitive action.
 
-\[
-e_i=E(\text{field metadata}_i),\quad u_j=E(\text{action metadata}_j)
-\]
+No textual state serialization is required on ordinary neural-only ticks.
 
-Runtime values can then be fused with cached representations instead of repeatedly tokenizing the same prose each decision tick.
+## Neural controller
 
-The adapter contract therefore separates:
+Current controller: `SchemaHashAttentionSetNet`.
 
-- **compile(schema, actions)** — slow/static path;
-- **score(observation)** — bounded fast path.
+The parameter count is independent of the number of records and action candidates.
 
-A Laya-derived ONNX scorer, NLI cross-encoder, embedding scorer, or purpose-trained model can implement the same boundary.
+### Static schema representation
 
-## State machine boundary
+Each field/action receives a fixed-size representation from:
 
-The orchestration state machine may know model/environment readiness, running/paused/reset/error states, action scheduling, episode boundaries, logging, replay, whether learning or escalation is enabled, and compute budgets.
+- lexical feature hashing over labels/descriptions/units;
+- optional MiniLM sentence embeddings projected into the same fixed space;
+- normalized numeric action parameters where defined.
 
-It must not know that low health implies retreat, an enemy implies firing, lack of ammunition implies weapon switching, or any other strategic state → action rule.
+The lexical path guarantees a zero-download fallback. The semantic-vector path improves paraphrase relationships without placing MiniLM on the real-time loop.
+
+### Global state
+
+Current scalar fields are normalized from declared ranges or scales and modulate their compiled field representations.
+
+The objective is also part of the compiled global representation. This is important: the neural controller is not merely learning an environment-specific Q-table; its state representation is conditioned on what the environment says success means.
+
+### Temporal state
+
+Recent normalized scalar deltas are maintained by a leaky temporal memory.
+
+Temporal features are encoded through a separate learned projection using metadata equivalent to "recent change in <field>". They are not silently concatenated with instantaneous values.
+
+This currently covers global fields. Identity-aware temporal tracking for variable records is a future extension.
+
+### Variable collections
+
+An observation can contain arbitrary named collections:
+
+[
+C_k = {r_1, r_2, ldots, r_n}
+]
+
+Every record is encoded with the same small MLP. Record ordering is intentionally irrelevant.
+
+A global set summary uses mean and max pooling plus bounded record-count information.
+
+### Action-conditioned attention
+
+Mean/max pooling is not enough when different actions should inspect different parts of the world.
+
+For action (a), the action embedding produces a query (q_a). Every record latent (z_i) receives:
+
+[
+alpha_i(a)=mathrm{softmax}left(rac{q_a^	op z_i}{sqrt d}ight)
+]
+
+and the action receives:
+
+[
+c_a=sum_i alpha_i(a)z_i
+]
+
+The final score head therefore sees:
+
+- global state;
+- temporal state;
+- permutation-invariant set summary;
+- action-specific attended record context;
+- the typed action embedding.
+
+The live UI exposes top attention records for the chosen action as a diagnostic, not as a claim of causal interpretability.
+
+## Request-time typed actions
+
+Actions are not represented by fixed output neurons alone.
+
+A candidate can include:
+
+- id / label / description;
+- optional static semantic vector;
+- optional numeric `params` / `values` governed by `schema.actionFields`.
+
+This permits candidate spaces such as:
+
+- discrete game controls;
+- click coordinates;
+- actuator values;
+- ranked objects;
+- thresholds;
+- prices / bids;
+- route candidates;
+- tool calls with numeric arguments.
+
+Changing candidate order or cardinality does not change parameter count.
+
+## Value ensemble and uncertainty
+
+A single softmax peak is not equivalent to knowledge.
+
+The controller now uses three independently initialized scalar value heads over a shared encoder. Reward updates bootstrap a subset of heads; teacher distillation supervises all heads.
+
+The policy reports four distinct signals:
+
+1. **entropy** — distribution diffuseness;
+2. **margin** — top-1 / top-2 separation;
+3. **novelty** — scalar-state deviation from online history;
+4. **epistemic disagreement** — normalized Jensen-Shannon disagreement among ensemble policy distributions.
+
+The ensemble is intentionally cheap: only the scalar output heads are independent in the current version. This is a first epistemic approximation, not a fully independent deep ensemble.
+
+## Semantic teacher
+
+The normal fast path can run without a large semantic model.
+
+Three inference modes are supported:
+
+- **hybrid** — semantic model runs every decision and is combined with neural value;
+- **adaptive** — neural policy controls immediately; semantic teacher is scheduled asynchronously when warranted;
+- **neural** — no semantic calls.
+
+Adaptive teacher triggers can include:
+
+- initial/bootstrap supervision;
+- fixed refresh interval;
+- high entropy;
+- small top-two margin;
+- state novelty;
+- ensemble disagreement.
+
+A teacher result is distilled into the small network. Generation/version guards prevent stale teacher results from being applied after model/schema reconfiguration.
+
+## Online consequence learning
+
+Reward adaptation uses tiny TD-style updates.
+
+For chosen action (a_t):
+
+[
+delta_t=r_t+gamma max_a Q(s_{t+1},a)-Q(s_t,a_t)
+]
+
+The shared representation and a bootstrapped subset of ensemble heads are updated.
+
+The reward signal defines consequences, not strategy. The environment is allowed to say that death is bad or progress is rewarded; it is not allowed to say "if health is low, retreat."
+
+## Orchestration boundary
+
+The state machine may understand:
+
+- readiness;
+- running / paused / reset / error;
+- action timing;
+- episode boundaries;
+- logging;
+- learning enabled/disabled;
+- teacher enabled/disabled;
+- compute budgets.
+
+It must not encode behavioral rules.
 
 **The FSM understands program state, never strategy.**
 
-## Online learning
+## DOOM adapter
 
-Runtime adaptation should touch as few parameters as possible. The current residual is a linear Q approximator over normalized observation features and temporal deltas. It can be switched off without changing the semantic policy.
+The current adapter exposes:
 
-Later variants can replace it with a small MLP residual, LoRA/adapters on a frozen encoder, learned recurrent state, distributional value head, or consequence/transition prediction head.
+- global player/resource state;
+- a variable entity collection;
+- a variable geometry collection;
+- reward and terminal state;
+- primitive input actuation.
 
-Normal inference must not wait for training. Browser versions should train between episodes or in a separate worker unless profiling proves synchronous micro-updates are harmless.
+It does not expose tactical macros.
 
-## Uncertainty and escalation
+The current browser engine is a pinned Chocolate Doom/Freedoom research runtime borrowed for bootstrap convenience. A project-owned minimal telemetry build remains a milestone.
 
-The current lab reports normalized action entropy, top-1/top-2 probability margin, and online feature novelty.
+## Transfer invariants
 
-A future escalation gate should combine them rather than equating max-softmax probability with knowledge.
+The test suite now checks or is designed to check:
 
-Teacher-assisted runs must always be distinguished from teacher-off evaluation. The long-term metric is not only performance but declining teacher-query rate after adaptation.
+- record permutation invariance;
+- field/action reordering;
+- renamed identifiers with stable descriptions;
+- range/unit rescaling;
+- request-time action cardinality;
+- typed numeric action parameters;
+- temporal channel influence;
+- action-conditioned attention;
+- compiled semantic-vector influence;
+- teacher-off neural inference.
 
-## Anti-overfitting tests
+Future tests should add:
 
-A useful controller should survive field reordering, key renaming with descriptions preserved, description paraphrases, unit/scale changes, dropped fields, irrelevant distractor fields, action reordering, changed action labels, changed option cardinality, and unseen structured environments.
+- semantic description paraphrases with actual MiniLM compilation;
+- collection renaming;
+- missing fields;
+- distractor records;
+- unseen objectives;
+- cross-domain environments.
 
-Schema dropout and temporal dropout should become training-time augmentations.
+## Current complexity
 
-## DOOM integration boundary
+At the present configuration the fast model is roughly 6.4k trainable parameters.
 
-A DOOM adapter should expose generic operations similar to:
+A GitHub Actions CPU microbenchmark with 768 records and 12 actions is approximately 4–5 ms p50/p95. Candidate cardinality scales without increasing parameter count.
 
-\`\`\`text
-reset() -> observation
-observe() -> structured observation
-step(typedAction) -> { observation, reward, done, info }
-getSchema() -> field metadata
-getActions() -> typed action schema
-\`\`\`
+Those numbers describe compute behavior, not policy quality.
 
-Engine telemetry belongs in the adapter. Strategic interpretation does not.
+## Next architectural milestones
 
-A later player-parity benchmark can replace direct telemetry with perception-derived state without changing the policy interface.
+### Calibration
 
-## Milestones
+Add held-out Brier score, log score, ECE/reliability diagrams and temperature/isotonic calibration. Ensemble disagreement should be validated against actual error rather than assumed useful.
 
-- **M0 — runnable lab:** synthetic environment, policy API, memory, online residual, uncertainty and latency metrics.
-- **M1 — real semantic adapter:** browser model adapter using ONNX Runtime Web / Transformers.js or a converted dedicated scorer.
-- **M2 — DOOM WASM:** in-browser engine with structured telemetry and typed actuation.
-- **M3 — teacher collection:** uncertainty-triggered escalation and distillation dataset generation.
-- **M4 — consequence learning:** short-horizon transition/value prediction and optional bounded planning.
-- **M5 — transfer suite:** multiple structured environments plus schema perturbation benchmarks.
+### Record identity / recurrence
+
+Global temporal deltas are now real, but collections are still encoded independently each tick. Add generic record identity association and recurrent/set-memory variants.
+
+### Offline distillation checkpoint
+
+Collect state/action/teacher/reward traces, train the small controller offline, and ship a portable checkpoint rather than beginning every environment from random weights.
+
+### Multi-environment transfer suite
+
+DOOM alone cannot establish generality. Add structured environments with unrelated semantics and action types.
+
+### Owned engine artifact
+
+Build the minimal telemetry ABI from pinned open source so the project no longer relies on a neighboring prebuilt research runtime.
