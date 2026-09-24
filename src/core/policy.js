@@ -36,6 +36,9 @@ function ensembleDisagreement(memberScores,temperature=1){
   }
   return Math.max(0,Math.min(1,(js/members)/Math.log(actions)));
 }
+function klDivergence(target,predicted){
+  let value=0;for(let i=0;i<target.length;i++)if(target[i]>0)value+=target[i]*Math.log(target[i]/Math.max(1e-9,predicted[i]));return value;
+}
 function crossEntropy(target,predicted){
   let loss=0;for(let i=0;i<target.length;i++)if(target[i]>0)loss-=target[i]*Math.log(Math.max(1e-9,predicted[i]));return loss;
 }
@@ -109,20 +112,25 @@ export class SemanticResidualPolicy{
     this.temperature=clamp(this.temperature*(1-blend)+bestT*blend,.30,1.5);
     return{temperature:this.temperature,bestTemperature:bestT,loss:bestLoss};
   }
-  applyTeacherScores(obs,scores,steps=this.distillSteps,temporal=null){
+  applyTeacherScores(obs,scores,steps=this.distillSteps,temporal=null,{maxSteps=steps,targetKL=null}={}){
     if(!this.q.distill)return null;
-    let result=null;
-    for(let i=0;i<steps;i++)result=this.q.distill(obs,scores,{strength:.5,temporal});
+    const teacher=softmax(scores,1);let result=null,used=0,kl=Infinity;
+    const cap=Math.max(steps,Math.floor(maxSteps||steps));
+    for(let i=0;i<cap;i++){
+      result=this.q.distill(obs,scores,{strength:.5,temporal});used=i+1;
+      if(result?.student){kl=klDivergence(teacher,result.student);if(used>=steps&&targetKL!=null&&kl<=targetKL)break}
+      if(used>=steps&&targetKL==null)break;
+    }
     this.q.syncTarget?.();
-    return result;
+    return result?{...result,stepsUsed:used,kl}:null;
   }
-  async primeTeacher(obs,{steps=Math.max(4,this.distillSteps),temporal=null}={}){
+  async primeTeacher(obs,{steps=Math.max(4,this.distillSteps),maxSteps=steps,targetKL=null,temporal=null}={}){
     const semantic=this.semantic,generation=this.teacherGeneration,requestedStep=this.decisionCount;
     const result=await this.semanticScores(obs,semantic);
     if(generation!==this.teacherGeneration||semantic!==this.semantic)return{stale:true,ms:result.ms};
-    this.applyTeacherScores(obs,result.scores,steps,temporal);const calibration=this.calibrateTemperature(obs,result.scores,temporal,{blend:.65});
+    const distillation=this.applyTeacherScores(obs,result.scores,steps,temporal,{maxSteps,targetKL});const calibration=this.calibrateTemperature(obs,result.scores,temporal,{blend:.65});
     this.teacherCalls++;this.lastTeacherStep=requestedStep;this.lastTeacherLatencyMs=result.ms;this.lastTeacherError=null;
-    return{stale:false,ms:result.ms,scores:result.scores,calibration};
+    return{stale:false,ms:result.ms,scores:result.scores,calibration,distillation};
   }
   scheduleTeacher(obs,temporal=null){
     if(this.teacherPromise)return false;
