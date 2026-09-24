@@ -15,11 +15,12 @@ const schema={
 };
 const actions=[{id:"use",label:"use",description:"use a suitable object"},{id:"wait",label:"wait",description:"do nothing"}];
 const obs={energy:55,_collections:{objects:[
-  {distance:5,quality:.9,active:1},{distance:80,quality:.2,active:0},{distance:40,quality:.5,active:1}
+  {distance:5,quality:.9,active:1},{distance:80,quality:.2,active:1},{distance:40,quality:.5,active:1}
 ]}};
 const summary=summarizeCollection(schema.collections[0],obs._collections.objects);
 assert.match(summary,/3 records/);
 assert.match(summary,/distance/);
+assert.match(summary,/active active=3\/3 \(100%\)/,"constant active binary flag must survive variance-based compression");
 assert.match(summary,/representative 1/);
 const adapter=new TransformersNLIAdapter({maxStateChars:2000});
 adapter.compile(schema,actions);
