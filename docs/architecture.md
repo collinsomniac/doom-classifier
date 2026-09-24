@@ -243,9 +243,9 @@ Future tests should add:
 
 ## Current complexity
 
-At the present configuration the fast model is roughly 6.4k trainable parameters.
+At the present configuration the fast model has 6,803 trainable parameters.
 
-A GitHub Actions CPU microbenchmark with 768 records and 12 actions is approximately 4–5 ms p50/p95. Candidate cardinality scales without increasing parameter count.
+A GitHub Actions CPU microbenchmark with 768 records and 12 actions is approximately 5.5 ms p50 / 7.4 ms p95. Candidate cardinality scales without increasing parameter count.
 
 Those numbers describe compute behavior, not policy quality.
 
