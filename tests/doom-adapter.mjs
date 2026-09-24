@@ -27,5 +27,5 @@ const rewardGood=arena.reward({player:{health:87,kills:3},world:{entities:[]}},{
 const rewardBad=arena.reward({player:{health:87,kills:3},world:{entities:[]}},{player:{health:62,kills:3},world:{entities:[]}});
 const rewardDead=arena.reward({player:{health:10,kills:3},world:{entities:[]}},{player:{health:0,kills:3},world:{entities:[]}});
 assert.ok(rewardGood>1);assert.ok(rewardBad<0);assert.ok(rewardDead<rewardBad);
-assert.equal(arena.actionMasks.fire,64);assert.equal(arena.actionMasks.forward_fire,65);assert.equal(arena.actionMasks.strafe_left_fire,80);
+assert.equal(arena.actionMasks.fire,64);assert.equal(arena.actionMasks.forward_fire,65);assert.equal(arena.actionMasks.strafe_left_fire,80);\nassert.equal(arena.actions.find(a=>a.id==="fire").params.fire,1);assert.equal(arena.actions.find(a=>a.id==="fire").params.forward,0);\nassert.equal(arena.actions.find(a=>a.id==="forward_fire").params.forward,1);assert.equal(arena.actions.find(a=>a.id==="forward_fire").params.fire,1);\nassert.equal(arena.schema.actionFields.length,8);
 console.log(JSON.stringify({ok:true,globals:arena.schema.fields.length,actions:arena.actions.length,damageOutcome,rewardGood,rewardBad,rewardDead}));
