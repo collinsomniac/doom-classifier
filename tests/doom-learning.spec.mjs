@@ -3,7 +3,7 @@ import {test,expect} from "@playwright/test";
 test.setTimeout(600000);
 
 test("prepared real-Doom policy reports pre/post short fine-tune behavior",async({page})=>{
-  const runtimeMode=process.env.DOOM_RUNTIME_MODE||"borrowed";
+  const runtimeMode=process.env.DOOM_RUNTIME_MODE||"borrowed",trainSteps=Math.max(1,Number(process.env.DOOM_TRAIN_STEPS||64));
   const errors=[];page.on("pageerror",e=>errors.push("pageerror: "+String(e)));page.on("console",m=>{if(m.type()==="error")errors.push("console: "+m.text())});
   await page.goto("http://127.0.0.1:8000/doom.html"+(runtimeMode==="owned"?"?runtime=owned":""),{waitUntil:"domcontentloaded"});
   await page.locator("#bootBtn").click();
@@ -13,7 +13,7 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
   const status=await page.locator("#prepareStatus").textContent();
   if(status?.includes("failed"))throw new Error(status);
 
-  const result=await page.evaluate(async()=>{
+  const result=await page.evaluate(async(trainSteps)=>{
     const lab=window.__doomLab,{controller:c,policy:p}=lab;
     const evaluate=async(steps)=>{
       c.pause();c.training=false;c.explore=false;c.memory=true;c.useResidual=true;p.setInferenceMode("neural");
@@ -45,7 +45,7 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
     const before=await evaluate(24);
     await c.reset({learning:false});c.training=true;c.explore=true;c.memory=true;c.useResidual=true;p.setInferenceMode("adaptive");
     const updatesBefore=p.q.updates,distillBefore=p.q.distillUpdates||0,teacherBefore=p.teacherCalls,traceStart=c.trace.length;
-    const train=await c.trainBurst({steps:64,epsilon:.16});
+    const train=await c.trainBurst({steps:trainSteps,epsilon:.16});
     const trainingTrace=c.trace.slice(traceStart),trainingCounts={},rewardByAction={};let trainingSwitches=0,trainingMaxStreak=0,trainingLast=null,trainingStreak=0,trainingAttributedDamage=0,trainingPlayerKills=0,trainingPickups=0,trainingAttributionTicks=0;
     for(const t of trainingTrace){
       trainingCounts[t.action]=(trainingCounts[t.action]||0)+1;rewardByAction[t.action]=(rewardByAction[t.action]||0)+t.reward;
@@ -55,14 +55,14 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
     const training={...train,neuralUpdates:p.q.updates-updatesBefore,semanticDistillUpdates:(p.q.distillUpdates||0)-distillBefore,teacherCalls:p.teacherCalls-teacherBefore,replaySize:p.replay?.length||0,teacherReplaySize:p.teacherReplay?.length||0,temperature:p.temperature,counts:trainingCounts,rewardByAction,attributedDamage:trainingAttributedDamage,playerKills:trainingPlayerKills,pickups:trainingPickups,combatAttributionTicks:trainingAttributionTicks,switches:trainingSwitches,maxStreak:trainingMaxStreak,explorationStrategies:[...new Set(trainingTrace.map(t=>t.explorationStrategy))]};
     const trainedDistribution=await distribution();
     const after=await evaluate(24);
-    return{version:"owned-causal-reward-nstep4-adaptive-kl-64",runtime:lab.env.runtime,initialDistribution,before,training,trainedDistribution,after,params:p.q.parameterCount(),model:p.q.name,targetSyncs:p.q.targetSyncs??0,splitHeads:typeof p.q.valueScoresObservation==="function"};
-  });
+    return{version:"owned-causal-reward-nstep4-adaptive-kl-"+trainSteps,runtime:lab.env.runtime,initialDistribution,before,training,trainedDistribution,after,params:p.q.parameterCount(),model:p.q.name,targetSyncs:p.q.targetSyncs??0,splitHeads:typeof p.q.valueScoresObservation==="function"};
+  },trainSteps);
 
   console.log("DOOM_LEARNING_BENCHMARK "+JSON.stringify(result));
   expect(result.params).toBeGreaterThan(0);expect(result.params).toBeLessThan(8000);expect(result.splitHeads).toBe(true);expect(result.model).toContain("SemanticValue");
   expect(result.before.teacherCalls).toBe(0);
   expect(result.after.teacherCalls).toBe(0);
-  expect(result.training.neuralUpdates).toBeGreaterThan(64);
+  expect(result.training.neuralUpdates).toBeGreaterThan(trainSteps);
   expect(result.training.replaySize).toBeGreaterThan(0);
   expect(result.before.steps).toBe(24);expect(result.after.steps).toBe(24);
   if(runtimeMode==="owned"){

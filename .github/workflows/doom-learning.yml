@@ -15,9 +15,19 @@ on:
         options:
           - owned
           - borrowed
+      steps:
+        description: "Training decisions"
+        required: false
+        type: choice
+        default: "256"
+        options:
+          - "64"
+          - "128"
+          - "256"
 
 env:
   DOOM_RUNTIME_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.runtime || 'owned' }}
+  DOOM_TRAIN_STEPS: ${{ github.event_name == 'workflow_dispatch' && inputs.steps || '256' }}
 
 permissions:
   contents: read
