@@ -21,13 +21,14 @@ export class ExperimentController extends EventTarget{
     if(this.inFlight)return false;this.inFlight=true;
     try{
       const obs=await this.environment.observe(),decision=await this.policy.decide(obs,{useResidual:this.useResidual,memory:this.memory,explore:this.training&&this.explore});
-      const step=await this.environment.step(decision.action.id),nextEncoded=this.policy.encode(step.observation,this.memory,false);
+      const step=await this.environment.step(decision.action.id),nextEncoded=this.policy.encode(step.observation,this.memory,false),nextHistory=this.policy.nextActionHistory?.(decision.actionIndex)||null;
       let learningInfo=null;
-      if(this.training)learningInfo=this.policy.learn({observation:obs,temporal:decision.temporal,features:decision.features,actionIndex:decision.actionIndex,reward:step.reward,nextObservation:step.observation,nextTemporal:nextEncoded.temporal,nextFeatures:nextEncoded.features,done:step.done});
+      if(this.training)learningInfo=this.policy.learn({observation:obs,temporal:decision.temporal,history:decision.actionHistory,features:decision.features,actionIndex:decision.actionIndex,reward:step.reward,nextObservation:step.observation,nextTemporal:nextEncoded.temporal,nextHistory,nextFeatures:nextEncoded.features,done:step.done});
+      this.policy.commitAction?.(decision.actionIndex);
       this.steps++;this.episodeReturn+=step.reward;this.latencies.push(decision.latencyMs);if(this.latencies.length>1000)this.latencies.shift();this.lastDecision={...decision,reward:step.reward,learningInfo,outcome:step.info?.outcome||null};
       this.trace.push({
         t:Date.now(),step:this.steps,observation:obs,action:decision.action.id,probabilities:Object.fromEntries(this.policy.actions.map((a,i)=>[a.id,decision.probs[i]])),reward:step.reward,outcome:step.info?.outcome||null,
-        uncertainty:decision.uncertainty,semanticPrior:decision.semanticPriorScores?.[decision.actionIndex]??null,learnedValue:decision.valueScores?.[decision.actionIndex]??null,combinedScore:decision.qScores?.[decision.actionIndex]??null,latencyMs:decision.latencyMs,semanticLatencyMs:decision.semanticLatencyMs,residualLatencyMs:decision.residualLatencyMs,
+        uncertainty:decision.uncertainty,previousAction:decision.actionHistory?.previousActionIndex==null?null:this.policy.actions[decision.actionHistory.previousActionIndex]?.id||null,actionStreak:decision.actionHistory?.streak||0,semanticPrior:decision.semanticPriorScores?.[decision.actionIndex]??null,learnedValue:decision.valueScores?.[decision.actionIndex]??null,combinedScore:decision.qScores?.[decision.actionIndex]??null,latencyMs:decision.latencyMs,semanticLatencyMs:decision.semanticLatencyMs,residualLatencyMs:decision.residualLatencyMs,
         teacherUsed:decision.teacherUsed,teacherPending:decision.teacherPending,semanticUsed:decision.semanticUsed,inferenceMode:decision.inferenceMode,teacherCalls:this.policy.teacherCalls,teacherScheduled:this.policy.teacherScheduled,lastTeacherLatencyMs:this.policy.lastTeacherLatencyMs,
         backbone:this.policy.semantic.name,residual:this.policy.q.name||this.policy.q.constructor.name,backend:this.policy.semantic.backend||"local-js",
         mode:{useResidual:this.useResidual,training:this.training,memory:this.memory,explore:this.explore}
