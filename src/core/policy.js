@@ -50,7 +50,8 @@ function confidenceStats(probs){
 export class SemanticResidualPolicy{
   constructor({
     schema,actions,semantic,residual="linear",residualWeight=.9,temperature=.8,epsilon=.08,seed=2026,
-    inferenceMode="hybrid",teacherInterval=32,teacherMinGap=8,teacherEntropy=.78,teacherMargin=.10,teacherNovelty=.85,teacherEpistemic=.025,distillSteps=4,replayCapacity=96,replayBatch=2
+    inferenceMode="hybrid",teacherInterval=32,teacherMinGap=8,teacherEntropy=.78,teacherMargin=.10,teacherNovelty=.85,teacherEpistemic=.025,distillSteps=4,replayCapacity=96,replayBatch=2,
+    teacherReplayCapacity=8,teacherReplayBatch=2,teacherReplayStrength=.2
   }){
     this.schema=schema;this.actions=actions;this.residualWeight=residualWeight;this.baseTemperature=temperature;this.temperature=temperature;this.epsilon=epsilon;this.seed=seed;this.rng=mulberry32(seed);
     this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;
@@ -58,12 +59,13 @@ export class SemanticResidualPolicy{
     else if(residual==="neural-set")this.q=new NeuralSetResidualQ(schema,actions,{seed});
     else this.q=new LinearResidualQ(actions.length,this.featureSize);
     this.inferenceMode=inferenceMode;this.teacherInterval=teacherInterval;this.teacherMinGap=teacherMinGap;this.teacherEntropy=teacherEntropy;this.teacherMargin=teacherMargin;this.teacherNovelty=teacherNovelty;this.teacherEpistemic=teacherEpistemic;this.distillSteps=distillSteps;this.replayCapacity=replayCapacity;this.replayBatch=replayBatch;this.replay=[];this.replayRng=mulberry32((seed^0x517cc1b7)>>>0);
+    this.teacherReplayCapacity=Math.max(0,Math.floor(teacherReplayCapacity));this.teacherReplayBatch=Math.max(0,Math.floor(teacherReplayBatch));this.teacherReplayStrength=teacherReplayStrength;this.teacherReplay=[];this.teacherReplayRng=mulberry32((seed^0xa341316c)>>>0);
     this.novelty=new NoveltyTracker(this.baseSize);
     this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherGeneration=0;this.teacherPromise=null;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;
     this.setSemantic(semantic);
   }
   setSemantic(semantic){
-    this.teacherGeneration++;this.teacherPromise=null;this.semantic=semantic;semantic.compile(this.schema,this.actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;
+    this.teacherGeneration++;this.teacherPromise=null;this.semantic=semantic;semantic.compile(this.schema,this.actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.teacherReplay=[];
   }
   setInferenceMode(mode){
     if(!["hybrid","adaptive","neural"].includes(mode))throw new Error("Unknown inference mode: "+mode);
@@ -75,12 +77,12 @@ export class SemanticResidualPolicy{
     this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;this.novelty=new NoveltyTracker(this.baseSize);
     if(this.q.setSchema&&this.q.setActions){this.q.setSchema(schema);this.q.setActions(actions)}
     else if(this.q instanceof LinearResidualQ){this.q=new LinearResidualQ(actions.length,this.featureSize)}
-    this.semantic.compile(schema,actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.replay=[];
+    this.semantic.compile(schema,actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.replay=[];this.teacherReplay=[];
     return this;
   }
   resetEpisode(){this.memory.reset()}
   resetLearning(){
-    this.teacherGeneration++;this.teacherPromise=null;this.q.reset();this.novelty.reset();this.rng=mulberry32(this.seed);this.replayRng=mulberry32((this.seed^0x517cc1b7)>>>0);this.replay=[];this.temperature=this.baseTemperature;
+    this.teacherGeneration++;this.teacherPromise=null;this.q.reset();this.novelty.reset();this.rng=mulberry32(this.seed);this.replayRng=mulberry32((this.seed^0x517cc1b7)>>>0);this.teacherReplayRng=mulberry32((this.seed^0xa341316c)>>>0);this.replay=[];this.teacherReplay=[];this.temperature=this.baseTemperature;
     this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;
   }
   encode(obs,memoryEnabled=true,commit=true){
@@ -112,17 +114,37 @@ export class SemanticResidualPolicy{
     this.temperature=clamp(this.temperature*(1-blend)+bestT*blend,.30,1.5);
     return{temperature:this.temperature,bestTemperature:bestT,loss:bestLoss};
   }
+  snapshotTeacherExample(obs,scores,temporal=null){
+    const observation=globalThis.structuredClone?globalThis.structuredClone(obs):JSON.parse(JSON.stringify(obs));
+    return{observation,scores:[...scores],temporal:temporal?new Float32Array(temporal):null};
+  }
+  replayTeacherDistillation(){
+    if(!this.q.distill||this.teacherReplayBatch<=0||!this.teacherReplay.length)return{updates:0,meanLoss:0};
+    const count=Math.min(this.teacherReplayBatch,this.teacherReplay.length);let loss=0;
+    for(let i=0;i<count;i++){
+      const sample=this.teacherReplay[Math.floor(this.teacherReplayRng()*this.teacherReplay.length)];
+      const result=this.q.distill(sample.observation,sample.scores,{strength:this.teacherReplayStrength,temporal:sample.temporal});
+      loss+=Number(result?.loss||0);
+    }
+    return{updates:count,meanLoss:count?loss/count:0};
+  }
+  rememberTeacherExample(obs,scores,temporal=null){
+    if(this.teacherReplayCapacity<=0)return;
+    this.teacherReplay.push(this.snapshotTeacherExample(obs,scores,temporal));
+    if(this.teacherReplay.length>this.teacherReplayCapacity)this.teacherReplay.shift();
+  }
   applyTeacherScores(obs,scores,steps=this.distillSteps,temporal=null,{maxSteps=steps,targetKL=null}={}){
     if(!this.q.distill)return null;
-    const teacher=softmax(scores,1);let result=null,used=0,kl=Infinity;
+    const replay=this.replayTeacherDistillation(),teacher=softmax(scores,1);let result=null,used=0,kl=Infinity;
     const cap=Math.max(steps,Math.floor(maxSteps||steps));
     for(let i=0;i<cap;i++){
       result=this.q.distill(obs,scores,{strength:.5,temporal});used=i+1;
       if(result?.student){kl=klDivergence(teacher,result.student);if(used>=steps&&targetKL!=null&&kl<=targetKL)break}
       if(used>=steps&&targetKL==null)break;
     }
+    this.rememberTeacherExample(obs,scores,temporal);
     this.q.syncTarget?.({value:false});
-    return result?{...result,stepsUsed:used,kl}:null;
+    return result?{...result,stepsUsed:used,kl,teacherReplayUpdates:replay.updates,teacherReplayMeanLoss:replay.meanLoss,teacherReplaySize:this.teacherReplay.length}:null;
   }
   async primeTeacher(obs,{steps=Math.max(4,this.distillSteps),maxSteps=steps,targetKL=null,temporal=null}={}){
     const semantic=this.semantic,generation=this.teacherGeneration,requestedStep=this.decisionCount;
