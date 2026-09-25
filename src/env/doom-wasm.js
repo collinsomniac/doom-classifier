@@ -53,6 +53,20 @@ function mkdir(fs,path){try{fs.mkdir(path)}catch{}}
 function hostileHealth(raw){
   return (raw?.world?.entities||[]).reduce((sum,e)=>sum+(e.enemy&&Number(e.health)>0?Number(e.health):0),0);
 }
+function nativeEventDeltas(previous,next){
+  const before=previous?.events,after=next?.events;
+  const keys=["player_damage_dealt","player_kills","player_pickups","level_completions","secret_exits"];
+  const available=!!before&&!!after&&keys.every(key=>Number.isFinite(Number(before[key]))&&Number.isFinite(Number(after[key])));
+  const delta=key=>available?Math.max(0,Number(after[key])-Number(before[key])):0;
+  return{
+    available,
+    playerDamageDealt:delta("player_damage_dealt"),
+    playerKills:delta("player_kills"),
+    playerPickups:delta("player_pickups"),
+    levelCompletions:delta("level_completions"),
+    secretExits:delta("secret_exits")
+  };
+}
 
 export class DoomWasmArena{
   constructor(module,{actionMs=110,settleMs=16,contentName="Freedoom 0.13.0",runtimeInfo=null}={}){
@@ -80,7 +94,12 @@ export class DoomWasmArena{
         {id:"rockets",label:"rockets",description:"available rocket launcher ammunition",min:0,max:100},
         {id:"cells",label:"cells",description:"available plasma or BFG energy ammunition",min:0,max:600},
         {id:"recent_damage",label:"recent damage received",description:"damage registered on the player in the recent engine combat window",min:0,max:100},
-        {id:"recent_hostile_hp_loss",label:"recent hostile HP loss",description:"hostile hit points removed during the previous control interval from any cause; this is observational telemetry and is not attributed to the player",min:0,max:200},
+        {id:"recent_hostile_hp_loss",label:"recent hostile HP loss",description:"hostile hit points removed during the previous control interval from any cause; observational telemetry that may include monster infighting",min:0,max:200},
+        {id:"recent_player_damage_dealt",label:"recent player-attributed hostile damage",description:"hostile hit points removed during the previous control interval with the player recorded by the engine as the damage source; zero when attribution telemetry is unavailable",min:0,max:200},
+        {id:"recent_player_kills",label:"recent player-attributed kills",description:"hostile kills during the previous control interval with the player recorded by the engine as source; zero when attribution telemetry is unavailable",min:0,max:20},
+        {id:"recent_player_pickups",label:"recent player pickups",description:"successful item pickups by the player during the previous control interval",min:0,max:20},
+        {id:"level_completed",label:"level completed",description:"whether the engine completed a level during the previous control interval",min:0,max:1},
+        {id:"secret_exit",label:"secret exit",description:"whether the completed level used a secret exit during the previous control interval",min:0,max:1},
         {id:"under_fire",label:"under fire",description:"whether the engine currently reports recent incoming damage",min:0,max:1},
         {id:"weapon",label:"equipped weapon",description:"weapon currently equipped by the player",enum:{
           0:"fist",1:"pistol",2:"shotgun",3:"chaingun",4:"rocket launcher",5:"plasma rifle",6:"BFG 9000",7:"chainsaw",8:"super shotgun"
@@ -138,7 +157,7 @@ export class DoomWasmArena{
         }
       ]
     };
-    this.lastRaw=null;this.lastObservation=null;this.lastHostileHpLoss=0;this.lastOutcome=null;this.visitedCells=new Map();this.lastExploration={visitedCells:0,cellVisits:0,novelty:1,newCell:false};
+    this.lastRaw=null;this.lastObservation=null;this.lastHostileHpLoss=0;this.lastNativeEvents={available:false,playerDamageDealt:0,playerKills:0,playerPickups:0,levelCompletions:0,secretExits:0};this.lastOutcome=null;this.visitedCells=new Map();this.lastExploration={visitedCells:0,cellVisits:0,novelty:1,newCell:false};
   }
 
   static async boot({canvas,onProgress=()=>{},actionMs=110,iwadFile=null,contentName=null,runtimeBase=RAW_BASE,runtimeInfo=null}={}){
@@ -208,7 +227,10 @@ export class DoomWasmArena{
     }));
     return{
       health:Number(p.health||0),armor:Number(p.armor||0),bullets:Number(p.ammo?.bullets||0),shells:Number(p.ammo?.shells||0),rockets:Number(p.ammo?.rockets||0),cells:Number(p.ammo?.cells||0),
-      recent_damage:Number(p.recent_damage||0),recent_hostile_hp_loss:Number(this.lastHostileHpLoss||0),under_fire:p.under_fire?1:0,weapon:Number(p.weapon||0),
+      recent_damage:Number(p.recent_damage||0),recent_hostile_hp_loss:Number(this.lastHostileHpLoss||0),
+      recent_player_damage_dealt:Number(this.lastNativeEvents?.playerDamageDealt||0),recent_player_kills:Number(this.lastNativeEvents?.playerKills||0),recent_player_pickups:Number(this.lastNativeEvents?.playerPickups||0),
+      level_completed:Number(this.lastNativeEvents?.levelCompletions||0)>0?1:0,secret_exit:Number(this.lastNativeEvents?.secretExits||0)>0?1:0,
+      under_fire:p.under_fire?1:0,weapon:Number(p.weapon||0),
       player_x:Number(p.x||0),player_y:Number(p.y||0),player_z:Number(p.z||0),velocity_x:Number(p.vx||0),velocity_y:Number(p.vy||0),heading,kills:Number(p.kills||0),
       visited_cells:Number(this.lastExploration?.visitedCells||0),cell_visits:Number(this.lastExploration?.cellVisits||0),exploration_novelty:Number(this.lastExploration?.novelty??1),
       _collections:{entities,geometry}
@@ -216,19 +238,24 @@ export class DoomWasmArena{
   }
   observe(){const raw=this.readRaw();this.lastRaw=raw;this.lastObservation=this.flatten(raw);return this.lastObservation}
   outcome(previous,next,{exploration=this.lastExploration}={}){
-    const prev=previous?.player||{},cur=next?.player||{};
+    const prev=previous?.player||{},cur=next?.player||{},events=nativeEventDeltas(previous,next);
     const healthDelta=Number(cur.health||0)-Number(prev.health||0);
     const killDelta=Math.max(0,Number(cur.kills||0)-Number(prev.kills||0));
     const hostileHpLoss=Math.max(0,hostileHealth(previous)-hostileHealth(next));
     const explorationBonus=exploration?.newCell ? .015 : 0;
-    const attributedCombatReward=0;
-    let reward=-.001+explorationBonus;
+    const attributedCombatReward=events.playerDamageDealt*.02+events.playerKills*1.25;
+    const pickupReward=events.playerPickups*.03;
+    const completionReward=events.levelCompletions*5+events.secretExits*.5;
+    let reward=-.001+explorationBonus+attributedCombatReward+pickupReward+completionReward;
     if(healthDelta<0)reward+=healthDelta*.03;else if(healthDelta>0)reward+=healthDelta*.005;
     if(Number(cur.health||0)<=0)reward-=2;
     return{
-      reward,hostileHpLoss,damageDealt:hostileHpLoss,damageAttributed:false,killDelta,killAttributed:false,
-      combatAttributionAvailable:false,attributedCombatReward,
-      healthDelta,explorationBonus,newCell:!!exploration?.newCell,visitedCells:Number(exploration?.visitedCells||0),dead:Number(cur.health||0)<=0
+      reward,hostileHpLoss,damageDealt:events.available?events.playerDamageDealt:hostileHpLoss,damageAttributed:events.available,
+      killDelta,playerKillDelta:events.playerKills,killAttributed:events.available,playerPickupDelta:events.playerPickups,
+      levelCompletionDelta:events.levelCompletions,secretExitDelta:events.secretExits,
+      combatAttributionAvailable:events.available,attributedCombatReward,pickupReward,completionReward,
+      healthDelta,explorationBonus,newCell:!!exploration?.newCell,visitedCells:Number(exploration?.visitedCells||0),
+      dead:Number(cur.health||0)<=0,levelCompleted:events.levelCompletions>0
     };
   }
   reward(previous,next){return this.outcome(previous,next).reward}
@@ -238,12 +265,12 @@ export class DoomWasmArena{
     this.module.ccall("PromptFPS_SetControls",null,["number"],[this.actionMasks[actionId]]);
     await sleep(this.actionMs);this.module.ccall("PromptFPS_SetControls",null,["number"],[0]);if(this.settleMs)await sleep(this.settleMs);
     const after=this.readRaw(),exploration=this.commitExploration(after),outcome=this.outcome(before,after,{exploration});
-    this.lastHostileHpLoss=outcome.hostileHpLoss;this.lastOutcome=outcome;this.lastRaw=after;this.lastObservation=this.flatten(after);
-    return{observation:this.lastObservation,reward:outcome.reward,done:outcome.dead,info:{raw:after,outcome,engine:after.engine||"Chocolate Doom"}};
+    this.lastHostileHpLoss=outcome.hostileHpLoss;this.lastNativeEvents=nativeEventDeltas(before,after);this.lastOutcome=outcome;this.lastRaw=after;this.lastObservation=this.flatten(after);
+    return{observation:this.lastObservation,reward:outcome.reward,done:outcome.dead||outcome.levelCompleted,info:{raw:after,outcome,engine:after.engine||"Chocolate Doom"}};
   }
   async reset(){
     this.module.ccall("PromptFPS_SetControls",null,["number"],[0]);this.module.ccall("PromptFPS_SetStart",null,[],[]);
-    this.lastHostileHpLoss=0;this.lastOutcome=null;this.visitedCells=new Map();await sleep(100);const raw=await this.waitUntilReady();this.commitExploration(raw);this.lastExploration.newCell=false;this.lastRaw=raw;this.lastObservation=this.flatten(raw);return this.lastObservation;
+    this.lastHostileHpLoss=0;this.lastNativeEvents={available:false,playerDamageDealt:0,playerKills:0,playerPickups:0,levelCompletions:0,secretExits:0};this.lastOutcome=null;this.visitedCells=new Map();await sleep(100);const raw=await this.waitUntilReady();this.commitExploration(raw);this.lastExploration.newCell=false;this.lastRaw=raw;this.lastObservation=this.flatten(raw);return this.lastObservation;
   }
 }
 
