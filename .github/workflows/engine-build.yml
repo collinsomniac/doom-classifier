@@ -52,6 +52,23 @@ jobs:
           grep -q "PromptFPS_RecordPlayerDamage" engine/dist/telemetry.patch
           ls -lh engine/dist
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Chromium ABI test tooling
+        shell: bash
+        run: |
+          npm install --no-save --no-package-lock @playwright/test@1.55.0
+          npx playwright install chromium
+
+      - name: Boot owned runtime and verify causal event ABI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m http.server 8000 --bind 127.0.0.1 > /tmp/owned-engine-http.log 2>&1 &
+          npx playwright test tests/owned-engine.spec.mjs --reporter=line
+
       - name: Upload owned engine artifact
         uses: actions/upload-artifact@v4
         with:
