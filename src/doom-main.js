@@ -193,7 +193,7 @@ async function tuneAgent(){
   try{
     const result=await controller.trainBurst({steps,epsilon:.16,onProgress:p=>{ui.tuneProgress.value=p.ratio*100;ui.tuneStatus.textContent="training "+p.completed+"/"+p.total+" · updates "+(p.updates-startUpdates)+" · episodes "+p.episodes}});
     applyProfile("frozen");ui.profile.value="frozen";ui.tuneBadge.textContent="frozen neural";
-    ui.tuneStatus.textContent="TRAINING COMPLETE · "+result.completed+" decisions · "+result.updates+" reward updates · "+(policy.teacherCalls-startTeacher)+" teacher refreshes · ready for teacher-off playback";
+    ui.tuneStatus.textContent="TRAINING COMPLETE · "+result.completed+" decisions · "+result.actionDiversity+" actions explored · "+result.switches+" switches · max streak "+result.maxStreak+" · "+result.updates+" reward updates · "+(policy.teacherCalls-startTeacher)+" teacher refreshes · ready for teacher-off playback";
     setRuntime("TRAINED · FROZEN");render();
   }catch(error){ui.tuneStatus.textContent="training failed · "+String(error?.message||error);setRuntime("TRAINING ERROR",true)}
   finally{setBusy(false)}
