@@ -33,5 +33,6 @@ assert.ok(Math.abs(q.seen[2].reward-(3+.9*4))<1e-9);
 assert.equal(q.seen[2].nStepHorizon,2);
 assert.equal(q.seen[3].reward,4);assert.equal(q.seen[3].nStepHorizon,1);
 
+const verified={updates:q.updates,rewards:q.seen.map(x=>x.reward),horizons:q.seen.map(x=>x.nStepHorizon),discounts:q.seen.map(x=>x.bootstrapDiscount)};
 p.resetLearning();assert.equal(p.nStepBuffer.length,0);
-console.log(JSON.stringify({ok:true,updates:q.updates,rewards:q.seen.map(x=>x.reward),horizons:q.seen.map(x=>x.nStepHorizon)}));
+console.log(JSON.stringify({ok:true,...verified}));
