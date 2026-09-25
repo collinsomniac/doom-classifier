@@ -253,6 +253,49 @@ https://collinsomniac.github.io/doom-classifier/
 
 The current main revision has successful full validation/deployment; the immediately preceding functional JavaScript revisions also pass the real Chromium smoke suite.
 
+## Owned-runtime causal reward benchmark
+
+The project-owned Chocolate Doom WASM runtime is now the default demo runtime. A Chromium benchmark using the same 7,316-parameter policy, MobileBERT semantic preparation, four-step consequence learning, adaptive teacher supervision, replay, and KL-constrained fusion produced the following on the starting encounter.
+
+### Frozen before training
+
+- return: **+2.526**
+- player-attributed hostile damage: **65**
+- player-attributed kills: **1**
+- player damage received: **0**
+- causal combat attribution available: **24 / 24 decisions**
+- exact-action diversity: **1**
+- dominant action: **back + fire**
+- teacher calls during frozen evaluation: **0**
+
+### 64-decision online training burst
+
+- player-attributed hostile damage: **90**
+- player-attributed kills: **3**
+- successful pickups: **2**
+- causal combat attribution available: **64 / 64 decisions**
+- reward/value updates including replay: **189**
+- adaptive teacher refreshes: **8**
+- reward replay size: **64**
+- action diversity: **15 / 15**
+- switches: **57**
+- maximum identical-action streak: **2**
+
+### Frozen after training
+
+- return: **+2.526**
+- player-attributed hostile damage: **65**
+- player-attributed kills: **1**
+- player damage received: **0**
+- teacher calls: **0**
+- dominant action remains **back + fire**
+- mean value-fusion beta: **16.59**
+- mean prior KL: **0.0787**
+- mean KL-budget utilization: **99.97%**
+- p95 neural decision time: **5.80 ms**
+
+The important result is not an improved score yet. It is that the consequence branch is now trained and evaluated against **engine-attributed causal combat events**, while the frozen fast path still runs without teacher calls. The remaining behavioral bottleneck is action separation: the value head shifts strongly during training, but KL-constrained fusion still preserves a dominant semantic-prior action in the frozen encounter.
+
 ## What remains unproven
 
 The strongest missing evidence is still:
