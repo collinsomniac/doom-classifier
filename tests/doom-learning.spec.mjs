@@ -17,15 +17,16 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
     const evaluate=async(steps)=>{
       c.pause();c.training=false;c.explore=false;c.memory=true;c.useResidual=true;p.setInferenceMode("neural");
       await c.reset({learning:false});
-      const teacherBefore=p.teacherCalls,counts={};let reward=0,damage=0,received=0,kills=0,maxP=0,entropy=0,fire=0;
+      const teacherBefore=p.teacherCalls,counts={};let reward=0,damage=0,received=0,kills=0,maxP=0,entropy=0,fire=0,switches=0,maxStreak=0,lastAction=null,streak=0;
       for(let i=0;i<steps;i++){
         await c.tick();const d=c.lastDecision;if(!d)continue;
         counts[d.action.id]=(counts[d.action.id]||0)+1;
+        if(d.action.id===lastAction)streak++;else{if(lastAction!==null)switches++;streak=1;lastAction=d.action.id}maxStreak=Math.max(maxStreak,streak);
         reward+=d.reward||0;damage+=d.outcome?.damageDealt||0;received+=Math.max(0,-(d.outcome?.healthDelta||0));kills+=d.outcome?.killDelta||0;
         maxP+=Math.max(...d.probs);entropy+=d.uncertainty.entropy;if(d.action.id.includes("fire"))fire++;
       }
       const lat=c.latencySummary(),dominant=Object.entries(counts).sort((a,b)=>b[1]-a[1])[0]||["none",0];
-      return{steps,reward,damage,received,kills,fire,diversity:Object.keys(counts).length,dominant,counts,meanMaxP:maxP/steps,meanEntropy:entropy/steps,p95Ms:lat.p95,teacherCalls:p.teacherCalls-teacherBefore,temperature:p.temperature};
+      return{steps,reward,damage,received,kills,fire,diversity:Object.keys(counts).length,switches,maxStreak,dominant,counts,meanMaxP:maxP/steps,meanEntropy:entropy/steps,p95Ms:lat.p95,teacherCalls:p.teacherCalls-teacherBefore,temperature:p.temperature};
     };
     const distribution=async()=>{
       await c.reset({learning:false});p.resetEpisode();
@@ -46,11 +47,11 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
     const training={...train,neuralUpdates:p.q.updates-updatesBefore,teacherCalls:p.teacherCalls-teacherBefore,replaySize:p.replay?.length||0,temperature:p.temperature,counts:trainingCounts,rewardByAction};
     const trainedDistribution=await distribution();
     const after=await evaluate(24);
-    return{version:"split-head-entity-semantics-novelty-tight-fit",initialDistribution,before,training,trainedDistribution,after,params:p.q.parameterCount(),model:p.q.name,targetSyncs:p.q.targetSyncs??0,splitHeads:typeof p.q.valueScoresObservation==="function"};
+    return{version:"split-head-value-history",initialDistribution,before,training,trainedDistribution,after,params:p.q.parameterCount(),model:p.q.name,targetSyncs:p.q.targetSyncs??0,splitHeads:typeof p.q.valueScoresObservation==="function"};
   });
 
   console.log("DOOM_LEARNING_BENCHMARK "+JSON.stringify(result));
-  expect(result.params).toBeGreaterThan(0);expect(result.params).toBeLessThan(8000);expect(result.splitHeads).toBe(true);expect(result.model).toContain("SemanticValue");
+  expect(result.params).toBeGreaterThan(0);expect(result.params).toBeLessThan(8000);expect(result.splitHeads).toBe(true);expect(result.model).toContain("History");
   expect(result.before.teacherCalls).toBe(0);
   expect(result.after.teacherCalls).toBe(0);
   expect(result.training.neuralUpdates).toBeGreaterThan(64);
