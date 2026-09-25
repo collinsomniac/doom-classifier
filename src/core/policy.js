@@ -58,7 +58,7 @@ export class SemanticResidualPolicy{
     else if(residual==="neural-set")this.q=new NeuralSetResidualQ(schema,actions,{seed});
     else this.q=new LinearResidualQ(actions.length,this.featureSize);
     this.inferenceMode=inferenceMode;this.teacherInterval=teacherInterval;this.teacherMinGap=teacherMinGap;this.teacherEntropy=teacherEntropy;this.teacherMargin=teacherMargin;this.teacherNovelty=teacherNovelty;this.teacherEpistemic=teacherEpistemic;this.distillSteps=distillSteps;this.replayCapacity=replayCapacity;this.replayBatch=replayBatch;this.replay=[];this.replayRng=mulberry32((seed^0x517cc1b7)>>>0);
-    this.novelty=new NoveltyTracker(this.baseSize);
+    this.novelty=new NoveltyTracker(this.baseSize);this.actionHistory={previousActionIndex:null,streak:0};
     this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherGeneration=0;this.teacherPromise=null;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;
     this.setSemantic(semantic);
   }
@@ -72,27 +72,33 @@ export class SemanticResidualPolicy{
   reconfigure({schema=this.schema,actions=this.actions}={}){
     this.teacherGeneration++;this.teacherPromise=null;
     this.schema=schema;this.actions=actions;
-    this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;this.novelty=new NoveltyTracker(this.baseSize);
+    this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;this.novelty=new NoveltyTracker(this.baseSize);this.actionHistory={previousActionIndex:null,streak:0};
     if(this.q.setSchema&&this.q.setActions){this.q.setSchema(schema);this.q.setActions(actions)}
     else if(this.q instanceof LinearResidualQ){this.q=new LinearResidualQ(actions.length,this.featureSize)}
     this.semantic.compile(schema,actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.replay=[];
     return this;
   }
-  resetEpisode(){this.memory.reset()}
+  resetEpisode(){this.memory.reset();this.actionHistory={previousActionIndex:null,streak:0}}
+  currentActionHistory(){return{previousActionIndex:Number.isInteger(this.actionHistory?.previousActionIndex)?this.actionHistory.previousActionIndex:null,streak:Math.max(0,Number(this.actionHistory?.streak||0))}}
+  nextActionHistory(actionIndex){
+    const previous=this.currentActionHistory(),same=previous.previousActionIndex===actionIndex;
+    return{previousActionIndex:actionIndex,streak:same?Math.min(255,previous.streak+1):1};
+  }
+  commitAction(actionIndex){this.actionHistory=this.nextActionHistory(actionIndex);return this.currentActionHistory()}
   resetLearning(){
-    this.teacherGeneration++;this.teacherPromise=null;this.q.reset();this.novelty.reset();this.rng=mulberry32(this.seed);this.replayRng=mulberry32((this.seed^0x517cc1b7)>>>0);this.replay=[];this.temperature=this.baseTemperature;
+    this.teacherGeneration++;this.teacherPromise=null;this.q.reset();this.novelty.reset();this.actionHistory={previousActionIndex:null,streak:0};this.rng=mulberry32(this.seed);this.replayRng=mulberry32((this.seed^0x517cc1b7)>>>0);this.replay=[];this.temperature=this.baseTemperature;
     this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;
   }
   encode(obs,memoryEnabled=true,commit=true){
     const base=numericFeatures(this.schema,obs),temporal=commit?this.memory.update(base,memoryEnabled):this.memory.preview(base,memoryEnabled);
     const x=new Float32Array(this.featureSize);x.set(base,0);x.set(temporal,this.baseSize);return{base,temporal,features:x};
   }
-  residualEvaluation(obs,features,temporal=null){
-    if(this.q.scoreStatsObservation)return this.q.scoreStatsObservation(obs,{temporal});
-    const scores=this.q.scoresObservation?this.q.scoresObservation(obs,{temporal}):this.q.scores(features);
+  residualEvaluation(obs,features,temporal=null,history=this.actionHistory){
+    if(this.q.scoreStatsObservation)return this.q.scoreStatsObservation(obs,{temporal,history});
+    const scores=this.q.scoresObservation?this.q.scoresObservation(obs,{temporal,history}):this.q.scores(features);
     return{scores,memberScores:null};
   }
-  residualScores(obs,features,temporal=null){return this.residualEvaluation(obs,features,temporal).scores}
+  residualScores(obs,features,temporal=null,history=this.actionHistory){return this.residualEvaluation(obs,features,temporal,history).scores}
   async semanticScores(obs,semantic=this.semantic){
     const t=performance.now(),scores=await semantic.score(obs);this.semanticCalls++;return{scores,ms:performance.now()-t};
   }
@@ -157,8 +163,8 @@ export class SemanticResidualPolicy{
   async awaitTeacher(){return this.teacherPromise?this.teacherPromise:null}
 
   async decide(obs,{useResidual=true,memory=true,explore=false}={}){
-    const t0=performance.now(),encoded=this.encode(obs,memory,true),novelty=this.novelty.observe(encoded.base);
-    const residualStart=performance.now(),residualEval=this.residualEvaluation(obs,encoded.features,encoded.temporal);let q=residualEval.scores,residualMs=performance.now()-residualStart;
+    const t0=performance.now(),encoded=this.encode(obs,memory,true),novelty=this.novelty.observe(encoded.base),actionHistory=this.currentActionHistory();
+    const residualStart=performance.now(),residualEval=this.residualEvaluation(obs,encoded.features,encoded.temporal,actionHistory);let q=residualEval.scores,residualMs=performance.now()-residualStart;
     const epistemic=ensembleDisagreement(residualEval.memberScores,this.temperature);
     let sem=new Array(this.actions.length).fill(0),semanticMs=0,teacherUsed=false,semanticUsed=false,logits;
     const mode=useResidual?this.inferenceMode:"hybrid";
@@ -179,7 +185,7 @@ export class SemanticResidualPolicy{
     if(explore&&this.rng()<this.epsilon)chosen=Math.floor(this.rng()*this.actions.length);
     const stats=confidenceStats(probs);this.decisionCount++;
     return{
-      actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:q,semanticPriorScores:residualEval.semanticScores||null,valueScores:residualEval.valueScores||null,features:encoded.features,temporal:encoded.temporal,
+      actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:q,semanticPriorScores:residualEval.semanticScores||null,valueScores:residualEval.valueScores||null,features:encoded.features,temporal:encoded.temporal,actionHistory,
       uncertainty:{...stats,novelty,epistemic},latencyMs:performance.now()-t0,semanticLatencyMs:semanticMs,residualLatencyMs:residualMs,
       teacherUsed,teacherPending:!!this.teacherPromise,semanticUsed,inferenceMode:mode,teacherCalls:this.teacherCalls,teacherScheduled:this.teacherScheduled,lastTeacherLatencyMs:this.lastTeacherLatencyMs
     };
