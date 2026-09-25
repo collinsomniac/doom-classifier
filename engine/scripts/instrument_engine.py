@@ -88,7 +88,9 @@ static void PromptFPS_ResetEvents(void)
         '        "\\"events\\":{\\"player_damage_dealt\\":%u,\\"player_kills\\":%u,"\n'
         '        "\\"player_pickups\\":%u,\\"level_completions\\":%u,\\"secret_exits\\":%u},"\n',
         "observation event JSON",
-    )    replace_once(
+    )
+
+    replace_once(
         bridge,
         'gametic, gamestate, paused ? "true" : "false", promptfps_controls);',
         'gametic, gamestate, paused ? "true" : "false", promptfps_controls,\n'
