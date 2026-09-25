@@ -5,6 +5,8 @@ import {ExperimentController} from "./core/controller.js";
 import {TransformersNLIAdapter,NLI_PRESETS} from "./model-adapters/transformers-nli.js";
 import {MiniLMSchemaCompiler,SCHEMA_EMBEDDING_PRESET} from "./model-adapters/schema-embedding-compiler.js";
 
+const OWNED_RUNTIME_BASE="https://raw.githubusercontent.com/collinsomniac/doom-classifier/engine-runtime";
+const requestedRuntime=new URLSearchParams(globalThis.location?.search||"").get("runtime");
 const $=id=>document.getElementById(id);
 const ui={
   boot:$("bootBtn"),prepare:$("prepareBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),runtime:$("runtimeStatus"),runtimeTitle:$("runtimeTitle"),bootStatus:$("bootStatus"),
@@ -140,15 +142,16 @@ async function loadTeacherOnly(selected){
   policy.setSemantic(candidate);teacherReady=true;ui.modelProgress.value=100;return candidate;
 }
 async function boot(){
-  setBusy(true);ui.boot.disabled=true;setRuntime("LOADING");ui.bootStatus.textContent="Fetching pinned Chocolate Doom runtime…";
+  setBusy(true);ui.boot.disabled=true;setRuntime("LOADING");ui.bootStatus.textContent=requestedRuntime==="owned"?"Fetching project-owned Chocolate Doom runtime…":"Fetching pinned Chocolate Doom runtime…";
   try{
     const file=ui.iwad.files?.[0]||null;if(file&&file.size>128*1024*1024)throw new Error("IWAD is larger than the 128 MB browser safety limit");
     const iwadFile=file?await file.arrayBuffer():null;
-    env=await DoomWasmArena.boot({canvas:ui.canvas,actionMs:Number(ui.actionMs.value),iwadFile,contentName:file?.name||null,onProgress:message=>{ui.bootStatus.textContent=message}});
+    const runtimeOptions=requestedRuntime==="owned"?{runtimeBase:OWNED_RUNTIME_BASE,runtimeInfo:{owned:true,repository:"collinsomniac/doom-classifier",branch:"engine-runtime",base:OWNED_RUNTIME_BASE}}:{};
+    env=await DoomWasmArena.boot({canvas:ui.canvas,actionMs:Number(ui.actionMs.value),iwadFile,contentName:file?.name||null,...runtimeOptions,onProgress:message=>{ui.bootStatus.textContent=message}});
     hashSemantic=new HashSemanticAdapter();hashSemantic.backend="local-js";
     policy=new SemanticResidualPolicy({schema:env.schema,actions:env.actions,semantic:hashSemantic,residual:"neural-set",seed:1993,inferenceMode:"adaptive"});
     controller=new ExperimentController({environment:env,policy,hz:8});controller.training=false;controller.explore=false;controller.memory=true;controller.useResidual=true;
-    bindController();buildBars();engineReady=true;ui.runtimeTitle.textContent="Chocolate Doom · "+env.contentName;
+    bindController();buildBars();engineReady=true;ui.runtimeTitle.textContent=(env.runtime?.owned?"Owned ":"")+"Chocolate Doom · "+env.contentName;
     const counts=env.lastObservation?._collections||{};ui.bootStatus.textContent=DOOM_RUNTIME_PROVENANCE.engine+" · "+env.contentName+" · "+policy.q.parameterCount()+" params · "+(counts.entities?.length||0)+" entities · "+(counts.geometry?.length||0)+" lines";
     ui.prepareStatus.textContent="Engine ready. Prepare Recommended before model-controlled play.";ui.schemaStatus.textContent="Lexical feature hash only.";ui.modelStatus.textContent="No learned teacher loaded.";
     applyProfile("assisted");setRuntime("ENGINE READY");window.__doomLab={get env(){return env},get policy(){return policy},get controller(){return controller}};render();
