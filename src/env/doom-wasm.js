@@ -44,8 +44,8 @@ function entityKind(e){
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
 
-async function fetchAsset(name,type="arrayBuffer"){
-  const response=await fetch(RAW_BASE+"/"+name,{cache:"force-cache"});
+async function fetchAsset(base,name,type="arrayBuffer"){
+  const response=await fetch(String(base).replace(/\/+$/,"")+"/"+name,{cache:"force-cache"});
   if(!response.ok)throw new Error("Failed to fetch "+name+": HTTP "+response.status);
   return type==="text"?response.text():response.arrayBuffer();
 }
@@ -55,9 +55,9 @@ function hostileHealth(raw){
 }
 
 export class DoomWasmArena{
-  constructor(module,{actionMs=110,settleMs=16,contentName="Freedoom 0.13.0"}={}){
+  constructor(module,{actionMs=110,settleMs=16,contentName="Freedoom 0.13.0",runtimeInfo=null}={}){
     this.module=module;this.actionMs=actionMs;this.settleMs=settleMs;this.contentName=contentName;
-    this.runtime={repository:RUNTIME_REPOSITORY,commit:RUNTIME_COMMIT};
+    this.runtime=runtimeInfo||{repository:RUNTIME_REPOSITORY,commit:RUNTIME_COMMIT,base:RAW_BASE,owned:false};
     this.actions=ACTION_SPECS.map(({mask,...action})=>action);
     this.actionMasks=Object.fromEntries(ACTION_SPECS.map(action=>[action.id,action.mask]));
     this.schema={
@@ -141,17 +141,23 @@ export class DoomWasmArena{
     this.lastRaw=null;this.lastObservation=null;this.lastHostileHpLoss=0;this.lastOutcome=null;this.visitedCells=new Map();this.lastExploration={visitedCells:0,cellVisits:0,novelty:1,newCell:false};
   }
 
-  static async boot({canvas,onProgress=()=>{},actionMs=110,iwadFile=null,contentName=null}={}){
+  static async boot({canvas,onProgress=()=>{},actionMs=110,iwadFile=null,contentName=null,runtimeBase=RAW_BASE,runtimeInfo=null}={}){
     if(!canvas)throw new Error("DoomWasmArena.boot requires a canvas");
-    onProgress("fetching pinned Chocolate Doom runtime");
-    const [source,wasmBinary,dataPackage]=await Promise.all([fetchAsset("chocolate-doom.js","text"),fetchAsset("chocolate-doom.wasm"),fetchAsset("chocolate-doom.data")]);
+    const base=String(runtimeBase||RAW_BASE).replace(/\/+$/,"");
+    const resolvedRuntime=runtimeInfo||(
+      base===RAW_BASE
+        ? {repository:RUNTIME_REPOSITORY,commit:RUNTIME_COMMIT,base,owned:false}
+        : {repository:null,commit:null,base,owned:true}
+    );
+    onProgress(resolvedRuntime.owned?"fetching owned Chocolate Doom runtime":"fetching pinned Chocolate Doom runtime");
+    const [source,wasmBinary,dataPackage]=await Promise.all([fetchAsset(base,"chocolate-doom.js","text"),fetchAsset(base,"chocolate-doom.wasm"),fetchAsset(base,"chocolate-doom.data")]);
     onProgress("instantiating WebAssembly runtime");
     const blobUrl=URL.createObjectURL(new Blob([source],{type:"text/javascript"}));
     let createModule;try{({default:createModule}=await import(blobUrl))}finally{URL.revokeObjectURL(blobUrl)}
     if(typeof createModule!=="function")throw new Error("Chocolate Doom module factory was not exported");
     const useCustom=!!iwadFile;
     const module=await createModule({
-      canvas,keyboardListeningElement:canvas,wasmBinary,locateFile:path=>RAW_BASE+"/"+path,getPreloadedPackage:()=>dataPackage,noInitialRun:true,
+      canvas,keyboardListeningElement:canvas,wasmBinary,locateFile:path=>base+"/"+path,getPreloadedPackage:()=>dataPackage,noInitialRun:true,
       preRun:[m=>{
         mkdir(m.FS,"/config");mkdir(m.FS,"/savegames");mkdir(m.FS,"/iwads");
         m.FS.writeFile("/config/default.cfg","fullscreen 0\ngrabmouse 0\nuse_mouse 0\n");
@@ -164,7 +170,7 @@ export class DoomWasmArena{
     onProgress("starting "+(useCustom?(contentName||"user IWAD"):"Freedoom"));
     try{module.callMain(["-window","-iwad",iwadPath,"-warp","1","-skill","1","-nomusic","-nosound","-config","/config/default.cfg","-extraconfig","/config/chocolate-doom.cfg"])}
     catch(error){const message=String(error);if(!message.includes("unwind")&&!message.includes("SimulateInfiniteLoop"))throw error}
-    const arena=new DoomWasmArena(module,{actionMs,contentName:useCustom?(contentName||"user-provided IWAD"):"Freedoom 0.13.0"});
+    const arena=new DoomWasmArena(module,{actionMs,contentName:useCustom?(contentName||"user-provided IWAD"):"Freedoom 0.13.0",runtimeInfo:resolvedRuntime});
     await arena.waitUntilReady();await arena.reset();onProgress("ready");return arena;
   }
 
