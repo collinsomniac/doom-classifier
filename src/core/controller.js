@@ -49,6 +49,7 @@ export class ExperimentController extends EventTarget{
         if(i===0||(i+1)%4===0||i+1===steps)onProgress({completed:i+1,total:steps,ratio:(i+1)/steps,steps:this.steps,episodes:this.episodes,updates:this.policy.q.updates});
         await Promise.resolve();
       }
+      const creditFlush=this.policy.flushLearning?.()||null;
       await this.policy.awaitTeacher?.();
       const segment=this.trace.slice(startTrace),counts={};let switches=0,maxStreak=0,last=null,streak=0;
       for(const item of segment){
@@ -56,7 +57,7 @@ export class ExperimentController extends EventTarget{
         if(item.action===last)streak++;else{if(last!==null)switches++;streak=1;last=item.action}
         maxStreak=Math.max(maxStreak,streak);
       }
-      return{requested:steps,completed:this.steps-startStep,updates:this.policy.q.updates-startUpdates,episodes:this.episodes-startEpisodes,return:this.episodeReturn,actionDiversity:Object.keys(counts).length,switches,maxStreak,actionCounts:counts};
+      return{requested:steps,completed:this.steps-startStep,updates:this.policy.q.updates-startUpdates,episodes:this.episodes-startEpisodes,return:this.episodeReturn,actionDiversity:Object.keys(counts).length,switches,maxStreak,actionCounts:counts,creditFlush};
     }finally{
       this.training=previous.training;this.explore=previous.explore;this.policy.epsilon=previous.epsilon;
       if(this.state!==ControllerState.ERROR)this.setState(ControllerState.PAUSED);
