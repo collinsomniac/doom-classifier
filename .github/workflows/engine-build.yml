@@ -21,6 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate telemetry instrumentation script
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile engine/scripts/instrument_engine.py
+          bash -n engine/scripts/build_owned_wasm.sh
+
       - name: Install pinned Emscripten SDK
         shell: bash
         run: |
