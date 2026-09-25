@@ -61,5 +61,16 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   });
   console.log("SEMANTIC_DOOM_PROBES "+JSON.stringify(semanticProbes));
 
+  await page.setViewportSize({width:390,height:844});
+  const mobileLayout=await page.evaluate(()=>{
+    const flow=document.querySelector("#architectureFlow"),env=document.querySelector('[data-arch="environment"]'),state=document.querySelector('[data-arch="state"]');
+    const fr=flow?.getBoundingClientRect(),er=env?.getBoundingClientRect(),sr=state?.getBoundingClientRect();
+    return{viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,flowWidth:fr?.width||0,envTop:er?.top||0,stateTop:sr?.top||0};
+  });
+  expect(mobileLayout.scrollWidth).toBeLessThanOrEqual(mobileLayout.viewport+1);
+  expect(mobileLayout.flowWidth).toBeLessThanOrEqual(mobileLayout.viewport);
+  expect(mobileLayout.stateTop).toBeGreaterThan(mobileLayout.envTop);
+  console.log("MOBILE_LAYOUT "+JSON.stringify(mobileLayout));
+
   if(consoleErrors.length)throw new Error("Browser errors after successful prepared-model step: "+consoleErrors.join(" | "));
 });
