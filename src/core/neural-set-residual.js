@@ -221,9 +221,11 @@ export class NeuralSetResidualQ{
     return{score,semanticScore,valueScore,memberScores,valueMemberScores,h,semanticOut,valueHidden,valueOuts,state,actionIndex,...attn};
   }
   scoreStatsObservation(observation,{temporal=null}={}){
-    const state=this.encodeState(observation,{temporal}),scores=new Array(this.actions.length),semanticScores=new Array(this.actions.length),valueScores=new Array(this.actions.length),memberScores=new Array(this.actions.length);
-    for(let i=0;i<scores.length;i++){const f=this.actionForward(state,i);scores[i]=f.score;semanticScores[i]=f.semanticScore;valueScores[i]=f.valueScore;memberScores[i]=f.memberScores}
-    return{scores,semanticScores,valueScores,memberScores};
+    const state=this.encodeState(observation,{temporal}),scores=new Array(this.actions.length),semanticScores=new Array(this.actions.length),valueScores=new Array(this.actions.length),memberScores=new Array(this.actions.length),valueMemberScores=new Array(this.actions.length);
+    for(let i=0;i<scores.length;i++){
+      const f=this.actionForward(state,i);scores[i]=f.score;semanticScores[i]=f.semanticScore;valueScores[i]=f.valueScore;memberScores[i]=f.memberScores;valueMemberScores[i]=f.valueMemberScores;
+    }
+    return{scores,semanticScores,valueScores,memberScores,valueMemberScores};
   }
   scoresObservation(observation,{temporal=null}={}){return this.scoreStatsObservation(observation,{temporal}).scores}
   valueScoresObservation(observation,{temporal=null}={}){return this.scoreStatsObservation(observation,{temporal}).valueScores}
