@@ -53,7 +53,7 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
     const training={...train,neuralUpdates:p.q.updates-updatesBefore,semanticDistillUpdates:(p.q.distillUpdates||0)-distillBefore,teacherCalls:p.teacherCalls-teacherBefore,replaySize:p.replay?.length||0,teacherReplaySize:p.teacherReplay?.length||0,temperature:p.temperature,counts:trainingCounts,rewardByAction,switches:trainingSwitches,maxStreak:trainingMaxStreak,explorationStrategies:[...new Set(trainingTrace.map(t=>t.explorationStrategy))]};
     const trainedDistribution=await distribution();
     const after=await evaluate(24);
-    return{version:"adaptive-kl-prior-fusion-64",initialDistribution,before,training,trainedDistribution,after,params:p.q.parameterCount(),model:p.q.name,targetSyncs:p.q.targetSyncs??0,splitHeads:typeof p.q.valueScoresObservation==="function"};
+    return{version:"nstep4-adaptive-kl-prior-fusion-64",initialDistribution,before,training,trainedDistribution,after,params:p.q.parameterCount(),model:p.q.name,targetSyncs:p.q.targetSyncs??0,splitHeads:typeof p.q.valueScoresObservation==="function"};
   });
 
   console.log("DOOM_LEARNING_BENCHMARK "+JSON.stringify(result));
