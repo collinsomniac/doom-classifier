@@ -26,7 +26,7 @@ assert.equal(flat._collections.geometry[0].line_id,4);assert.equal(flat._collect
 const damaged=structuredClone(raw);damaged.world.entities[1].health=15;
 const damageOutcome=arena.outcome(raw,damaged,{exploration:{newCell:false,visitedCells:1}});
 const noveltyOutcome=arena.outcome(raw,raw,{exploration:{newCell:true,visitedCells:2}});
-assert.equal(damageOutcome.damageDealt,15);assert.ok(damageOutcome.reward>0,"nonlethal hostile damage must create immediate positive learning signal");
+assert.equal(damageOutcome.hostileHpLoss,15);assert.equal(damageOutcome.damageDealt,15,"legacy trace alias should match hostile HP-loss telemetry");assert.equal(damageOutcome.damageAttributed,false);assert.ok(damageOutcome.reward<0,"unattributed hostile HP loss must not create positive learning reward");
 assert.equal(firstExplore.newCell,true);assert.equal(repeatExplore.newCell,false);assert.equal(novelExplore.newCell,true);assert.equal(novelExplore.visitedCells,2);
 assert.ok(noveltyOutcome.explorationBonus>0,"new spatial cells must provide a small policy-blind progress bonus");
 
@@ -38,4 +38,5 @@ assert.equal(arena.actionMasks.fire,64);assert.equal(arena.actionMasks.forward_f
 assert.equal(arena.actions.find(a=>a.id==="fire").params.fire,1);assert.equal(arena.actions.find(a=>a.id==="fire").params.forward,0);
 assert.equal(arena.actions.find(a=>a.id==="forward_fire").params.forward,1);assert.equal(arena.actions.find(a=>a.id==="forward_fire").params.fire,1);
 assert.equal(arena.schema.actionFields.length,8);
+assert.ok(arena.schema.fields.some(f=>f.id==="recent_hostile_hp_loss"));assert.ok(!arena.schema.fields.some(f=>f.id==="recent_damage_dealt"));
 console.log(JSON.stringify({ok:true,globals:arena.schema.fields.length,actions:arena.actions.length,damageOutcome,rewardGood,rewardBad,rewardDead}));
