@@ -43,6 +43,8 @@ jobs:
         run: node tests/policy-exploration.mjs
       - name: Run experience replay invariants
         run: node tests/experience-replay.mjs
+      - name: Run n-step return invariants
+        run: node tests/n-step-returns.mjs
       - name: Run target network invariants
         run: node tests/target-network.mjs
       - name: Run semantic/value separation invariants
