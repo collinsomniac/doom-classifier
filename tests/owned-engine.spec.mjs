@@ -22,9 +22,10 @@ test("owned Chocolate Doom runtime exposes causal event counters",async({page})=
     });
 
     const before=env.readRaw(),initial={...(before.events||{})};
-    let after=before,pulses=0;
+    let after=before,pulses=0,lastOutcome=null;
     while(pulses<12&&Number(after.events?.player_damage_dealt||0)===0){
-      await env.step("fire");
+      const step=await env.step("fire");
+      lastOutcome=step.info?.outcome||null;
       after=env.readRaw();
       pulses++;
     }
@@ -34,7 +35,7 @@ test("owned Chocolate Doom runtime exposes causal event counters",async({page})=
     const reset={...(env.readRaw().events||{})};
     env.setActionMs(110);
 
-    return{runtime:env.runtime,initial,observed,reset,pulses};
+    return{runtime:env.runtime,initial,observed,reset,pulses,lastOutcome};
   });
 
   expect(result.runtime.owned).toBe(true);
@@ -45,6 +46,11 @@ test("owned Chocolate Doom runtime exposes causal event counters",async({page})=
   }
   expect(result.observed.player_damage_dealt).toBeGreaterThan(0);
   expect(result.observed.player_kills).toBeGreaterThanOrEqual(0);
+  expect(result.lastOutcome?.combatAttributionAvailable).toBe(true);
+  expect(result.lastOutcome?.damageAttributed).toBe(true);
+  expect(result.lastOutcome?.damageDealt).toBeGreaterThan(0);
+  expect(result.lastOutcome?.attributedCombatReward).toBeGreaterThan(0);
+  expect(result.lastOutcome?.reward).toBeGreaterThan(0);
   if(consoleErrors.length)throw new Error(consoleErrors.join(" | "));
 
   console.log("OWNED_ENGINE_ABI "+JSON.stringify(result));
