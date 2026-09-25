@@ -42,7 +42,7 @@ export class ExperimentController extends EventTarget{
     this.loopVersion++;if(this.timer)clearTimeout(this.timer);this.timer=null;
     const previous={training:this.training,explore:this.explore,epsilon:this.policy.epsilon};
     this.training=true;this.explore=true;this.policy.epsilon=epsilon;this.setState(ControllerState.TUNING);
-    const startUpdates=this.policy.q.updates,startEpisodes=this.episodes,startStep=this.steps;
+    const startUpdates=this.policy.q.updates,startEpisodes=this.episodes,startStep=this.steps,startTrace=this.trace.length;
     try{
       for(let i=0;i<steps;i++){
         const ok=await this.tick();if(!ok&&this.state===ControllerState.ERROR)break;
@@ -50,7 +50,13 @@ export class ExperimentController extends EventTarget{
         await Promise.resolve();
       }
       await this.policy.awaitTeacher?.();
-      return{requested:steps,completed:this.steps-startStep,updates:this.policy.q.updates-startUpdates,episodes:this.episodes-startEpisodes,return:this.episodeReturn};
+      const segment=this.trace.slice(startTrace),counts={};let switches=0,maxStreak=0,last=null,streak=0;
+      for(const item of segment){
+        counts[item.action]=(counts[item.action]||0)+1;
+        if(item.action===last)streak++;else{if(last!==null)switches++;streak=1;last=item.action}
+        maxStreak=Math.max(maxStreak,streak);
+      }
+      return{requested:steps,completed:this.steps-startStep,updates:this.policy.q.updates-startUpdates,episodes:this.episodes-startEpisodes,return:this.episodeReturn,actionDiversity:Object.keys(counts).length,switches,maxStreak,actionCounts:counts};
     }finally{
       this.training=previous.training;this.explore=previous.explore;this.policy.epsilon=previous.epsilon;
       if(this.state!==ControllerState.ERROR)this.setState(ControllerState.PAUSED);
