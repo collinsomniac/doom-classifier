@@ -51,8 +51,8 @@ assert.equal(moved.action.id,"value","larger KL budget must allow learned conseq
 
 
 const tinyQ={...q,updates:100,scoreStatsObservation(){return{
-  scores:[0,0,0],semanticScores:[.8,0,-.4],valueScores:[-.002,.01,0],
-  valueMemberScores:[[-.0022,-.002,-.0018],[.009,.01,.011],[-.0005,0,.0005]],memberScores:[[0,0,0],[0,0,0],[0,0,0]]
+  scores:[0,0,0],semanticScores:[.8,0,-.4],valueScores:[-.0002,.001,0],
+  valueMemberScores:[[-.00022,-.0002,-.00018],[.0009,.001,.0011],[-.00005,0,.00005]],memberScores:[[0,0,0],[0,0,0],[0,0,0]]
 }}};
 const adaptive=new SemanticResidualPolicy({
   schema,actions,semantic,residual:tinyQ,temperature:.5,seed:13,
