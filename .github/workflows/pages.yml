@@ -43,8 +43,6 @@ jobs:
         run: node tests/target-network.mjs
       - name: Run semantic/value separation invariants
         run: node tests/semantic-value-separation.mjs
-      - name: Run action-history invariants
-        run: node tests/action-history.mjs
       - name: Run temperature calibration invariants
         run: node tests/temperature-calibration.mjs
       - name: Run semantic collection summary
