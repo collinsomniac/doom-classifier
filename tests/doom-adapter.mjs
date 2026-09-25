@@ -30,9 +30,10 @@ assert.equal(damageOutcome.hostileHpLoss,15);assert.equal(damageOutcome.damageDe
 assert.equal(firstExplore.newCell,true);assert.equal(repeatExplore.newCell,false);assert.equal(novelExplore.newCell,true);assert.equal(novelExplore.visitedCells,2);
 assert.ok(noveltyOutcome.explorationBonus>0,"new spatial cells must provide a small policy-blind progress bonus");
 
-const rewardKillOnly=arena.reward({player:{health:87,kills:3},world:{entities:[]}},{player:{health:87,kills:4},world:{entities:[]}});
-const rewardBad=arena.reward({player:{health:87,kills:3},world:{entities:[]}},{player:{health:62,kills:3},world:{entities:[]}});
-const rewardDead=arena.reward({player:{health:10,kills:3},world:{entities:[]}},{player:{health:0,kills:3},world:{entities:[]}});
+const noExplore={exploration:{newCell:false,visitedCells:2}};
+const rewardKillOnly=arena.outcome({player:{health:87,kills:3},world:{entities:[]}},{player:{health:87,kills:4},world:{entities:[]}},noExplore).reward;
+const rewardBad=arena.outcome({player:{health:87,kills:3},world:{entities:[]}},{player:{health:62,kills:3},world:{entities:[]}},noExplore).reward;
+const rewardDead=arena.outcome({player:{health:10,kills:3},world:{entities:[]}},{player:{health:0,kills:3},world:{entities:[]}},noExplore).reward;
 assert.ok(rewardKillOnly<0,"single-player intermission killcount must not create positive reward without attacker attribution");assert.ok(rewardBad<0);assert.ok(rewardDead<rewardBad);
 assert.equal(arena.actionMasks.fire,64);assert.equal(arena.actionMasks.forward_fire,65);assert.equal(arena.actionMasks.strafe_left_fire,80);
 assert.equal(arena.actions.find(a=>a.id==="fire").params.fire,1);assert.equal(arena.actions.find(a=>a.id==="fire").params.forward,0);
