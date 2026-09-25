@@ -2,8 +2,11 @@ name: owned-doom-engine
 
 on:
   push:
+    branches: [main]
     paths:
       - "engine/**"
+      - "src/env/doom-wasm.js"
+      - "tests/owned-engine.spec.mjs"
       - ".github/workflows/engine-build.yml"
   workflow_dispatch:
 
