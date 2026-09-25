@@ -164,21 +164,23 @@ Teacher distillation may update the semantic/shared branch, but it synchronizes 
 
 ## Online value learning
 
-For chosen action `a_t`:
+The default learner uses a short four-step return. For a prefix beginning at action `a_t`:
 
-`target = r_t + gamma * max_a V_target(s_{t+1}, a)`
+`R_t^(n) = r_t + gamma r_(t+1) + ... + gamma^(n-1) r_(t+n-1)`
 
-`td = target - V_online(s_t, a_t)`
+`target = R_t^(n) + gamma^n * max_a V_target(s_(t+n), a)`
 
-Only the consequence-value branch receives this gradient.
+Shorter prefixes are flushed at terminal states and at the end of a bounded browser training burst. Only the consequence-value branch receives this gradient.
 
 The browser learner adds:
 
-- replay capacity: 96 transitions;
+- replay capacity: 96 **aggregated** transitions;
 - replay batch: 2 extra transitions per live update;
 - target sync interval: 24 value updates;
 - bootstrap subset of value heads;
-- optional epsilon exploration during training.
+- policy-proportional exploration from the model's own calibrated distribution with a small uniform floor;
+- bounded semantic teacher replay;
+- KL-bounded fusion between semantic prior and learned consequence value.
 
 ## Semantic teacher
 
@@ -276,6 +278,20 @@ Expose map-line geometry, blocking flag, special, tag and line flags.
 The policy outputs actual button masks. FIRE is Chocolate Doom's real fire input.
 
 No tactical macros are supplied.
+
+## Reward integrity
+
+Environment telemetry and learning reward are deliberately different contracts.
+
+The current borrowed Chocolate Doom bridge exposes player `killcount`, incoming `damagecount`, and entity health, but it does **not** expose player-attributed damage dealt. The adapter can therefore observe hostile HP decreases, but those decreases may come from monster infighting or other world events.
+
+Accordingly:
+
+- `recent_hostile_hp_loss` is factual state telemetry;
+- player kill-count changes may contribute combat reward;
+- hostile HP loss contributes **zero** reward until a project-owned bridge exposes damage attribution.
+
+This prevents a coincidental action from receiving positive value merely because hostile HP happened to decrease during its control interval.
 
 ## Progress reward
 
