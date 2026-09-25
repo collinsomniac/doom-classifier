@@ -35,10 +35,38 @@ const rewardKillOnly=arena.outcome({player:{health:87,kills:3},world:{entities:[
 const rewardBad=arena.outcome({player:{health:87,kills:3},world:{entities:[]}},{player:{health:62,kills:3},world:{entities:[]}},noExplore).reward;
 const rewardDead=arena.outcome({player:{health:10,kills:3},world:{entities:[]}},{player:{health:0,kills:3},world:{entities:[]}},noExplore).reward;
 assert.ok(rewardKillOnly<0,"single-player intermission killcount must not create positive reward without attacker attribution");assert.ok(rewardBad<0);assert.ok(rewardDead<rewardBad);
+
+const attributedBefore=structuredClone(raw);
+attributedBefore.events={player_damage_dealt:10,player_kills:1,player_pickups:2,level_completions:0,secret_exits:0};
+const attributedAfter=structuredClone(raw);
+attributedAfter.events={player_damage_dealt:25,player_kills:2,player_pickups:3,level_completions:1,secret_exits:1};
+const attributedOutcome=arena.outcome(attributedBefore,attributedAfter,noExplore);
+assert.equal(attributedOutcome.combatAttributionAvailable,true);
+assert.equal(attributedOutcome.damageAttributed,true);
+assert.equal(attributedOutcome.damageDealt,15);
+assert.equal(attributedOutcome.playerKillDelta,1);
+assert.equal(attributedOutcome.playerPickupDelta,1);
+assert.equal(attributedOutcome.levelCompletionDelta,1);
+assert.equal(attributedOutcome.secretExitDelta,1);
+assert.equal(attributedOutcome.killAttributed,true);
+assert.equal(attributedOutcome.levelCompleted,true);
+assert.ok(Math.abs(attributedOutcome.attributedCombatReward-(15*.02+1.25))<1e-12);
+assert.ok(Math.abs(attributedOutcome.pickupReward-.03)<1e-12);
+assert.ok(Math.abs(attributedOutcome.completionReward-5.5)<1e-12);
+assert.ok(attributedOutcome.reward>7,"native causal events should create positive attributed consequence reward");
+
+arena.lastNativeEvents={available:true,playerDamageDealt:15,playerKills:1,playerPickups:1,levelCompletions:1,secretExits:1};
+const attributedFlat=arena.flatten(attributedAfter);
+assert.equal(attributedFlat.recent_player_damage_dealt,15);
+assert.equal(attributedFlat.recent_player_kills,1);
+assert.equal(attributedFlat.recent_player_pickups,1);
+assert.equal(attributedFlat.level_completed,1);
+assert.equal(attributedFlat.secret_exit,1);
+
 assert.equal(arena.actionMasks.fire,64);assert.equal(arena.actionMasks.forward_fire,65);assert.equal(arena.actionMasks.strafe_left_fire,80);
 assert.equal(arena.actions.find(a=>a.id==="fire").params.fire,1);assert.equal(arena.actions.find(a=>a.id==="fire").params.forward,0);
 assert.equal(arena.actions.find(a=>a.id==="forward_fire").params.forward,1);assert.equal(arena.actions.find(a=>a.id==="forward_fire").params.fire,1);
 assert.equal(arena.schema.actionFields.length,8);
-assert.ok(arena.schema.fields.some(f=>f.id==="recent_hostile_hp_loss"));assert.ok(!arena.schema.fields.some(f=>f.id==="recent_damage_dealt"));
+assert.ok(arena.schema.fields.some(f=>f.id==="recent_hostile_hp_loss"));assert.ok(arena.schema.fields.some(f=>f.id==="recent_player_damage_dealt"));assert.ok(arena.schema.fields.some(f=>f.id==="level_completed"));assert.ok(!arena.schema.fields.some(f=>f.id==="recent_damage_dealt"));
 assert.equal(damageOutcome.killAttributed,false);assert.equal(damageOutcome.combatAttributionAvailable,false);
-console.log(JSON.stringify({ok:true,globals:arena.schema.fields.length,actions:arena.actions.length,damageOutcome,rewardKillOnly,rewardBad,rewardDead}));
+console.log(JSON.stringify({ok:true,globals:arena.schema.fields.length,actions:arena.actions.length,damageOutcome,attributedOutcome,rewardKillOnly,rewardBad,rewardDead}));
