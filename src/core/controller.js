@@ -62,7 +62,8 @@ export class ExperimentController extends EventTarget{
         if(item.action===last)streak++;else{if(last!==null)switches++;streak=1;last=item.action}
         maxStreak=Math.max(maxStreak,streak);
       }
-      const trainingReturn=segment.reduce((sum,item)=>sum+Number(item.reward||0),0);\n      return{requested:steps,completed:this.steps-startStep,updates:this.policy.q.updates-startUpdates,episodes:this.episodes-startEpisodes,rolloutHorizon,rolloutRestarts,return:trainingReturn,actionDiversity:Object.keys(counts).length,switches,maxStreak,actionCounts:counts,creditFlush};
+      const trainingReturn=segment.reduce((sum,item)=>sum+Number(item.reward||0),0);
+      return{requested:steps,completed:this.steps-startStep,updates:this.policy.q.updates-startUpdates,episodes:this.episodes-startEpisodes,rolloutHorizon,rolloutRestarts,return:trainingReturn,actionDiversity:Object.keys(counts).length,switches,maxStreak,actionCounts:counts,creditFlush};
     }finally{
       this.training=previous.training;this.explore=previous.explore;this.policy.epsilon=previous.epsilon;
       if(this.state!==ControllerState.ERROR)this.setState(ControllerState.PAUSED);
