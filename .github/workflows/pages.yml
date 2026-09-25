@@ -37,6 +37,8 @@ jobs:
         run: node tests/neural-set-benchmark.mjs
       - name: Run adaptive teacher invariants
         run: node tests/adaptive-teacher.mjs
+      - name: Run semantic teacher replay invariants
+        run: node tests/teacher-replay.mjs
       - name: Run experience replay invariants
         run: node tests/experience-replay.mjs
       - name: Run target network invariants
