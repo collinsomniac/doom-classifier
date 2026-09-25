@@ -13,7 +13,7 @@ const ui={
   tune:$("tuneBtn"),eval:$("evalBtn"),evalResults:$("evalResults"),tuneSteps:$("tuneSteps"),tuneProgress:$("tuneProgress"),tuneStatus:$("tuneStatus"),tuneBadge:$("tuneBadge"),
   actionMs:$("actionMs"),actionMsOut:$("actionMsOut"),manualAction:$("manualActionSelect"),manual:$("manualBtn"),manualStatus:$("manualStatus"),weaponState:$("weaponState"),
   bars:$("actionBars"),chosen:$("chosenAction"),chosenSemantic:$("chosenSemantic"),chosenValue:$("chosenValue"),chosenScore:$("chosenScore"),intentFire:$("intentFire"),intentStrafe:$("intentStrafe"),intentTurn:$("intentTurn"),intentForward:$("intentForward"),intentBack:$("intentBack"),intentUse:$("intentUse"),entropy:$("entropy"),margin:$("margin"),epistemic:$("epistemic"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),
-  attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),decodeTemp:$("decodeTemp"),replaySize:$("replaySize"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),
+  attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),decodeTemp:$("decodeTemp"),replaySize:$("replaySize"),teacherReplaySize:$("teacherReplaySize"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),
   schemaCompile:$("schemaCompileBtn"),schemaStatus:$("schemaStatus"),state:$("stateTable"),objective:$("objectiveText"),steps:$("steps"),episodes:$("episodes"),ret:$("return"),updates:$("updates"),lastReward:$("lastReward"),damageDealt:$("damageDealt"),damageReceived:$("damageReceived"),
   log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot")
 };
@@ -80,7 +80,7 @@ function render(){
   if(!env||!controller||!policy)return;
   const obs=env.lastObservation||env.observe();ui.objective.textContent=policy.schema.objective||env.schema.objective;ui.weaponState.textContent=weaponLabel(obs);
   ui.state.innerHTML=(policy.schema.fields||env.schema.fields).map(field=>'<div class="state-row"><span>'+field.label+'</span><strong>'+displayField(field,obs[field.id])+'</strong></div>').join("");
-  ui.steps.textContent=controller.steps;ui.episodes.textContent=controller.episodes;ui.ret.textContent=controller.episodeReturn.toFixed(3);ui.updates.textContent=policy.q.updates;ui.teacherCalls.textContent=policy.teacherCalls;ui.decodeTemp.textContent=policy.temperature.toFixed(3);ui.replaySize.textContent=String(policy.replay?.length||0);
+  ui.steps.textContent=controller.steps;ui.episodes.textContent=controller.episodes;ui.ret.textContent=controller.episodeReturn.toFixed(3);ui.updates.textContent=policy.q.updates;ui.teacherCalls.textContent=policy.teacherCalls;ui.decodeTemp.textContent=policy.temperature.toFixed(3);ui.replaySize.textContent=String(policy.replay?.length||0);ui.teacherReplaySize.textContent=String(policy.teacherReplay?.length||0);
   ui.backbone.textContent=(policy.q.name||"neural")+" · "+policy.q.parameterCount()+" params";
   const lat=controller.latencySummary();ui.latLast.textContent=lat.last.toFixed(2)+" ms";ui.latP95.textContent=lat.p95.toFixed(2)+" ms";ui.latSemantic.textContent=(policy.lastTeacherLatencyMs||0).toFixed(1)+" ms";
   const outcome=controller.lastDecision?.outcome||env.lastOutcome;ui.damageDealt.textContent=Number(outcome?.damageDealt||0).toFixed(0);ui.damageReceived.textContent=Math.max(0,-Number(outcome?.healthDelta||0)).toFixed(0);
