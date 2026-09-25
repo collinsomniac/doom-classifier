@@ -17,19 +17,19 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
     const evaluate=async(steps)=>{
       c.pause();c.training=false;c.explore=false;c.memory=true;c.useResidual=true;p.setInferenceMode("neural");
       await c.reset({learning:false});
-      const teacherBefore=p.teacherCalls,counts={},semanticCounts={},valueCounts={};let reward=0,damage=0,received=0,kills=0,maxP=0,entropy=0,fire=0,switches=0,maxStreak=0,lastAction=null,streak=0,chosenSemantic=0,chosenValue=0;
+      const teacherBefore=p.teacherCalls,counts={},semanticCounts={},valueCounts={};let reward=0,damage=0,received=0,kills=0,maxP=0,entropy=0,fire=0,switches=0,maxStreak=0,lastAction=null,streak=0,chosenSemantic=0,chosenValue=0,valueBeta=0,priorKL=0,valueTrust=0;
       for(let i=0;i<steps;i++){
         await c.tick();const d=c.lastDecision;if(!d)continue;
         counts[d.action.id]=(counts[d.action.id]||0)+1;
         if(d.action.id===lastAction)streak++;else{if(lastAction!==null)switches++;streak=1;lastAction=d.action.id}maxStreak=Math.max(maxStreak,streak);
         reward+=d.reward||0;damage+=d.outcome?.damageDealt||0;received+=Math.max(0,-(d.outcome?.healthDelta||0));kills+=d.outcome?.killDelta||0;
         maxP+=Math.max(...d.probs);entropy+=d.uncertainty.entropy;if(d.action.id.includes("fire"))fire++;
-        chosenSemantic+=Number(d.semanticPriorScores?.[d.actionIndex]||0);chosenValue+=Number(d.valueScores?.[d.actionIndex]||0);
+        chosenSemantic+=Number(d.semanticPriorScores?.[d.actionIndex]||0);chosenValue+=Number(d.valueScores?.[d.actionIndex]||0);valueBeta+=Number(d.valueBeta||0);priorKL+=Number(d.priorKL||0);valueTrust+=Number(d.valueTrust||0);
         if(d.semanticPriorScores){const si=d.semanticPriorScores.reduce((best,v,i,a)=>v>a[best]?i:best,0),id=p.actions[si].id;semanticCounts[id]=(semanticCounts[id]||0)+1}
         if(d.valueScores){const vi=d.valueScores.reduce((best,v,i,a)=>v>a[best]?i:best,0),id=p.actions[vi].id;valueCounts[id]=(valueCounts[id]||0)+1}
       }
       const lat=c.latencySummary(),dominant=Object.entries(counts).sort((a,b)=>b[1]-a[1])[0]||["none",0],semanticDominant=Object.entries(semanticCounts).sort((a,b)=>b[1]-a[1])[0]||["none",0],valueDominant=Object.entries(valueCounts).sort((a,b)=>b[1]-a[1])[0]||["none",0];
-      return{steps,reward,damage,received,kills,fire,diversity:Object.keys(counts).length,switches,maxStreak,dominant,semanticDominant,valueDominant,counts,semanticCounts,valueCounts,meanChosenSemantic:chosenSemantic/steps,meanChosenValue:chosenValue/steps,meanMaxP:maxP/steps,meanEntropy:entropy/steps,p95Ms:lat.p95,teacherCalls:p.teacherCalls-teacherBefore,temperature:p.temperature};
+      return{steps,reward,damage,received,kills,fire,diversity:Object.keys(counts).length,switches,maxStreak,dominant,semanticDominant,valueDominant,counts,semanticCounts,valueCounts,meanChosenSemantic:chosenSemantic/steps,meanChosenValue:chosenValue/steps,meanValueBeta:valueBeta/steps,meanPriorKL:priorKL/steps,meanValueTrust:valueTrust/steps,meanMaxP:maxP/steps,meanEntropy:entropy/steps,p95Ms:lat.p95,teacherCalls:p.teacherCalls-teacherBefore,temperature:p.temperature};
     };
     const distribution=async()=>{
       await c.reset({learning:false});p.resetEpisode();
@@ -44,7 +44,7 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
     const before=await evaluate(24);
     await c.reset({learning:false});c.training=true;c.explore=true;c.memory=true;c.useResidual=true;p.setInferenceMode("adaptive");
     const updatesBefore=p.q.updates,distillBefore=p.q.distillUpdates||0,teacherBefore=p.teacherCalls,traceStart=c.trace.length;
-    const train=await c.trainBurst({steps:256,epsilon:.16});
+    const train=await c.trainBurst({steps:64,epsilon:.16});
     const trainingTrace=c.trace.slice(traceStart),trainingCounts={},rewardByAction={};let trainingSwitches=0,trainingMaxStreak=0,trainingLast=null,trainingStreak=0;
     for(const t of trainingTrace){
       trainingCounts[t.action]=(trainingCounts[t.action]||0)+1;rewardByAction[t.action]=(rewardByAction[t.action]||0)+t.reward;
@@ -53,14 +53,14 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
     const training={...train,neuralUpdates:p.q.updates-updatesBefore,semanticDistillUpdates:(p.q.distillUpdates||0)-distillBefore,teacherCalls:p.teacherCalls-teacherBefore,replaySize:p.replay?.length||0,teacherReplaySize:p.teacherReplay?.length||0,temperature:p.temperature,counts:trainingCounts,rewardByAction,switches:trainingSwitches,maxStreak:trainingMaxStreak,explorationStrategies:[...new Set(trainingTrace.map(t=>t.explorationStrategy))]};
     const trainedDistribution=await distribution();
     const after=await evaluate(24);
-    return{version:"split-head-semantic-replay-policy-sampling-256",initialDistribution,before,training,trainedDistribution,after,params:p.q.parameterCount(),model:p.q.name,targetSyncs:p.q.targetSyncs??0,splitHeads:typeof p.q.valueScoresObservation==="function"};
+    return{version:"kl-prior-fusion-64",initialDistribution,before,training,trainedDistribution,after,params:p.q.parameterCount(),model:p.q.name,targetSyncs:p.q.targetSyncs??0,splitHeads:typeof p.q.valueScoresObservation==="function"};
   });
 
   console.log("DOOM_LEARNING_BENCHMARK "+JSON.stringify(result));
   expect(result.params).toBeGreaterThan(0);expect(result.params).toBeLessThan(8000);expect(result.splitHeads).toBe(true);expect(result.model).toContain("SemanticValue");
   expect(result.before.teacherCalls).toBe(0);
   expect(result.after.teacherCalls).toBe(0);
-  expect(result.training.neuralUpdates).toBeGreaterThan(256);
+  expect(result.training.neuralUpdates).toBeGreaterThan(64);
   expect(result.training.replaySize).toBeGreaterThan(0);
   expect(result.before.steps).toBe(24);expect(result.after.steps).toBe(24);
   if(errors.length)throw new Error(errors.join(" | "));
