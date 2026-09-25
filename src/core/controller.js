@@ -28,7 +28,7 @@ export class ExperimentController extends EventTarget{
       this.trace.push({
         t:Date.now(),step:this.steps,observation:obs,action:decision.action.id,probabilities:Object.fromEntries(this.policy.actions.map((a,i)=>[a.id,decision.probs[i]])),reward:step.reward,outcome:step.info?.outcome||null,
         uncertainty:decision.uncertainty,semanticPrior:decision.semanticPriorScores?.[decision.actionIndex]??null,learnedValue:decision.valueScores?.[decision.actionIndex]??null,combinedScore:decision.qScores?.[decision.actionIndex]??null,latencyMs:decision.latencyMs,semanticLatencyMs:decision.semanticLatencyMs,residualLatencyMs:decision.residualLatencyMs,
-        teacherUsed:decision.teacherUsed,teacherPending:decision.teacherPending,semanticUsed:decision.semanticUsed,inferenceMode:decision.inferenceMode,teacherCalls:this.policy.teacherCalls,teacherScheduled:this.policy.teacherScheduled,lastTeacherLatencyMs:this.policy.lastTeacherLatencyMs,
+        teacherUsed:decision.teacherUsed,teacherPending:decision.teacherPending,semanticUsed:decision.semanticUsed,inferenceMode:decision.inferenceMode,explorationStrategy:decision.explorationStrategy,teacherCalls:this.policy.teacherCalls,teacherScheduled:this.policy.teacherScheduled,lastTeacherLatencyMs:this.policy.lastTeacherLatencyMs,
         backbone:this.policy.semantic.name,residual:this.policy.q.name||this.policy.q.constructor.name,backend:this.policy.semantic.backend||"local-js",
         mode:{useResidual:this.useResidual,training:this.training,memory:this.memory,explore:this.explore}
       });
