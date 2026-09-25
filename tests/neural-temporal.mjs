@@ -16,7 +16,7 @@ const actions=[
 ];
 
 function makePolicy(){
-  return new SemanticResidualPolicy({schema,actions,semantic:new ZeroSemantic(),residual:"neural-set",inferenceMode:"neural",seed:77});
+  return new SemanticResidualPolicy({schema,actions,semantic:new ZeroSemantic(),residual:"neural-set",inferenceMode:"neural",seed:77,nStep:1});
 }
 
 const withMemory=makePolicy();
