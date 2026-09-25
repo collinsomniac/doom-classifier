@@ -63,7 +63,7 @@ export class SemanticResidualPolicy{
     this.teacherReplayCapacity=Math.max(0,Math.floor(teacherReplayCapacity));this.teacherReplayBatch=Math.max(0,Math.floor(teacherReplayBatch));this.teacherReplayStrength=teacherReplayStrength;this.teacherReplay=[];this.teacherReplayRng=mulberry32((seed^0xa341316c)>>>0);this.nStep=Math.max(1,Math.floor(nStep));this.nStepBuffer=[];
     this.priorKlBudget=Math.max(0,Number(priorKlBudget)||0);this.valueBetaMax=Math.max(0,Number(valueBetaMax)||0);this.valueBetaSearchSteps=Math.max(1,Math.floor(valueBetaSearchSteps));this.valueTrustUpdates=Math.max(1,Math.floor(valueTrustUpdates));
     this.novelty=new NoveltyTracker(this.baseSize);
-    this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherGeneration=0;this.teacherPromise=null;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];
+    this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherGeneration=0;this.teacherPromise=null;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];this.onTeacherResult=null;
     this.setSemantic(semantic);
   }
   setSemantic(semantic){
@@ -169,7 +169,7 @@ export class SemanticResidualPolicy{
       calibration:calibration?{temperature:Number(calibration.temperature||0),bestTemperature:Number(calibration.bestTemperature||0),loss:Number(calibration.loss||0)}:null,
       stateText:stateText.slice(0,1800)
     };
-    this.lastTeacherResult=item;this.teacherHistory.push(item);if(this.teacherHistory.length>24)this.teacherHistory.shift();return item;
+    this.lastTeacherResult=item;this.teacherHistory.push(item);if(this.teacherHistory.length>24)this.teacherHistory.shift();try{this.onTeacherResult?.(item)}catch{}return item;
   }
   calibrateTemperature(obs,teacherScores,temporal=null,{blend=.35}={}){
     if(!teacherScores?.length)return null;

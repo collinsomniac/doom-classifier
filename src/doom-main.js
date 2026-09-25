@@ -200,6 +200,7 @@ async function boot(){
     env=await DoomWasmArena.boot({canvas:ui.canvas,actionMs:Number(ui.actionMs.value),iwadFile,contentName:file?.name||null,...runtimeOptions,onProgress:message=>{ui.bootStatus.textContent=message}});
     hashSemantic=new HashSemanticAdapter();hashSemantic.backend="local-js";
     policy=new SemanticResidualPolicy({schema:env.schema,actions:env.actions,semantic:hashSemantic,residual:"neural-set",seed:1993,inferenceMode:"adaptive"});
+    policy.onTeacherResult=()=>{if(env&&controller){const obs=env.lastObservation||env.observe(),d=controller.lastDecision,outcome=d?.outcome||env.lastOutcome;renderTeacherTranscript();renderArchitecture(obs,d,outcome)}};
     controller=new ExperimentController({environment:env,policy,hz:8});controller.training=false;controller.explore=false;controller.memory=true;controller.useResidual=true;
     bindController();buildBars();engineReady=true;ui.runtimeTitle.textContent=(env.runtime?.owned?"Owned ":"")+"Chocolate Doom · "+env.contentName;
     const counts=env.lastObservation?._collections||{};ui.bootStatus.textContent=DOOM_RUNTIME_PROVENANCE.engine+" · "+env.contentName+" · "+policy.q.parameterCount()+" params · "+(counts.entities?.length||0)+" entities · "+(counts.geometry?.length||0)+" lines";
