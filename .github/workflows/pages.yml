@@ -39,6 +39,8 @@ jobs:
         run: node tests/adaptive-teacher.mjs
       - name: Run semantic teacher replay invariants
         run: node tests/teacher-replay.mjs
+      - name: Run policy exploration invariants
+        run: node tests/policy-exploration.mjs
       - name: Run experience replay invariants
         run: node tests/experience-replay.mjs
       - name: Run target network invariants
