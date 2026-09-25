@@ -283,13 +283,12 @@ No tactical macros are supplied.
 
 Environment telemetry and learning reward are deliberately different contracts.
 
-The current borrowed Chocolate Doom bridge exposes player `killcount`, incoming `damagecount`, and entity health, but it does **not** expose player-attributed damage dealt. The adapter can therefore observe hostile HP decreases, but those decreases may come from monster infighting or other world events.
+The current borrowed Chocolate Doom bridge exposes `killcount`, incoming `damagecount`, and entity health, but it does **not** expose attacker-attributed combat events. The adapter can observe hostile HP decreases and intermission kill-count changes, but in vanilla single-player Chocolate Doom both can reflect monster infighting or other non-player causes.
 
 Accordingly:
 
 - `recent_hostile_hp_loss` is factual state telemetry;
-- player kill-count changes may contribute combat reward;
-- hostile HP loss contributes **zero** reward until a project-owned bridge exposes damage attribution.
+- kill-count changes and hostile HP loss contribute **zero** reward until a project-owned bridge exposes attacker attribution.
 
 This prevents a coincidental action from receiving positive value merely because hostile HP happened to decrease during its control interval.
 
