@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import {NeuralSetResidualQ} from "../src/core/neural-set-residual.js";
 import {SemanticResidualPolicy} from "../src/core/policy.js";
-import {HashSemanticAdapter} from "../src/model-adapters/hash-semantic.js";
 
 const schema={objective:"respond appropriately",fields:[{id:"signal",label:"signal",description:"current signal",min:0,max:1}],collections:[]};
 const actions=[
@@ -31,7 +30,8 @@ const after=net.scoreStatsObservation(obs,{history:{previousActionIndex:0,streak
 const semanticDrift=Math.max(...beforeSemantic.map((v,i)=>Math.abs(v-after.semanticScores[i])));
 assert.equal(semanticDrift,0,"history-conditioned reward learning must not overwrite semantic prior");
 
-const policy=new SemanticResidualPolicy({schema,actions,semantic:new HashSemanticAdapter(),residual:net,seed:313});
+const semantic={name:"stub",backend:"test",compile(){},async score(){return[0,0]}};
+const policy=new SemanticResidualPolicy({schema,actions,semantic,residual:net,seed:313});
 assert.equal(policy.currentActionHistory().previousActionIndex,null);
 assert.deepEqual(policy.nextActionHistory(0),{previousActionIndex:0,streak:1});
 policy.commitAction(0);policy.commitAction(0);policy.commitAction(0);
