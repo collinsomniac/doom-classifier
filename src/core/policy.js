@@ -51,7 +51,7 @@ export class SemanticResidualPolicy{
   constructor({
     schema,actions,semantic,residual="linear",residualWeight=.9,temperature=.8,epsilon=.08,seed=2026,
     inferenceMode="hybrid",teacherInterval=32,teacherMinGap=8,teacherEntropy=.78,teacherMargin=.10,teacherNovelty=.85,teacherEpistemic=.025,distillSteps=4,replayCapacity=96,replayBatch=2,
-    teacherReplayCapacity=8,teacherReplayBatch=2,teacherReplayStrength=.2,
+    teacherReplayCapacity=8,teacherReplayBatch=2,teacherReplayStrength=.2,nStep=4,
     priorKlBudget=.08,valueBetaMax=4096,valueBetaSearchSteps=12,valueTrustUpdates=192
   }){
     this.schema=schema;this.actions=actions;this.residualWeight=residualWeight;this.baseTemperature=temperature;this.temperature=temperature;this.epsilon=epsilon;this.seed=seed;this.rng=mulberry32(seed);
@@ -60,7 +60,7 @@ export class SemanticResidualPolicy{
     else if(residual==="neural-set")this.q=new NeuralSetResidualQ(schema,actions,{seed});
     else this.q=new LinearResidualQ(actions.length,this.featureSize);
     this.inferenceMode=inferenceMode;this.teacherInterval=teacherInterval;this.teacherMinGap=teacherMinGap;this.teacherEntropy=teacherEntropy;this.teacherMargin=teacherMargin;this.teacherNovelty=teacherNovelty;this.teacherEpistemic=teacherEpistemic;this.distillSteps=distillSteps;this.replayCapacity=replayCapacity;this.replayBatch=replayBatch;this.replay=[];this.replayRng=mulberry32((seed^0x517cc1b7)>>>0);
-    this.teacherReplayCapacity=Math.max(0,Math.floor(teacherReplayCapacity));this.teacherReplayBatch=Math.max(0,Math.floor(teacherReplayBatch));this.teacherReplayStrength=teacherReplayStrength;this.teacherReplay=[];this.teacherReplayRng=mulberry32((seed^0xa341316c)>>>0);
+    this.teacherReplayCapacity=Math.max(0,Math.floor(teacherReplayCapacity));this.teacherReplayBatch=Math.max(0,Math.floor(teacherReplayBatch));this.teacherReplayStrength=teacherReplayStrength;this.teacherReplay=[];this.teacherReplayRng=mulberry32((seed^0xa341316c)>>>0);this.nStep=Math.max(1,Math.floor(nStep));this.nStepBuffer=[];
     this.priorKlBudget=Math.max(0,Number(priorKlBudget)||0);this.valueBetaMax=Math.max(0,Number(valueBetaMax)||0);this.valueBetaSearchSteps=Math.max(1,Math.floor(valueBetaSearchSteps));this.valueTrustUpdates=Math.max(1,Math.floor(valueTrustUpdates));
     this.novelty=new NoveltyTracker(this.baseSize);
     this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherGeneration=0;this.teacherPromise=null;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;
@@ -79,12 +79,12 @@ export class SemanticResidualPolicy{
     this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;this.novelty=new NoveltyTracker(this.baseSize);
     if(this.q.setSchema&&this.q.setActions){this.q.setSchema(schema);this.q.setActions(actions)}
     else if(this.q instanceof LinearResidualQ){this.q=new LinearResidualQ(actions.length,this.featureSize)}
-    this.semantic.compile(schema,actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.replay=[];this.teacherReplay=[];
+    this.semantic.compile(schema,actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.replay=[];this.teacherReplay=[];this.nStepBuffer=[];
     return this;
   }
-  resetEpisode(){this.memory.reset()}
+  resetEpisode(){this.memory.reset();this.nStepBuffer=[]}
   resetLearning(){
-    this.teacherGeneration++;this.teacherPromise=null;this.q.reset();this.novelty.reset();this.rng=mulberry32(this.seed);this.replayRng=mulberry32((this.seed^0x517cc1b7)>>>0);this.teacherReplayRng=mulberry32((this.seed^0xa341316c)>>>0);this.replay=[];this.teacherReplay=[];this.temperature=this.baseTemperature;
+    this.teacherGeneration++;this.teacherPromise=null;this.q.reset();this.novelty.reset();this.rng=mulberry32(this.seed);this.replayRng=mulberry32((this.seed^0x517cc1b7)>>>0);this.teacherReplayRng=mulberry32((this.seed^0xa341316c)>>>0);this.replay=[];this.teacherReplay=[];this.nStepBuffer=[];this.temperature=this.baseTemperature;
     this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;
   }
   encode(obs,memoryEnabled=true,commit=true){
@@ -259,8 +259,16 @@ export class SemanticResidualPolicy{
       teacherUsed,teacherPending:!!this.teacherPromise,semanticUsed,inferenceMode:mode,explorationStrategy,teacherCalls:this.teacherCalls,teacherScheduled:this.teacherScheduled,lastTeacherLatencyMs:this.lastTeacherLatencyMs
     };
   }
-  learn(transition){
-    if(!this.q.updateTransition)return this.q.update(transition.features,transition.actionIndex,transition.reward,transition.nextFeatures,transition.done);
+  aggregateNStep(count=Math.min(this.nStep,this.nStepBuffer.length)){
+    if(!this.nStepBuffer.length)return null;
+    const gamma=Number(this.q?.gamma??.96),first=this.nStepBuffer[0];let reward=0,discount=1,last=first,horizon=0;
+    for(let i=0;i<count&&i<this.nStepBuffer.length;i++){
+      const t=this.nStepBuffer[i];reward+=discount*Number(t.reward||0);discount*=gamma;last=t;horizon++;
+      if(t.done)break;
+    }
+    return{...first,reward,nextObservation:last.nextObservation,nextTemporal:last.nextTemporal,nextFeatures:last.nextFeatures,done:!!last.done,bootstrapDiscount:last.done?0:discount,nStepHorizon:horizon};
+  }
+  applyLearningTransition(transition){
     const primary=this.q.updateTransition(transition);
     if(this.replayCapacity>0){
       this.replay.push(transition);if(this.replay.length>this.replayCapacity)this.replay.shift();
@@ -271,7 +279,23 @@ export class SemanticResidualPolicy{
       const index=Math.floor(this.replayRng()*candidates),sample=this.replay[index],result=this.q.updateTransition(sample);
       replayUpdates++;replayAbsTd+=Math.abs(Number(result?.td||0));
     }
-    return{...primary,replayUpdates,replayMeanAbsTd:replayUpdates?replayAbsTd/replayUpdates:0,replaySize:this.replay.length};
+    return{...primary,replayUpdates,replayMeanAbsTd:replayUpdates?replayAbsTd/replayUpdates:0,replaySize:this.replay.length,nStepHorizon:transition.nStepHorizon||1};
+  }
+  drainNStep({flush=false}={}){
+    let primaryUpdates=0,replayUpdates=0,replayAbsTd=0,last=null;
+    while(this.nStepBuffer.length&&(flush||this.nStepBuffer.length>=this.nStep)){
+      const aggregate=this.aggregateNStep(Math.min(this.nStep,this.nStepBuffer.length));if(!aggregate)break;
+      const result=this.applyLearningTransition(aggregate);last=result;primaryUpdates++;replayUpdates+=result.replayUpdates||0;replayAbsTd+=(result.replayMeanAbsTd||0)*(result.replayUpdates||0);
+      this.nStepBuffer.shift();
+      if(!flush&&this.nStepBuffer.length<this.nStep)break;
+    }
+    return last?{...last,primaryUpdates,replayUpdates,replayMeanAbsTd:replayUpdates?replayAbsTd/replayUpdates:0,nStepBufferSize:this.nStepBuffer.length,nStep:this.nStep}:{primaryUpdates:0,replayUpdates:0,replayMeanAbsTd:0,replaySize:this.replay.length,nStepBufferSize:this.nStepBuffer.length,nStep:this.nStep,pending:true};
+  }
+  flushLearning(){return this.q.updateTransition?this.drainNStep({flush:true}):null}
+  learn(transition){
+    if(!this.q.updateTransition)return this.q.update(transition.features,transition.actionIndex,transition.reward,transition.nextFeatures,transition.done);
+    this.nStepBuffer.push(transition);
+    return this.drainNStep({flush:!!transition.done});
   }
   distill(observation,teacherScores,options){return this.q.distill?.(observation,teacherScores,options)||null}
 }
