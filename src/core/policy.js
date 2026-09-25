@@ -63,11 +63,11 @@ export class SemanticResidualPolicy{
     this.teacherReplayCapacity=Math.max(0,Math.floor(teacherReplayCapacity));this.teacherReplayBatch=Math.max(0,Math.floor(teacherReplayBatch));this.teacherReplayStrength=teacherReplayStrength;this.teacherReplay=[];this.teacherReplayRng=mulberry32((seed^0xa341316c)>>>0);this.nStep=Math.max(1,Math.floor(nStep));this.nStepBuffer=[];
     this.priorKlBudget=Math.max(0,Number(priorKlBudget)||0);this.valueBetaMax=Math.max(0,Number(valueBetaMax)||0);this.valueBetaSearchSteps=Math.max(1,Math.floor(valueBetaSearchSteps));this.valueTrustUpdates=Math.max(1,Math.floor(valueTrustUpdates));
     this.novelty=new NoveltyTracker(this.baseSize);
-    this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherGeneration=0;this.teacherPromise=null;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;
+    this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherGeneration=0;this.teacherPromise=null;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];
     this.setSemantic(semantic);
   }
   setSemantic(semantic){
-    this.teacherGeneration++;this.teacherPromise=null;this.semantic=semantic;semantic.compile(this.schema,this.actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.teacherReplay=[];
+    this.teacherGeneration++;this.teacherPromise=null;this.semantic=semantic;semantic.compile(this.schema,this.actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];this.teacherReplay=[];
   }
   setInferenceMode(mode){
     if(!["hybrid","adaptive","neural"].includes(mode))throw new Error("Unknown inference mode: "+mode);
@@ -79,13 +79,13 @@ export class SemanticResidualPolicy{
     this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;this.novelty=new NoveltyTracker(this.baseSize);
     if(this.q.setSchema&&this.q.setActions){this.q.setSchema(schema);this.q.setActions(actions)}
     else if(this.q instanceof LinearResidualQ){this.q=new LinearResidualQ(actions.length,this.featureSize)}
-    this.semantic.compile(schema,actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.replay=[];this.teacherReplay=[];this.nStepBuffer=[];
+    this.semantic.compile(schema,actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];this.replay=[];this.teacherReplay=[];this.nStepBuffer=[];
     return this;
   }
   resetEpisode(){this.memory.reset();this.nStepBuffer=[]}
   resetLearning(){
     this.teacherGeneration++;this.teacherPromise=null;this.q.reset();this.novelty.reset();this.rng=mulberry32(this.seed);this.replayRng=mulberry32((this.seed^0x517cc1b7)>>>0);this.teacherReplayRng=mulberry32((this.seed^0xa341316c)>>>0);this.replay=[];this.teacherReplay=[];this.nStepBuffer=[];this.temperature=this.baseTemperature;
-    this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;
+    this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];
   }
   encode(obs,memoryEnabled=true,commit=true){
     const base=numericFeatures(this.schema,obs),temporal=commit?this.memory.update(base,memoryEnabled):this.memory.preview(base,memoryEnabled);
@@ -143,12 +143,33 @@ export class SemanticResidualPolicy{
   async semanticScores(obs,semantic=this.semantic){
     const t=performance.now(),scores=await semantic.score(obs);this.semanticCalls++;return{scores,ms:performance.now()-t};
   }
-  shouldTeacher(provisional,novelty){
-    if(this.teacherPromise)return false;
+  teacherTriggerReason(provisional,novelty){
+    if(this.teacherPromise)return null;
     const gap=this.decisionCount-this.lastTeacherStep;
-    if(this.teacherCalls===0)return true;
-    if(gap>=this.teacherInterval)return true;
-    return gap>=this.teacherMinGap&&(provisional.entropy>=this.teacherEntropy||provisional.margin<=this.teacherMargin||novelty>=this.teacherNovelty||provisional.epistemic>=this.teacherEpistemic);
+    if(this.teacherCalls===0)return "initial supervision";
+    if(gap>=this.teacherInterval)return "scheduled refresh";
+    if(gap<this.teacherMinGap)return null;
+    const reasons=[];
+    if(provisional.entropy>=this.teacherEntropy)reasons.push("high entropy");
+    if(provisional.margin<=this.teacherMargin)reasons.push("small margin");
+    if(novelty>=this.teacherNovelty)reasons.push("novel state");
+    if(provisional.epistemic>=this.teacherEpistemic)reasons.push("value disagreement");
+    return reasons.length?reasons.join(" + "):null;
+  }
+  shouldTeacher(provisional,novelty){return !!this.teacherTriggerReason(provisional,novelty)}
+  recordTeacherResult(obs,scores,{kind="supervision",reason="teacher call",ms=0,distillation=null,calibration=null,step=this.decisionCount}={}){
+    if(!scores?.length)return null;
+    const probs=softmax(scores,1),ranked=this.actions.map((action,i)=>({id:action.id,label:action.label,score:Number(scores[i]||0),probability:Number(probs[i]||0)})).sort((a,b)=>b.probability-a.probability);
+    let stateText="";
+    try{if(typeof this.semantic?.stateText==="function")stateText=String(this.semantic.stateText(obs)||"")}catch{}
+    const item={
+      id:(this.teacherHistory.at(-1)?.id||0)+1,t:Date.now(),step:Number(step||0),kind,reason,
+      model:this.semantic?.name||"semantic teacher",ms:Number(ms||0),top:ranked.slice(0,6),
+      distillation:distillation?{stepsUsed:Number(distillation.stepsUsed||0),kl:Number(distillation.kl||0),loss:Number(distillation.loss||0),teacherReplayUpdates:Number(distillation.teacherReplayUpdates||0)}:null,
+      calibration:calibration?{temperature:Number(calibration.temperature||0),bestTemperature:Number(calibration.bestTemperature||0),loss:Number(calibration.loss||0)}:null,
+      stateText:stateText.slice(0,1800)
+    };
+    this.lastTeacherResult=item;this.teacherHistory.push(item);if(this.teacherHistory.length>24)this.teacherHistory.shift();return item;
   }
   calibrateTemperature(obs,teacherScores,temporal=null,{blend=.35}={}){
     if(!teacherScores?.length)return null;
@@ -197,9 +218,10 @@ export class SemanticResidualPolicy{
     if(generation!==this.teacherGeneration||semantic!==this.semantic)return{stale:true,ms:result.ms};
     const distillation=this.applyTeacherScores(obs,result.scores,steps,temporal,{maxSteps,targetKL});const calibration=this.calibrateTemperature(obs,result.scores,temporal,{blend:.65});
     this.teacherCalls++;this.lastTeacherStep=requestedStep;this.lastTeacherLatencyMs=result.ms;this.lastTeacherError=null;
+    this.recordTeacherResult(obs,result.scores,{kind:"bootstrap",reason:"semantic bootstrap",ms:result.ms,distillation,calibration,step:requestedStep});
     return{stale:false,ms:result.ms,scores:result.scores,calibration,distillation};
   }
-  scheduleTeacher(obs,temporal=null){
+  scheduleTeacher(obs,temporal=null,reason="adaptive refresh"){
     if(this.teacherPromise)return false;
     const semantic=this.semantic,generation=this.teacherGeneration,requestedStep=this.decisionCount;
     this.teacherScheduled++;
@@ -208,9 +230,10 @@ export class SemanticResidualPolicy{
       try{
         const result=await this.semanticScores(obs,semantic);
         if(generation!==this.teacherGeneration||semantic!==this.semantic)return{stale:true,ms:result.ms};
-        this.applyTeacherScores(obs,result.scores,this.distillSteps,temporal);this.calibrateTemperature(obs,result.scores,temporal,{blend:.18});
+        const distillation=this.applyTeacherScores(obs,result.scores,this.distillSteps,temporal),calibration=this.calibrateTemperature(obs,result.scores,temporal,{blend:.18});
         this.teacherCalls++;this.lastTeacherStep=requestedStep;this.lastTeacherLatencyMs=result.ms;this.lastTeacherError=null;
-        return{stale:false,ms:result.ms,scores:result.scores};
+        this.recordTeacherResult(obs,result.scores,{kind:"adaptive",reason,ms:result.ms,distillation,calibration,step:requestedStep});
+        return{stale:false,ms:result.ms,scores:result.scores,distillation,calibration};
       }catch(error){
         if(generation===this.teacherGeneration){this.lastTeacherError=error}
         return{stale:generation!==this.teacherGeneration,error};
@@ -232,13 +255,15 @@ export class SemanticResidualPolicy{
 
     if(mode==="hybrid"){
       const result=await this.semanticScores(obs);sem=result.scores;semanticMs=result.ms;semanticUsed=true;
+      this.teacherCalls++;this.lastTeacherStep=this.decisionCount;this.lastTeacherLatencyMs=result.ms;this.lastTeacherError=null;
+      this.recordTeacherResult(obs,sem,{kind:"decode",reason:"teacher in decode path",ms:result.ms,step:this.decisionCount});
       if(useResidual&&residualEval.valueScores){
         const direct=this.fusePriorValue(sem,residualEval.valueScores,residualEval.valueMemberScores,{temperature:this.temperature});
         activeFusion={...residualEval,...direct};logits=direct.scores;epistemic=ensembleDisagreement(direct.memberScores,this.temperature);
       }else logits=useResidual?sem.map((v,i)=>v+this.residualWeight*q[i]):sem;
     }else if(mode==="adaptive"){
-      const provisional={...confidenceStats(softmax(q,this.temperature)),epistemic};
-      teacherUsed=this.shouldTeacher(provisional,novelty)?this.scheduleTeacher(obs,encoded.temporal):false;
+      const provisional={...confidenceStats(softmax(q,this.temperature)),epistemic},teacherReason=this.teacherTriggerReason(provisional,novelty);
+      teacherUsed=teacherReason?this.scheduleTeacher(obs,encoded.temporal,teacherReason):false;
       logits=q;
     }else{
       logits=q;
