@@ -49,6 +49,21 @@ const permissive=new SemanticResidualPolicy({
 const moved=await permissive.decide(obs,{useResidual:true,memory:false,explore:false});
 assert.equal(moved.action.id,"value","larger KL budget must allow learned consequence value to override the prior");
 
+
+const tinyQ={...q,updates:100,scoreStatsObservation(){return{
+  scores:[0,0,0],semanticScores:[.8,0,-.4],valueScores:[-.002,.01,0],
+  valueMemberScores:[[-.0022,-.002,-.0018],[.009,.01,.011],[-.0005,0,.0005]],memberScores:[[0,0,0],[0,0,0],[0,0,0]]
+}}};
+const adaptive=new SemanticResidualPolicy({
+  schema,actions,semantic,residual:tinyQ,temperature:.5,seed:13,
+  priorKlBudget:.08,valueBetaMax:4096,valueTrustUpdates:100,inferenceMode:"neural"
+});
+const scaled=await adaptive.decide(obs,{useResidual:true,memory:false,explore:false});
+assert.ok(scaled.valueBeta>64,"adaptive fusion must expand beyond the old arbitrary beta cap when value scores are small");
+assert.ok(scaled.priorKL>.07&&scaled.priorKL<=.0805,"adaptive fusion should spend nearly all available KL budget");
+assert.ok(scaled.klUtilization>.85,"KL utilization should expose that the trust budget was actually used");
+assert.equal(scaled.valueBetaSaturated,false,"beta should stop on KL boundary, not the safety ceiling");
+
 const flatQ={...q,updates:100,scoreStatsObservation(){return{
   scores:[0,0,0],semanticScores:[.8,0,-.4],valueScores:[1,1,1],
   valueMemberScores:[[1,1,1],[1,1,1],[1,1,1]],memberScores:[[0,0,0],[0,0,0],[0,0,0]]
@@ -58,4 +73,4 @@ const same=await invariant.decide(obs,{useResidual:true,memory:false,explore:fal
 assert.ok(same.probs.every((x,i)=>Math.abs(x-prior[i])<1e-8),"action-invariant value offsets must not alter semantic prior");
 assert.ok(same.priorKL<1e-10);
 
-console.log(JSON.stringify({ok:true,beta:d.valueBeta,priorKL:d.priorKL,moved:moved.action.id,invariantKL:same.priorKL}));
+console.log(JSON.stringify({ok:true,beta:d.valueBeta,priorKL:d.priorKL,adaptiveBeta:scaled.valueBeta,adaptiveKL:scaled.priorKL,adaptiveUtilization:scaled.klUtilization,moved:moved.action.id,invariantKL:same.priorKL}));
