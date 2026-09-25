@@ -112,3 +112,17 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
   .arch-node{min-height:82px}
   .arch-feedback{align-items:flex-start;display:grid}
 }
+
+@media(max-width:650px){
+  html,body{max-width:100%;overflow-x:hidden}
+  .shell,.panel,.workflow-step,.step-body,.lab-grid>*,
+  .monitor-grid>*,.monitor-column,.architecture-panel,.monitor-panel,
+  .arch-node,.arch-branch,.arch-branch-stack,.teacher-item,
+  .model-controls,.manual-row,.eval-results,.state-table{min-width:0;max-width:100%}
+  pre,.teacher-state,.model-status,.help,.caption,.arch-node small,.teacher-reason{
+    overflow-wrap:anywhere;word-break:break-word
+  }
+  select,input,button{max-width:100%}
+  .model-controls select,.manual-row select{min-width:0}
+  footer{flex-wrap:wrap}
+}

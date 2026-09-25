@@ -65,12 +65,12 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   const mobileLayout=await page.evaluate(()=>{
     const flow=document.querySelector("#architectureFlow"),env=document.querySelector('[data-arch="environment"]'),state=document.querySelector('[data-arch="state"]');
     const fr=flow?.getBoundingClientRect(),er=env?.getBoundingClientRect(),sr=state?.getBoundingClientRect();
-    return{viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,flowWidth:fr?.width||0,envTop:er?.top||0,stateTop:sr?.top||0};
+    const offenders=[...document.querySelectorAll("body *")].map(el=>{const r=el.getBoundingClientRect();return{tag:el.tagName,id:el.id||"",className:typeof el.className==="string"?el.className:"",left:r.left,right:r.right,width:r.width}}).filter(x=>x.right>innerWidth+1||x.left<-1).sort((a,b)=>b.width-a.width).slice(0,12);
+    return{viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,flowWidth:fr?.width||0,envTop:er?.top||0,stateTop:sr?.top||0,offenders};
   });
-  expect(mobileLayout.scrollWidth).toBeLessThanOrEqual(mobileLayout.viewport+1);
+  console.log("MOBILE_LAYOUT "+JSON.stringify(mobileLayout));
+  expect(mobileLayout.scrollWidth,"overflow offenders: "+JSON.stringify(mobileLayout.offenders)).toBeLessThanOrEqual(mobileLayout.viewport+1);
   expect(mobileLayout.flowWidth).toBeLessThanOrEqual(mobileLayout.viewport);
   expect(mobileLayout.stateTop).toBeGreaterThan(mobileLayout.envTop);
-  console.log("MOBILE_LAYOUT "+JSON.stringify(mobileLayout));
-
   if(consoleErrors.length)throw new Error("Browser errors after successful prepared-model step: "+consoleErrors.join(" | "));
 });
