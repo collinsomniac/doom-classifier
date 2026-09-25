@@ -6,7 +6,7 @@ class ZeroSemantic{
 }
 const schema={fields:[{id:"x",label:"signal",description:"generic scalar signal",min:0,max:1}],collections:[]};
 const actions=[{id:"a",label:"act",description:"perform the action"},{id:"b",label:"hold",description:"hold state"}];
-const policy=new SemanticResidualPolicy({schema,actions,semantic:new ZeroSemantic(),residual:"neural-set",inferenceMode:"neural",seed:3,replayCapacity:4,replayBatch:2});
+const policy=new SemanticResidualPolicy({schema,actions,semantic:new ZeroSemantic(),residual:"neural-set",inferenceMode:"neural",seed:3,replayCapacity:4,replayBatch:2,nStep:1});
 const transition=i=>({
   observation:{x:(i%2)*.8,_collections:{}},
   temporal:new Float32Array([0,0]),
