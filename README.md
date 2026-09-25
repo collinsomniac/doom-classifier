@@ -49,7 +49,7 @@ The semantic/value separation is deliberate. Reward learning cannot overwrite th
 The policy receives native structured engine state, including:
 
 - health, armor, ammunition, equipped weapon name;
-- recent damage and damage dealt;
+- recent incoming damage and **unattributed hostile HP loss** as telemetry;
 - position, velocity, heading, kills;
 - coarse exploration novelty / visited cells;
 - variable world-entity records;
@@ -87,23 +87,22 @@ The current NLI teacher is useful but not yet a reliable affordance oracle. Mobi
 
 The browser learner uses:
 
-- TD consequence learning on the value branch;
-- replay buffer;
-- delayed target value network;
+- consequence learning on the value branch with **4-step discounted returns**;
+- experience replay + delayed target value network;
+- bounded **semantic teacher replay** so new teacher states do not immediately erase prior semantic fits;
 - semantic-only target synchronization after teacher refreshes;
 - teacher-guided decode-temperature calibration;
-- optional epsilon exploration during training;
-- policy-blind reward from real consequences.
+- **policy-proportional training exploration** with a small uniform floor rather than epsilon-greedy argmax;
+- KL-bounded fusion so learned value may move the policy away from the semantic prior only inside an explicit trust budget.
 
-Current DOOM reward includes:
+Current DOOM reward uses only signals the borrowed bridge can attribute safely:
 
-- hostile HP decrease;
-- kills;
-- player damage/death;
+- player-attributed kill-count increases;
+- player health loss/recovery and death;
 - a small step cost;
 - a small first-visit spatial novelty bonus.
 
-The novelty bonus provides a progress signal without telling the policy which door, corridor or direction is correct.
+The bridge also exposes hostile entity HP, so the adapter reports hostile HP loss as structured telemetry. That HP loss is **not rewarded** because the bridge does not identify who caused it; monster infighting or other world events could otherwise teach false action values. The novelty bonus provides a progress signal without telling the policy which door, corridor or direction is correct.
 
 ## Current measurements
 
