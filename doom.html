@@ -54,7 +54,7 @@
 
 <article class="panel tune-panel">
   <div class="panel-head"><div><p class="kicker">OPTIONAL BROWSER FINE-TUNE</p><h2>Learn from real Doom transitions</h2></div><div id="tuneBadge" class="choice">not trained</div></div>
-  <p class="help">Training uses the same primitive actions. Reward comes from consequences—hostile damage/kills, player damage, survival cost, and a small first-visit spatial novelty bonus—not rules such as “enemy visible → fire.”</p>
+  <p class="help">Training uses the same primitive actions. Reward comes from consequences—hostile damage/kills, player damage, survival cost, and a small first-visit spatial novelty bonus—not rules such as “enemy visible → fire.” Consequences are assigned with a 4-step discounted return so delayed damage or kills are credited across the short action sequence that caused them rather than only to the final tick.</p>
   <div class="model-controls"><select id="tuneSteps" disabled><option value="64">64 decisions — quick</option><option value="128" selected>128 decisions — recommended</option><option value="256">256 decisions — longer</option></select><button id="tuneBtn" disabled>Train then freeze</button><button id="evalBtn" class="secondary" disabled>Evaluate frozen (48)</button></div>
   <progress id="tuneProgress" max="100" value="0"></progress><div id="tuneStatus" class="model-status">Preparation required.</div><div id="evalResults" class="eval-results"><span>Run a frozen evaluation before and after training to compare behavior.</span></div>
 </article>
