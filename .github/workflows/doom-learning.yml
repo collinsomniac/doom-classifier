@@ -6,6 +6,18 @@ on:
       - tests/doom-learning.spec.mjs
       - .github/workflows/doom-learning.yml
   workflow_dispatch:
+    inputs:
+      runtime:
+        description: "DOOM runtime to benchmark"
+        required: false
+        type: choice
+        default: owned
+        options:
+          - owned
+          - borrowed
+
+env:
+  DOOM_RUNTIME_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.runtime || 'owned' }}
 
 permissions:
   contents: read
