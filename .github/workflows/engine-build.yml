@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: owned-doom-engine
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -41,9 +45,11 @@ jobs:
           test -s engine/dist/chocolate-doom.wasm
           test -s engine/dist/chocolate-doom.data
           test -s engine/dist/SOURCE.txt
+          test -s engine/dist/telemetry.patch
           grep -q "player_damage_dealt" .engine-work/upstream/vendor/chocolate-doom/src/doom/browser_doom_bridge.c
           grep -q "PromptFPS_RecordPlayerDamage" .engine-work/upstream/vendor/chocolate-doom/src/doom/p_inter.c
           grep -q "PromptFPS_RecordLevelComplete" .engine-work/upstream/vendor/chocolate-doom/src/doom/g_game.c
+          grep -q "PromptFPS_RecordPlayerDamage" engine/dist/telemetry.patch
           ls -lh engine/dist
 
       - name: Upload owned engine artifact

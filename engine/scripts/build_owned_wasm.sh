@@ -19,6 +19,7 @@ git -C "${WORK}/upstream" checkout --detach FETCH_HEAD
 git -C "${WORK}/upstream" submodule update --init --recursive --depth 1
 
 python3 "${ROOT}/engine/scripts/instrument_engine.py" "${WORK}/upstream/vendor/chocolate-doom"
+git -C "${WORK}/upstream" diff -- vendor/chocolate-doom/src/doom/browser_doom_bridge.c vendor/chocolate-doom/src/doom/p_inter.c vendor/chocolate-doom/src/doom/g_game.c > "${DIST}/telemetry.patch"
 
 (
   cd "${WORK}/upstream"
@@ -40,11 +41,14 @@ commit ${UPSTREAM_COMMIT}
 Instrumentation source:
 engine/scripts/instrument_engine.py in the doom-classifier repository.
 
+The exact applied diff is included as telemetry.patch.
+
 Chocolate Doom is GPL-2.0-or-later. Freedoom content retains its own license.
 EOF
 
 test -s "${DIST}/chocolate-doom.js"
 test -s "${DIST}/chocolate-doom.wasm"
 test -s "${DIST}/chocolate-doom.data"
+test -s "${DIST}/telemetry.patch"
 
 sha256sum "${DIST}/chocolate-doom.js" "${DIST}/chocolate-doom.wasm" "${DIST}/chocolate-doom.data"
