@@ -273,10 +273,11 @@ export class NeuralSetResidualQ{
       const g1=this.entityLayer2.backward(cache.recordCaches[r].c2,g);this.entityLayer1.backward(cache.recordCaches[r].c1,g1);
     }
   }
-  updateTransition({observation,temporal=null,actionIndex,reward,nextObservation,nextTemporal=null,done=false}){
+  updateTransition({observation,temporal=null,actionIndex,reward,nextObservation,nextTemporal=null,done=false,bootstrapDiscount=null}){
     const current=this.encodeState(observation,{cache:false,temporal}),chosen=this.actionForward(current,actionIndex);
     const bootstrapModel=this.targetNet||this,nextScores=done?[]:bootstrapModel.valueScoresObservation(nextObservation,{temporal:nextTemporal});
-    const target=reward+(done?0:this.gamma*Math.max(...nextScores)),td=clamp(target-chosen.valueScore,-4,4);
+    const discount=bootstrapDiscount==null?this.gamma:Number(bootstrapDiscount);
+    const target=reward+(done?0:discount*Math.max(...nextScores)),td=clamp(target-chosen.valueScore,-4,4);
     this.zeroGrad();this.backwardValue(chosen,-td,{bootstrap:true});this.applyLayers(this.valueLayers);this.updates++;
     if(this.targetNet&&this.updates%this.targetSyncInterval===0)this.syncTarget();
     return{td,target,q:chosen.valueScore,combined:chosen.score,semantic:chosen.semanticScore,targetNetwork:!!this.targetNet,targetSyncs:this.targetSyncs};
