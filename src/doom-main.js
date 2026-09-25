@@ -23,7 +23,7 @@ let engineReady=false,schemaCompiled=false,teacherReady=false,busy=false,prepare
 const PROFILES={
   assisted:{label:"Adaptive assisted",teacher:"adaptive",neural:true,learning:false,memory:true,explore:false,hint:"Fast neural decisions every tick; MobileBERT is scheduled only when uncertainty/novelty warrants it."},
   teacher:{label:"Teacher-only zero-shot",teacher:"every",neural:false,learning:false,memory:true,explore:false,hint:"MobileBERT scores every decision. Useful semantic baseline, but it pays teacher latency every tick."},
-  learning:{label:"Online learning",teacher:"adaptive",neural:true,learning:true,memory:true,explore:true,hint:"The neural controller learns from real consequences while an adaptive teacher supplies semantic supervision."},
+  learning:{label:"Online learning",teacher:"adaptive",neural:true,learning:true,memory:true,explore:true,hint:"The neural controller samples from its own uncertainty (with a small uniform floor), learns real consequences, and receives adaptive semantic supervision."},
   frozen:{label:"Frozen neural evaluation",teacher:"off",neural:true,learning:false,memory:true,explore:false,hint:"No teacher calls, no weight updates, no random exploration. This is the clean small-model evaluation mode."}
 };
 
