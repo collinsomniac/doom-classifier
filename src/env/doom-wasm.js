@@ -80,7 +80,7 @@ export class DoomWasmArena{
         {id:"rockets",label:"rockets",description:"available rocket launcher ammunition",min:0,max:100},
         {id:"cells",label:"cells",description:"available plasma or BFG energy ammunition",min:0,max:600},
         {id:"recent_damage",label:"recent damage received",description:"damage registered on the player in the recent engine combat window",min:0,max:100},
-        {id:"recent_damage_dealt",label:"recent hostile damage dealt",description:"hostile hit points removed during the previous control interval",min:0,max:200},
+        {id:"recent_hostile_hp_loss",label:"recent hostile HP loss",description:"hostile hit points removed during the previous control interval from any cause; this is observational telemetry and is not attributed to the player",min:0,max:200},
         {id:"under_fire",label:"under fire",description:"whether the engine currently reports recent incoming damage",min:0,max:1},
         {id:"weapon",label:"equipped weapon",description:"weapon currently equipped by the player",enum:{
           0:"fist",1:"pistol",2:"shotgun",3:"chaingun",4:"rocket launcher",5:"plasma rifle",6:"BFG 9000",7:"chainsaw",8:"super shotgun"
@@ -138,7 +138,7 @@ export class DoomWasmArena{
         }
       ]
     };
-    this.lastRaw=null;this.lastObservation=null;this.lastDamageDealt=0;this.lastOutcome=null;this.visitedCells=new Map();this.lastExploration={visitedCells:0,cellVisits:0,novelty:1,newCell:false};
+    this.lastRaw=null;this.lastObservation=null;this.lastHostileHpLoss=0;this.lastOutcome=null;this.visitedCells=new Map();this.lastExploration={visitedCells:0,cellVisits:0,novelty:1,newCell:false};
   }
 
   static async boot({canvas,onProgress=()=>{},actionMs=110,iwadFile=null,contentName=null}={}){
@@ -202,7 +202,7 @@ export class DoomWasmArena{
     }));
     return{
       health:Number(p.health||0),armor:Number(p.armor||0),bullets:Number(p.ammo?.bullets||0),shells:Number(p.ammo?.shells||0),rockets:Number(p.ammo?.rockets||0),cells:Number(p.ammo?.cells||0),
-      recent_damage:Number(p.recent_damage||0),recent_damage_dealt:Number(this.lastDamageDealt||0),under_fire:p.under_fire?1:0,weapon:Number(p.weapon||0),
+      recent_damage:Number(p.recent_damage||0),recent_hostile_hp_loss:Number(this.lastHostileHpLoss||0),under_fire:p.under_fire?1:0,weapon:Number(p.weapon||0),
       player_x:Number(p.x||0),player_y:Number(p.y||0),player_z:Number(p.z||0),velocity_x:Number(p.vx||0),velocity_y:Number(p.vy||0),heading,kills:Number(p.kills||0),
       visited_cells:Number(this.lastExploration?.visitedCells||0),cell_visits:Number(this.lastExploration?.cellVisits||0),exploration_novelty:Number(this.lastExploration?.novelty??1),
       _collections:{entities,geometry}
@@ -213,12 +213,16 @@ export class DoomWasmArena{
     const prev=previous?.player||{},cur=next?.player||{};
     const healthDelta=Number(cur.health||0)-Number(prev.health||0);
     const killDelta=Math.max(0,Number(cur.kills||0)-Number(prev.kills||0));
-    const damageDealt=Math.max(0,hostileHealth(previous)-hostileHealth(next));
+    const hostileHpLoss=Math.max(0,hostileHealth(previous)-hostileHealth(next));
     const explorationBonus=exploration?.newCell ? .015 : 0;
-    let reward=-.001+damageDealt*.02+killDelta*1.25+explorationBonus;
+    const attributedCombatReward=killDelta*1.25;
+    let reward=-.001+attributedCombatReward+explorationBonus;
     if(healthDelta<0)reward+=healthDelta*.03;else if(healthDelta>0)reward+=healthDelta*.005;
     if(Number(cur.health||0)<=0)reward-=2;
-    return{reward,damageDealt,healthDelta,killDelta,explorationBonus,newCell:!!exploration?.newCell,visitedCells:Number(exploration?.visitedCells||0),dead:Number(cur.health||0)<=0};
+    return{
+      reward,hostileHpLoss,damageDealt:hostileHpLoss,damageAttributed:false,attributedCombatReward,
+      healthDelta,killDelta,explorationBonus,newCell:!!exploration?.newCell,visitedCells:Number(exploration?.visitedCells||0),dead:Number(cur.health||0)<=0
+    };
   }
   reward(previous,next){return this.outcome(previous,next).reward}
   async step(actionId){
@@ -227,12 +231,12 @@ export class DoomWasmArena{
     this.module.ccall("PromptFPS_SetControls",null,["number"],[this.actionMasks[actionId]]);
     await sleep(this.actionMs);this.module.ccall("PromptFPS_SetControls",null,["number"],[0]);if(this.settleMs)await sleep(this.settleMs);
     const after=this.readRaw(),exploration=this.commitExploration(after),outcome=this.outcome(before,after,{exploration});
-    this.lastDamageDealt=outcome.damageDealt;this.lastOutcome=outcome;this.lastRaw=after;this.lastObservation=this.flatten(after);
+    this.lastHostileHpLoss=outcome.hostileHpLoss;this.lastOutcome=outcome;this.lastRaw=after;this.lastObservation=this.flatten(after);
     return{observation:this.lastObservation,reward:outcome.reward,done:outcome.dead,info:{raw:after,outcome,engine:after.engine||"Chocolate Doom"}};
   }
   async reset(){
     this.module.ccall("PromptFPS_SetControls",null,["number"],[0]);this.module.ccall("PromptFPS_SetStart",null,[],[]);
-    this.lastDamageDealt=0;this.lastOutcome=null;this.visitedCells=new Map();await sleep(100);const raw=await this.waitUntilReady();this.commitExploration(raw);this.lastExploration.newCell=false;this.lastRaw=raw;this.lastObservation=this.flatten(raw);return this.lastObservation;
+    this.lastHostileHpLoss=0;this.lastOutcome=null;this.visitedCells=new Map();await sleep(100);const raw=await this.waitUntilReady();this.commitExploration(raw);this.lastExploration.newCell=false;this.lastRaw=raw;this.lastObservation=this.flatten(raw);return this.lastObservation;
   }
 }
 
