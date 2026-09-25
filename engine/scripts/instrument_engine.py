@@ -75,14 +75,12 @@ static void PromptFPS_ResetEvents(void)
 
     replace_once(
         bridge,
-        '        "\"engine_state\":{\"gametic\":%d,\"gamestate\":%d,\"paused\":%s,\"controls\":%d},"\n        "\"visible_enemies\":[",\n',
-        '        "\"engine_state\":{\"gametic\":%d,\"gamestate\":%d,\"paused\":%s,\"controls\":%d},"\n'
-        '        "\"events\":{\"player_damage_dealt\":%u,\"player_kills\":%u,"\n'
-        '        "\"player_pickups\":%u,\"level_completions\":%u,\"secret_exits\":%u},"\n'
-        '        "\"visible_enemies\":[",\n',
+        '        "\\"visible_enemies\\":[",\\n',
+        '        "\\"events\\":{\\"player_damage_dealt\\":%u,\\"player_kills\\":%u,"\\n'
+        '        "\\"player_pickups\\":%u,\\"level_completions\\":%u,\\"secret_exits\\":%u},"\\n'
+        '        "\\"visible_enemies\\":[",\\n',
         "observation event JSON",
     )
-
     replace_once(
         bridge,
         '        gametic, gamestate, paused ? "true" : "false", promptfps_controls);\n',
