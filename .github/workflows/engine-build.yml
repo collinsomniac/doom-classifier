@@ -1,0 +1,55 @@
+name: owned-doom-engine
+
+on:
+  push:
+    paths:
+      - "engine/**"
+      - ".github/workflows/engine-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned Emscripten SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install 4.0.14
+          "$RUNNER_TEMP/emsdk/emsdk" activate 4.0.14
+
+      - name: Build owned Chocolate Doom telemetry runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          emcc --version
+          bash engine/scripts/build_owned_wasm.sh
+
+      - name: Validate generated runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s engine/dist/chocolate-doom.js
+          test -s engine/dist/chocolate-doom.wasm
+          test -s engine/dist/chocolate-doom.data
+          test -s engine/dist/SOURCE.txt
+          grep -q "player_damage_dealt" .engine-work/upstream/vendor/chocolate-doom/src/doom/browser_doom_bridge.c
+          grep -q "PromptFPS_RecordPlayerDamage" .engine-work/upstream/vendor/chocolate-doom/src/doom/p_inter.c
+          grep -q "PromptFPS_RecordLevelComplete" .engine-work/upstream/vendor/chocolate-doom/src/doom/g_game.c
+          ls -lh engine/dist
+
+      - name: Upload owned engine artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: doom-classifier-owned-engine
+          path: engine/dist/
+          if-no-files-found: error
+          retention-days: 14
