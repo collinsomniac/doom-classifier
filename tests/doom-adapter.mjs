@@ -30,13 +30,14 @@ assert.equal(damageOutcome.hostileHpLoss,15);assert.equal(damageOutcome.damageDe
 assert.equal(firstExplore.newCell,true);assert.equal(repeatExplore.newCell,false);assert.equal(novelExplore.newCell,true);assert.equal(novelExplore.visitedCells,2);
 assert.ok(noveltyOutcome.explorationBonus>0,"new spatial cells must provide a small policy-blind progress bonus");
 
-const rewardGood=arena.reward({player:{health:87,kills:3},world:{entities:[]}},{player:{health:87,kills:4},world:{entities:[]}});
+const rewardKillOnly=arena.reward({player:{health:87,kills:3},world:{entities:[]}},{player:{health:87,kills:4},world:{entities:[]}});
 const rewardBad=arena.reward({player:{health:87,kills:3},world:{entities:[]}},{player:{health:62,kills:3},world:{entities:[]}});
 const rewardDead=arena.reward({player:{health:10,kills:3},world:{entities:[]}},{player:{health:0,kills:3},world:{entities:[]}});
-assert.ok(rewardGood>1);assert.ok(rewardBad<0);assert.ok(rewardDead<rewardBad);
+assert.ok(rewardKillOnly<0,"single-player intermission killcount must not create positive reward without attacker attribution");assert.ok(rewardBad<0);assert.ok(rewardDead<rewardBad);
 assert.equal(arena.actionMasks.fire,64);assert.equal(arena.actionMasks.forward_fire,65);assert.equal(arena.actionMasks.strafe_left_fire,80);
 assert.equal(arena.actions.find(a=>a.id==="fire").params.fire,1);assert.equal(arena.actions.find(a=>a.id==="fire").params.forward,0);
 assert.equal(arena.actions.find(a=>a.id==="forward_fire").params.forward,1);assert.equal(arena.actions.find(a=>a.id==="forward_fire").params.fire,1);
 assert.equal(arena.schema.actionFields.length,8);
 assert.ok(arena.schema.fields.some(f=>f.id==="recent_hostile_hp_loss"));assert.ok(!arena.schema.fields.some(f=>f.id==="recent_damage_dealt"));
-console.log(JSON.stringify({ok:true,globals:arena.schema.fields.length,actions:arena.actions.length,damageOutcome,rewardGood,rewardBad,rewardDead}));
+assert.equal(damageOutcome.killAttributed,false);assert.equal(damageOutcome.combatAttributionAvailable,false);
+console.log(JSON.stringify({ok:true,globals:arena.schema.fields.length,actions:arena.actions.length,damageOutcome,rewardKillOnly,rewardBad,rewardDead}));
