@@ -17,19 +17,19 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
     const evaluate=async(steps)=>{
       c.pause();c.training=false;c.explore=false;c.memory=true;c.useResidual=true;p.setInferenceMode("neural");
       await c.reset({learning:false});
-      const teacherBefore=p.teacherCalls,counts={},semanticCounts={},valueCounts={};let reward=0,damage=0,received=0,kills=0,maxP=0,entropy=0,fire=0,switches=0,maxStreak=0,lastAction=null,streak=0,chosenSemantic=0,chosenValue=0,valueBeta=0,priorKL=0,valueTrust=0,klUtilization=0,betaSaturated=0;
+      const teacherBefore=p.teacherCalls,counts={},semanticCounts={},valueCounts={};let reward=0,hostileHpLoss=0,received=0,kills=0,maxP=0,entropy=0,fire=0,switches=0,maxStreak=0,lastAction=null,streak=0,chosenSemantic=0,chosenValue=0,valueBeta=0,priorKL=0,valueTrust=0,klUtilization=0,betaSaturated=0;
       for(let i=0;i<steps;i++){
         await c.tick();const d=c.lastDecision;if(!d)continue;
         counts[d.action.id]=(counts[d.action.id]||0)+1;
         if(d.action.id===lastAction)streak++;else{if(lastAction!==null)switches++;streak=1;lastAction=d.action.id}maxStreak=Math.max(maxStreak,streak);
-        reward+=d.reward||0;damage+=d.outcome?.damageDealt||0;received+=Math.max(0,-(d.outcome?.healthDelta||0));kills+=d.outcome?.killDelta||0;
+        reward+=d.reward||0;hostileHpLoss+=d.outcome?.hostileHpLoss??d.outcome?.damageDealt??0;received+=Math.max(0,-(d.outcome?.healthDelta||0));kills+=d.outcome?.killDelta||0;
         maxP+=Math.max(...d.probs);entropy+=d.uncertainty.entropy;if(d.action.id.includes("fire"))fire++;
         chosenSemantic+=Number(d.semanticPriorScores?.[d.actionIndex]||0);chosenValue+=Number(d.valueScores?.[d.actionIndex]||0);valueBeta+=Number(d.valueBeta||0);priorKL+=Number(d.priorKL||0);valueTrust+=Number(d.valueTrust||0);klUtilization+=Number(d.klUtilization||0);if(d.valueBetaSaturated)betaSaturated++;
         if(d.semanticPriorScores){const si=d.semanticPriorScores.reduce((best,v,i,a)=>v>a[best]?i:best,0),id=p.actions[si].id;semanticCounts[id]=(semanticCounts[id]||0)+1}
         if(d.valueScores){const vi=d.valueScores.reduce((best,v,i,a)=>v>a[best]?i:best,0),id=p.actions[vi].id;valueCounts[id]=(valueCounts[id]||0)+1}
       }
       const lat=c.latencySummary(),dominant=Object.entries(counts).sort((a,b)=>b[1]-a[1])[0]||["none",0],semanticDominant=Object.entries(semanticCounts).sort((a,b)=>b[1]-a[1])[0]||["none",0],valueDominant=Object.entries(valueCounts).sort((a,b)=>b[1]-a[1])[0]||["none",0];
-      return{steps,reward,damage,received,kills,fire,diversity:Object.keys(counts).length,switches,maxStreak,dominant,semanticDominant,valueDominant,counts,semanticCounts,valueCounts,meanChosenSemantic:chosenSemantic/steps,meanChosenValue:chosenValue/steps,meanValueBeta:valueBeta/steps,meanPriorKL:priorKL/steps,meanValueTrust:valueTrust/steps,meanKLUtilization:klUtilization/steps,betaSaturated,betaSaturationRate:betaSaturated/steps,meanMaxP:maxP/steps,meanEntropy:entropy/steps,p95Ms:lat.p95,teacherCalls:p.teacherCalls-teacherBefore,temperature:p.temperature};
+      return{steps,reward,hostileHpLoss,received,kills,fire,diversity:Object.keys(counts).length,switches,maxStreak,dominant,semanticDominant,valueDominant,counts,semanticCounts,valueCounts,meanChosenSemantic:chosenSemantic/steps,meanChosenValue:chosenValue/steps,meanValueBeta:valueBeta/steps,meanPriorKL:priorKL/steps,meanValueTrust:valueTrust/steps,meanKLUtilization:klUtilization/steps,betaSaturated,betaSaturationRate:betaSaturated/steps,meanMaxP:maxP/steps,meanEntropy:entropy/steps,p95Ms:lat.p95,teacherCalls:p.teacherCalls-teacherBefore,temperature:p.temperature};
     };
     const distribution=async()=>{
       await c.reset({learning:false});p.resetEpisode();
@@ -53,7 +53,7 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
     const training={...train,neuralUpdates:p.q.updates-updatesBefore,semanticDistillUpdates:(p.q.distillUpdates||0)-distillBefore,teacherCalls:p.teacherCalls-teacherBefore,replaySize:p.replay?.length||0,teacherReplaySize:p.teacherReplay?.length||0,temperature:p.temperature,counts:trainingCounts,rewardByAction,switches:trainingSwitches,maxStreak:trainingMaxStreak,explorationStrategies:[...new Set(trainingTrace.map(t=>t.explorationStrategy))]};
     const trainedDistribution=await distribution();
     const after=await evaluate(24);
-    return{version:"nstep4-adaptive-kl-prior-fusion-64",initialDistribution,before,training,trainedDistribution,after,params:p.q.parameterCount(),model:p.q.name,targetSyncs:p.q.targetSyncs??0,splitHeads:typeof p.q.valueScoresObservation==="function"};
+    return{version:"attributed-reward-nstep4-kl-64",initialDistribution,before,training,trainedDistribution,after,params:p.q.parameterCount(),model:p.q.name,targetSyncs:p.q.targetSyncs??0,splitHeads:typeof p.q.valueScoresObservation==="function"};
   });
 
   console.log("DOOM_LEARNING_BENCHMARK "+JSON.stringify(result));
