@@ -30,6 +30,9 @@ cp "${WORK}/upstream/public/engine/chocolate-doom.js" "${DIST}/"
 cp "${WORK}/upstream/public/engine/chocolate-doom.wasm" "${DIST}/"
 cp "${WORK}/upstream/public/engine/chocolate-doom.data" "${DIST}/"
 cp "${LOCK}" "${DIST}/SOURCE.lock"
+cp "${ROOT}/engine/scripts/instrument_engine.py" "${DIST}/INSTRUMENTATION.py"
+cp "${WORK}/upstream/licenses/CHOCOLATE-DOOM-GPL-2.0.md" "${DIST}/CHOCOLATE-DOOM-GPL-2.0.md"
+cp "${WORK}/upstream/licenses/FREEDOOM-COPYING.txt" "${DIST}/FREEDOOM-COPYING.txt"
 
 cat > "${DIST}/SOURCE.txt" <<EOF
 doom-classifier owned telemetry build
