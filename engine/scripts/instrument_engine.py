@@ -75,21 +75,21 @@ static void PromptFPS_ResetEvents(void)
 
     replace_once(
         bridge,
-        r'''        "\"visible_enemies\":[",''',
-        r'''        "\"events\":{\"player_damage_dealt\":%u,\"player_kills\":%u,"
-        "\"player_pickups\":%u,\"level_completions\":%u,\"secret_exits\":%u},"
-        "\"visible_enemies\":[",''',
+        r'''\"visible_enemies\\\":[\",''',
+        r'''\"events\\\":{\\\"player_damage_dealt\\\":%u,\\\"player_kills\\\":%u,\"
+        \"player_pickups\\\":%u,\\\"level_completions\\\":%u,\\\"secret_exits\\\":%u},\"
+        \"visible_enemies\\\":[\",''',
         "observation event JSON",
-    )    replace_once(
+    )
+    replace_once(
         bridge,
-        '        gametic, gamestate, paused ? "true" : "false", promptfps_controls);\n',
-        '        gametic, gamestate, paused ? "true" : "false", promptfps_controls,\n'
+        'gametic, gamestate, paused ? "true" : "false", promptfps_controls);',
+        'gametic, gamestate, paused ? "true" : "false", promptfps_controls,\n'
         '        promptfps_player_damage_dealt, promptfps_player_kills,\n'
         '        promptfps_player_pickups, promptfps_level_completions,\n'
-        '        promptfps_secret_exits);\n',
+        '        promptfps_secret_exits);',
         "observation event arguments",
     )
-
     replace_once(
         bridge,
         "    unsigned int i;\n    G_InitNew(sk_baby, 1, 1);\n",
