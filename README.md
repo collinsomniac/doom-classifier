@@ -95,13 +95,15 @@ The browser learner uses:
 - **policy-proportional training exploration** with a small uniform floor rather than epsilon-greedy argmax;
 - KL-bounded fusion so learned value may move the policy away from the semantic prior only inside an explicit trust budget.
 
-Current DOOM reward uses only signals the borrowed bridge can attribute safely:
+The default browser demo now boots a project-owned, reproducibly built Chocolate Doom WASM runtime with native causal event counters. Reward can therefore use:
 
+- player-attributed hostile damage and player-attributed hostile kills;
+- successful player pickups;
+- level completion and secret-exit events;
 - player health loss/recovery and death;
-- a small step cost;
-- a small first-visit spatial novelty bonus.
+- a small step cost and first-visit spatial novelty bonus.
 
-The bridge also exposes hostile entity HP and Chocolate Doom’s single-player intermission kill count. Both remain structured telemetry, but neither is **rewarded**: hostile HP loss lacks attacker attribution, and vanilla single-player killcount deliberately includes monster deaths caused by other monsters. Rewarding either would teach false action values. The novelty bonus provides a progress signal without telling the policy which door, corridor or direction is correct.
+Unattributed hostile HP loss and vanilla intermission kill count remain visible as telemetry but are not used as causal combat reward. Add `?runtime=borrowed` to run the older attribution-limited bridge for comparison.
 
 ## Current measurements
 
@@ -174,8 +176,11 @@ It must not encode strategy.
 
 Then open:
 
-- `http://localhost:8000/` — real DOOM lab
-- `http://localhost:8000/synthetic.html` — legacy synthetic ablation lab
+- `http://localhost:8000/` — real DOOM lab using the owned causal-telemetry runtime;
+- `http://localhost:8000/?runtime=borrowed` — older pinned bridge for attribution ablation;
+- `http://localhost:8000/synthetic.html` — legacy synthetic ablation lab.
+
+The live lab includes a real-time architecture view and inspectable teacher/training transcripts.
 
 ## Research invariants
 
@@ -196,7 +201,7 @@ Then open:
 - better decision-specialized semantic teacher or generic decision fine-tune;
 - previous-action and identity-aware record memory;
 - calibration metrics: Brier, log score, ECE / reliability;
-- owned telemetry-enabled Chocolate Doom build with richer native events;
-- non-DOOM structured environments for true transfer tests;
+- additional non-DOOM environment adapters to test the same typed learner without architectural changes;
+- multi-seed / multi-map causal-reward DOOM evaluation;
 - portable offline-distilled tiny checkpoints;
 - controlled comparison against Laya / Jev-style typed-decision baselines.

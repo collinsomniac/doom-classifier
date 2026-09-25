@@ -99,3 +99,16 @@ footer{display:flex;justify-content:space-between;gap:16px;color:#67717e;font-si
 code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
 @media(max-width:1050px){.monitor-grid{grid-template-columns:1fr}.architecture-flow{padding-bottom:16px}}
 @media(max-width:650px){.arch-node{flex-basis:132px;min-width:132px}.arch-branch-stack{flex-basis:286px;min-width:286px}.monitor-head{display:grid}.monitor-head span{text-align:left}.training-output,.teacher-transcript{max-height:300px}}
+
+
+@media(max-width:650px){
+  .architecture-flow{display:grid;grid-template-columns:1fr;gap:5px;overflow:visible}
+  .architecture-flow>.arch-node,.arch-branch-stack{width:100%;min-width:0;flex-basis:auto}
+  .arch-arrow{height:20px;min-height:20px;transform:rotate(90deg);font-size:1rem}
+  .branch-arrow,.merge-arrow{transform:rotate(90deg)}
+  .arch-branch-stack{display:grid;gap:10px}
+  .arch-branch{display:grid;grid-template-columns:1fr;gap:5px}
+  .arch-mini-arrow{height:18px;transform:rotate(90deg)}
+  .arch-node{min-height:82px}
+  .arch-feedback{align-items:flex-start;display:grid}
+}

@@ -342,7 +342,7 @@ NLI provides semantic knowledge but is not trained for calibrated state-action a
 
 ### Owned engine artifact
 
-Build our own pinned Chocolate Doom telemetry artifact so richer native events—level completion, item/secret counts, projectile flags, damage attribution—can be exposed directly.
+The project now builds and publishes its own pinned Chocolate Doom browser runtime. Native hooks expose monotonic player-attributed damage, player-attributed kills, successful pickups, level completions, and secret exits. The browser adapter differences those counters per transition before reward learning. The build artifact carries source provenance, licenses, the exact telemetry patch, and the instrumentation script.
 
 ### Calibration
 
