@@ -2,7 +2,7 @@
 <html lang="en">
 <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" /><meta name="theme-color" content="#0a0c10" /><title>DOOM Neural Decision Lab</title><link rel="stylesheet" href="./styles.css" /></head>
 <body><main class="shell">
-<header class="hero"><div><p class="eyebrow">REAL CHOCOLATE DOOM / STRUCTURED STATE / TYPED NEURAL CONTROL</p><h1>DOOM Neural Decision Lab</h1><p class="lede">Prepare semantic priors once, optionally learn from real game consequences, then evaluate a tiny neural controller making sub-second primitive decisions.</p></div><div class="status-pill"><span id="statusDot"></span><span id="runtimeStatus">ENGINE OFFLINE</span></div></header>
+<header class="hero"><div><p class="eyebrow">GENERIC TYPED DECISION LEARNER / DOOM ENVIRONMENT ADAPTER / BROWSER FINE-TUNE</p><h1>DOOM Neural Decision Lab</h1><p class="lede">A task-agnostic structured-state policy learns typed decisions from semantic priors and real consequences. DOOM is the current environment adapter—not the architecture itself.</p></div><div class="status-pill"><span id="statusDot"></span><span id="runtimeStatus">ENGINE OFFLINE</span></div></header>
 
 <section class="workflow panel">
   <article class="workflow-step">
@@ -52,9 +52,50 @@
   <div class="callout"><strong>Recommended demonstration:</strong><span>Prepare → Train a short burst → Frozen neural evaluation. This shows what the small model retained without teacher calls.</span></div>
 </article>
 
+
+<article class="panel architecture-panel">
+  <div class="panel-head"><div><p class="kicker">LIVE ARCHITECTURE</p><h2>Generic decision pipeline</h2></div><div id="archMode" class="choice">waiting for engine</div></div>
+  <p class="caption arch-caption">The lit path is the computation used now. DOOM lives only at the environment boundary; the encoder, semantic prior, consequence learner, fusion, and typed action interface are reusable across structured tasks.</p>
+  <div id="architectureFlow" class="architecture-flow" aria-label="live model architecture">
+    <div class="arch-node" data-arch="environment"><span class="arch-tag">ENVIRONMENT ADAPTER</span><strong>Task / simulator</strong><small class="arch-value">not mounted</small></div>
+    <div class="arch-arrow">→</div>
+    <div class="arch-node" data-arch="state"><span class="arch-tag">OBSERVATION</span><strong>Structured state</strong><small class="arch-value">facts + records</small></div>
+    <div class="arch-arrow">→</div>
+    <div class="arch-node" data-arch="encoder"><span class="arch-tag">FAST CORE</span><strong>Set + temporal encoder</strong><small class="arch-value">shared representation</small></div>
+    <div class="arch-arrow branch-arrow">⇢</div>
+    <div class="arch-branch-stack">
+      <div class="arch-branch">
+        <div class="arch-node teacher-node" data-arch="teacher"><span class="arch-tag">OPTIONAL TEACHER</span><strong>Semantic supervisor</strong><small class="arch-value">off</small></div>
+        <div class="arch-mini-arrow">→</div>
+        <div class="arch-node" data-arch="semantic"><span class="arch-tag">PRIOR</span><strong>Semantic action prior</strong><small class="arch-value">unprepared</small></div>
+      </div>
+      <div class="arch-branch">
+        <div class="arch-node replay-node" data-arch="replay"><span class="arch-tag">LEARNING</span><strong>n-step + replay</strong><small class="arch-value">0 transitions</small></div>
+        <div class="arch-mini-arrow">→</div>
+        <div class="arch-node value-node" data-arch="value"><span class="arch-tag">CONSEQUENCES</span><strong>Value ensemble</strong><small class="arch-value">untrained</small></div>
+      </div>
+    </div>
+    <div class="arch-arrow merge-arrow">⇒</div>
+    <div class="arch-node fusion-node" data-arch="fusion"><span class="arch-tag">TRUST BOUNDARY</span><strong>KL-constrained fusion</strong><small class="arch-value">β 0 · KL 0%</small></div>
+    <div class="arch-arrow">→</div>
+    <div class="arch-node" data-arch="actions"><span class="arch-tag">OUTPUT</span><strong>Typed action distribution</strong><small class="arch-value">waiting</small></div>
+    <div class="arch-arrow">→</div>
+    <div class="arch-node" data-arch="actuator"><span class="arch-tag">ACTUATION</span><strong>Environment control</strong><small class="arch-value">idle</small></div>
+  </div>
+  <div class="arch-feedback"><span>↺ causal feedback</span><strong id="archFeedback">reward/events feed the consequence branch; teacher supervision feeds only the semantic prior</strong></div>
+</article>
+
+<article class="panel monitor-panel">
+  <div class="panel-head"><div><p class="kicker">LIVE LEARNING MONITOR</p><h2>Training updates + teacher responses</h2></div><div id="trainingModeBadge" class="choice">idle</div></div>
+  <div class="monitor-grid">
+    <section class="monitor-column"><div class="monitor-head"><strong>transition / TD stream</strong><span>what the tiny model is learning from</span></div><pre id="trainingOutput" class="training-output">No decisions yet.</pre></section>
+    <section class="monitor-column"><div class="monitor-head"><strong>semantic teacher transcript</strong><span>real scorer inputs and ranked outputs</span></div><div id="teacherTranscript" class="teacher-transcript"><div class="teacher-empty">Prepare a semantic teacher to inspect its responses.</div></div></section>
+  </div>
+</article>
+
 <article class="panel tune-panel">
   <div class="panel-head"><div><p class="kicker">OPTIONAL BROWSER FINE-TUNE</p><h2>Learn from real Doom transitions</h2></div><div id="tuneBadge" class="choice">not trained</div></div>
-  <p class="help">Training uses the same primitive actions. Reward comes only from safely attributable consequences available in the current bridge—player health/death, survival cost, and a small first-visit spatial novelty bonus—not rules such as “enemy visible → fire.” Hostile HP loss and Chocolate Doom’s single-player intermission kill count remain visible telemetry but are not rewarded because the borrowed bridge cannot identify the attacker. Consequences are assigned with a 4-step discounted return so delayed events are credited across a short action sequence rather than only to the final tick.</p>
+  <p class="help">The default project-owned engine exposes causal event counters, so training can reward player-attributed hostile damage/kills, successful pickups, level completion, survival, and policy-blind exploration without tactical rules such as “enemy visible → fire.” Consequences use a 4-step discounted return. Add <code>?runtime=borrowed</code> to compare against the older attribution-limited bridge.</p>
   <div class="model-controls"><select id="tuneSteps" disabled><option value="64">64 decisions — quick</option><option value="128" selected>128 decisions — recommended</option><option value="256">256 decisions — longer</option></select><button id="tuneBtn" disabled>Train then freeze</button><button id="evalBtn" class="secondary" disabled>Evaluate frozen (48)</button></div>
   <progress id="tuneProgress" max="100" value="0"></progress><div id="tuneStatus" class="model-status">Preparation required.</div><div id="evalResults" class="eval-results"><span>Run a frozen evaluation before and after training to compare behavior.</span></div>
 </article>
@@ -77,5 +118,5 @@
 </details>
 
 <section class="panel log-panel"><div class="panel-head"><div><p class="kicker">TRACE</p><h2>Recent decisions</h2></div><button id="exportBtn" class="secondary" disabled>Export trace</button></div><pre id="eventLog">Boot the engine to begin.</pre></section>
-<footer><span>Chocolate Doom mechanics → native state → compiled semantics → tiny neural policy → primitive controls</span><span><a href="./docs/results.md">results</a> · <a href="./docs/architecture.md">architecture</a> · <a href="./synthetic.html">legacy synthetic benchmark</a></span></footer>
+<footer><span>environment adapter → structured state → semantic prior + learned value → KL fusion → typed action</span><span><a href="./docs/results.md">results</a> · <a href="./docs/architecture.md">architecture</a> · <a href="./synthetic.html">legacy synthetic benchmark</a></span></footer>
 </main><script type="module" src="./src/doom-main.js"></script></body></html>

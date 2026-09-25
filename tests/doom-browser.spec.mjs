@@ -7,7 +7,7 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   await page.goto("http://127.0.0.1:8000/doom.html",{waitUntil:"domcontentloaded"});await page.locator("#bootBtn").click();
   await page.waitForFunction(()=>{const text=document.querySelector("#runtimeStatus")?.textContent;return text==="ENGINE READY"||text==="BOOT FAILED"},null,{timeout:90000});
   if((await page.locator("#runtimeStatus").textContent())!=="ENGINE READY")throw new Error("DOOM boot failed. "+(await page.locator("#bootStatus").textContent()));
-  await expect(page.locator("#stateTable .state-row")).toHaveCount(25);
+  await expect(page.locator("#stateTable .state-row")).toHaveCount(25);\n  await expect(page.locator("#architectureFlow")).toBeVisible();\n  await expect(page.locator('[data-arch="environment"]')).toHaveClass(/active/);\n  expect(await page.evaluate(()=>window.__doomLab.env.runtime?.owned)).toBe(true);
   await expect(page.locator("#weaponState")).toContainText("pistol");
   await expect(page.locator("#manualActionSelect")).toHaveValue("fire");
 
@@ -29,11 +29,11 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   const prepare=(await page.locator("#prepareStatus").textContent())||"";
   if(prepare.includes("failed"))throw new Error("Preparation failed: "+prepare+" browser="+consoleErrors.join(" | "));
   await expect(page.locator("#schemaChip")).toContainText("schema compiled");await expect(page.locator("#teacherChip")).toContainText("teacher loaded");await expect(page.locator("#policyChip")).toContainText("ready to play");
-  await expect(page.locator("#backboneName")).toContainText("params");
+  await expect(page.locator("#backboneName")).toContainText("params");\n  await expect(page.locator("#teacherTranscript .teacher-item").first()).toBeVisible();\n  await expect(page.locator('[data-arch="teacher"]')).toHaveClass(/active/);
 
   await page.locator("#stepBtn").click();await expect(page.locator("#steps")).toHaveText("1",{timeout:8000});
   await expect(page.locator("#chosenAction")).not.toHaveText("—");await expect(page.locator("#eventLog")).toContainText("s0001");
-  await expect(page.locator("#attentionList .attention-row").first()).toBeVisible();
+  await expect(page.locator("#attentionList .attention-row").first()).toBeVisible();\n  await expect(page.locator("#trainingOutput")).toContainText("s0001");\n  await expect(page.locator('[data-arch="actions"]')).toHaveClass(/hot/);
 
   const semanticProbes=await page.evaluate(async()=>{
     const {env,policy}=window.__doomLab,base=env.observe(),actions=policy.actions;

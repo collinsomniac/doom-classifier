@@ -6,7 +6,7 @@ import {TransformersNLIAdapter,NLI_PRESETS} from "./model-adapters/transformers-
 import {MiniLMSchemaCompiler,SCHEMA_EMBEDDING_PRESET} from "./model-adapters/schema-embedding-compiler.js";
 
 const OWNED_RUNTIME_BASE="https://raw.githubusercontent.com/collinsomniac/doom-classifier/engine-runtime";
-const requestedRuntime=new URLSearchParams(globalThis.location?.search||"").get("runtime");
+const requestedRuntime=new URLSearchParams(globalThis.location?.search||"").get("runtime")||"owned";
 const $=id=>document.getElementById(id);
 const ui={
   boot:$("bootBtn"),prepare:$("prepareBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),runtime:$("runtimeStatus"),runtimeTitle:$("runtimeTitle"),bootStatus:$("bootStatus"),
@@ -17,6 +17,7 @@ const ui={
   bars:$("actionBars"),chosen:$("chosenAction"),chosenSemantic:$("chosenSemantic"),chosenValue:$("chosenValue"),chosenScore:$("chosenScore"),intentFire:$("intentFire"),intentStrafe:$("intentStrafe"),intentTurn:$("intentTurn"),intentForward:$("intentForward"),intentBack:$("intentBack"),intentUse:$("intentUse"),entropy:$("entropy"),margin:$("margin"),epistemic:$("epistemic"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),
   attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),decodeTemp:$("decodeTemp"),replaySize:$("replaySize"),teacherReplaySize:$("teacherReplaySize"),valueBeta:$("valueBeta"),priorKL:$("priorKL"),klUtilization:$("klUtilization"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),
   schemaCompile:$("schemaCompileBtn"),schemaStatus:$("schemaStatus"),state:$("stateTable"),objective:$("objectiveText"),steps:$("steps"),episodes:$("episodes"),ret:$("return"),updates:$("updates"),lastReward:$("lastReward"),damageDealt:$("damageDealt"),hostileHpLoss:$("hostileHpLoss"),damageReceived:$("damageReceived"),combatAttribution:$("combatAttribution"),
+  architecture:$("architectureFlow"),archMode:$("archMode"),archFeedback:$("archFeedback"),trainingModeBadge:$("trainingModeBadge"),trainingOutput:$("trainingOutput"),teacherTranscript:$("teacherTranscript"),
   log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot")
 };
 let env=null,policy=null,controller=null,hashSemantic=null;
@@ -78,6 +79,54 @@ function applyProfile(id=ui.profile.value){
   const cfg=PROFILES[id]||PROFILES.assisted;ui.profile.value=id;ui.teacherMode.value=cfg.teacher;ui.useNeural.checked=cfg.neural;ui.learn.checked=cfg.learning;ui.memory.checked=cfg.memory;ui.explore.checked=cfg.explore;
   ui.profileHint.textContent=cfg.label+" — "+cfg.hint;syncRuntimeConfig();
 }
+function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]))}
+function setArchNode(id,{active=false,hot=false,pending=false,learning=false,value=null}={}){
+  const node=ui.architecture?.querySelector('[data-arch="'+id+'"]');if(!node)return;
+  node.classList.toggle("active",!!active);node.classList.toggle("hot",!!hot);node.classList.toggle("pending",!!pending);node.classList.toggle("learning",!!learning);
+  if(value!==null){const target=node.querySelector(".arch-value");if(target)target.textContent=value}
+}
+function renderArchitecture(obs,d,outcome){
+  if(!ui.architecture)return;
+  const entities=obs?._collections?.entities?.length||0,geometry=obs?._collections?.geometry?.length||0,lastTeacher=policy?.lastTeacherResult;
+  const teacherFresh=!!lastTeacher&&Math.abs(Number(policy?.decisionCount||0)-Number(lastTeacher.step||0))<=2;
+  const learning=!!controller?.training||!!d?.learningInfo;
+  setArchNode("environment",{active:engineReady,hot:!!d,value:engineReady?(env.runtime?.owned?"DOOM · owned causal ABI":"DOOM · borrowed telemetry"):"not mounted"});
+  setArchNode("state",{active:engineReady,hot:!!d,value:engineReady?(policy.schema.fields.length+" fields · "+entities+" entities · "+geometry+" lines"):"facts + records"});
+  setArchNode("encoder",{active:prepared||!!d,hot:!!d,value:policy?(policy.q.parameterCount()+" params · memory "+(controller?.memory?"on":"off")):"shared representation"});
+  setArchNode("teacher",{active:isLearnedTeacher(),hot:!!d?.teacherUsed||teacherFresh,pending:!!d?.teacherPending,value:isLearnedTeacher()?(policy.semantic.name+" · "+Number(policy.lastTeacherLatencyMs||0).toFixed(0)+" ms"):"off"});
+  setArchNode("semantic",{active:prepared||!!d,hot:!!d?.semanticUsed||teacherFresh,value:d?"chosen "+Number(d.semanticPriorScores?.[d.actionIndex]??0).toFixed(3):"unprepared"});
+  setArchNode("replay",{active:(policy?.replay?.length||0)>0||learning,hot:learning,learning,value:(policy?.replay?.length||0)+" transitions · n="+(policy?.nStep||1)});
+  setArchNode("value",{active:(policy?.q?.updates||0)>0||!!d,hot:learning,learning,value:d?"chosen "+Number(d.valueScores?.[d.actionIndex]??0).toFixed(3)+" · "+(policy.q.updates||0)+" updates":"untrained"});
+  setArchNode("fusion",{active:!!d,hot:!!d&&Number(d.valueBeta||0)>0,value:d?"β "+Number(d.valueBeta||0).toFixed(2)+" · KL "+(Number(d.klUtilization||0)*100).toFixed(0)+"%":"β 0 · KL 0%"});
+  setArchNode("actions",{active:!!d,hot:!!d,value:d?(d.action.label+" · p "+Number(d.probs?.[d.actionIndex]||0).toFixed(3)):"waiting"});
+  setArchNode("actuator",{active:!!d,hot:!!d,value:d?("primitive mask "+String(env.actionMasks?.[d.action.id]??"—")):"idle"});
+  ui.archMode.textContent=!engineReady?"waiting for engine":learning?"learning":policy?.inferenceMode==="neural"?"frozen / neural":policy?.inferenceMode==="hybrid"?"teacher in decode path":"adaptive supervision";
+  const reward=Number(d?.reward||0),dmg=Number(outcome?.damageDealt||0),kills=Number(outcome?.playerKillDelta||0),pickups=Number(outcome?.playerPickupDelta||0);
+  ui.archFeedback.textContent=d?("r "+reward.toFixed(3)+" · attributed damage "+dmg.toFixed(0)+" · kills "+kills.toFixed(0)+" · pickups "+pickups.toFixed(0)):"reward/events feed the consequence branch; teacher supervision feeds only the semantic prior";
+}
+function renderTrainingStream(){
+  if(!ui.trainingOutput||!controller)return;
+  const rows=controller.trace.slice(-24);
+  ui.trainingModeBadge.textContent=controller.training?"learning · "+(policy.q.updates||0)+" updates":policy.inferenceMode==="neural"?"frozen neural":"observing";
+  if(!rows.length){ui.trainingOutput.textContent="No decisions yet.";return}
+  ui.trainingOutput.textContent=rows.map(t=>{
+    const maxP=Math.max(...Object.values(t.probabilities||{x:0})),learn=t.learning;
+    const eventBits=[];if(Number(t.outcome?.damageDealt||0)>0)eventBits.push("dmg+"+Number(t.outcome.damageDealt).toFixed(0));if(Number(t.outcome?.playerKillDelta||0)>0)eventBits.push("kill+"+Number(t.outcome.playerKillDelta).toFixed(0));if(Number(t.outcome?.playerPickupDelta||0)>0)eventBits.push("pickup+"+Number(t.outcome.playerPickupDelta).toFixed(0));
+    const td=learn?" td="+Number(learn.td||0).toFixed(3)+" H"+Number(learn.nStepHorizon||0):"";
+    return "s"+String(t.step).padStart(4,"0")+" "+(t.mode?.training?"TRAIN":"PLAY ")+" "+String(t.action).padEnd(19)+" p="+maxP.toFixed(3)+" r="+Number(t.reward||0).toFixed(3)+td+" β="+Number(t.valueBeta||0).toFixed(2)+" KL="+(Number(t.klUtilization||0)*100).toFixed(0)+"% "+(eventBits.join(",")||"—");
+  }).join("\n");
+  ui.trainingOutput.scrollTop=ui.trainingOutput.scrollHeight;
+}
+function renderTeacherTranscript(){
+  if(!ui.teacherTranscript||!policy)return;
+  const history=policy.teacherHistory||[];if(!history.length){ui.teacherTranscript.innerHTML='<div class="teacher-empty">No semantic-teacher response yet. Prepare Recommended or enable teacher supervision.</div>';return}
+  ui.teacherTranscript.innerHTML=history.slice(-6).reverse().map((item,index)=>{
+    const actions=(item.top||[]).slice(0,5).map(a=>'<span class="teacher-action">'+escapeHtml(a.label||a.id)+' <strong>'+(Number(a.probability||0)*100).toFixed(1)+'%</strong></span>').join("");
+    const fit=item.distillation?('<span>distill '+Number(item.distillation.stepsUsed||0)+' steps · KL '+Number(item.distillation.kl||0).toFixed(3)+'</span>'):"";
+    const calibration=item.calibration?('<span>T '+Number(item.calibration.temperature||0).toFixed(3)+'</span>'):"";
+    return '<article class="teacher-item '+(index===0?"latest":"")+'"><div class="teacher-item-head"><strong>'+escapeHtml(item.model)+' · '+escapeHtml(item.kind)+'</strong><span>s'+String(item.step).padStart(4,"0")+' · '+Number(item.ms||0).toFixed(0)+' ms</span></div><div class="teacher-reason">'+escapeHtml(item.reason)+'</div><div class="teacher-actions">'+actions+'</div><div class="teacher-meta">'+fit+calibration+'</div><details><summary>state sent to teacher</summary><pre class="teacher-state">'+escapeHtml(item.stateText||"state serializer unavailable")+'</pre></details></article>';
+  }).join("");
+}
 function render(){
   if(!env||!controller||!policy)return;
   const obs=env.lastObservation||env.observe();ui.objective.textContent=policy.schema.objective||env.schema.objective;ui.weaponState.textContent=weaponLabel(obs);
@@ -107,6 +156,7 @@ function render(){
     [...ui.bars.children].forEach((row,i)=>{row.querySelector(".bar-fill").style.width=(d.probs[i]*100).toFixed(1)+"%";row.lastElementChild.textContent=d.probs[i].toFixed(3)});
     ui.log.textContent=controller.trace.slice(-14).reverse().map(t=>"s"+String(t.step).padStart(4,"0")+" "+(t.teacherUsed?"Q":t.teacherPending?"…":"·")+" "+t.action.padEnd(19)+" p="+Math.max(...Object.values(t.probabilities)).toFixed(3)+" r="+t.reward.toFixed(3)+" dmg="+Number(t.outcome?.damageDealt||0).toFixed(0)+" "+t.residualLatencyMs.toFixed(1)+"ms").join("\n");
   }
+  renderArchitecture(obs,d,outcome);renderTrainingStream();renderTeacherTranscript();
   updateReadiness();
 }
 function bindController(){
@@ -142,11 +192,11 @@ async function loadTeacherOnly(selected){
   policy.setSemantic(candidate);teacherReady=true;ui.modelProgress.value=100;return candidate;
 }
 async function boot(){
-  setBusy(true);ui.boot.disabled=true;setRuntime("LOADING");ui.bootStatus.textContent=requestedRuntime==="owned"?"Fetching project-owned Chocolate Doom runtime…":"Fetching pinned Chocolate Doom runtime…";
+  setBusy(true);ui.boot.disabled=true;setRuntime("LOADING");ui.bootStatus.textContent=requestedRuntime!=="borrowed"?"Fetching project-owned Chocolate Doom runtime…":"Fetching borrowed pinned Chocolate Doom runtime…";
   try{
     const file=ui.iwad.files?.[0]||null;if(file&&file.size>128*1024*1024)throw new Error("IWAD is larger than the 128 MB browser safety limit");
     const iwadFile=file?await file.arrayBuffer():null;
-    const runtimeOptions=requestedRuntime==="owned"?{runtimeBase:OWNED_RUNTIME_BASE,runtimeInfo:{owned:true,repository:"collinsomniac/doom-classifier",branch:"engine-runtime",base:OWNED_RUNTIME_BASE}}:{};
+    const runtimeOptions=requestedRuntime!=="borrowed"?{runtimeBase:OWNED_RUNTIME_BASE,runtimeInfo:{owned:true,repository:"collinsomniac/doom-classifier",branch:"engine-runtime",base:OWNED_RUNTIME_BASE}}:{};
     env=await DoomWasmArena.boot({canvas:ui.canvas,actionMs:Number(ui.actionMs.value),iwadFile,contentName:file?.name||null,...runtimeOptions,onProgress:message=>{ui.bootStatus.textContent=message}});
     hashSemantic=new HashSemanticAdapter();hashSemantic.backend="local-js";
     policy=new SemanticResidualPolicy({schema:env.schema,actions:env.actions,semantic:hashSemantic,residual:"neural-set",seed:1993,inferenceMode:"adaptive"});
