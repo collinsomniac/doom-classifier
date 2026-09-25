@@ -15,6 +15,15 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
     path.write_text(text.replace(old, new, 1))
 
 
+def insert_before_unique_line(path: Path, token: str, insertion: str, label: str) -> None:
+    lines = path.read_text().splitlines(keepends=True)
+    matches = [i for i, line in enumerate(lines) if token in line]
+    if len(matches) != 1:
+        raise SystemExit(f"{path}: expected exactly one {label} line containing {token!r}, found {len(matches)}")
+    lines.insert(matches[0], insertion)
+    path.write_text("".join(lines))
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit("usage: instrument_engine.py <chocolate-doom-root>")
@@ -73,15 +82,13 @@ static void PromptFPS_ResetEvents(void)
         "bridge event state",
     )
 
-    replace_once(
+    insert_before_unique_line(
         bridge,
-        r'''\"visible_enemies\\\":[\",''',
-        r'''\"events\\\":{\\\"player_damage_dealt\\\":%u,\\\"player_kills\\\":%u,\"
-        \"player_pickups\\\":%u,\\\"level_completions\\\":%u,\\\"secret_exits\\\":%u},\"
-        \"visible_enemies\\\":[\",''',
+        "visible_enemies",
+        '        "\\"events\\":{\\"player_damage_dealt\\":%u,\\"player_kills\\":%u,"\n'
+        '        "\\"player_pickups\\":%u,\\"level_completions\\":%u,\\"secret_exits\\":%u},"\n',
         "observation event JSON",
-    )
-    replace_once(
+    )    replace_once(
         bridge,
         'gametic, gamestate, paused ? "true" : "false", promptfps_controls);',
         'gametic, gamestate, paused ? "true" : "false", promptfps_controls,\n'
