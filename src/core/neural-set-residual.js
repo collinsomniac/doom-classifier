@@ -110,8 +110,8 @@ function zeroEntityGrads(n,dim){return Array.from({length:n},()=>new Float32Arra
 export class NeuralSetResidualQ{
   constructor(schema,actions,{seed=2026,hashDim=48,globalDim=16,temporalDim=8,entityHidden=24,entityDim=16,actionDim=24,headDim=32,valueHidden=16,valueWeight=.5,ensembleSize=3,bootstrapProbability=.8,lr=.008,gamma=.96,l2=1e-6,useTargetNetwork=true,targetSyncInterval=24}={}){
     this.schema=schema;this.actions=actions;this.seed=seed;this.hashDim=hashDim;this.globalDim=globalDim;this.temporalDim=temporalDim;this.entityHidden=entityHidden;this.entityDim=entityDim;this.actionDim=actionDim;this.headDim=headDim;this.valueHidden=valueHidden;this.valueWeight=valueWeight;this.ensembleSize=ensembleSize;this.bootstrapProbability=bootstrapProbability;
-    this.lr=lr;this.gamma=gamma;this.l2=l2;this.useTargetNetwork=useTargetNetwork;this.targetSyncInterval=Math.max(1,Math.floor(targetSyncInterval));this.name="SchemaSemanticValueSetNet";
-    this.attentionStateDim=globalDim+temporalDim;this.queryInputDim=actionDim+this.attentionStateDim;this.contextDim=globalDim+temporalDim+entityDim*2+2;this.headInputDim=this.contextDim+entityDim+actionDim;
+    this.lr=lr;this.gamma=gamma;this.l2=l2;this.useTargetNetwork=useTargetNetwork;this.targetSyncInterval=Math.max(1,Math.floor(targetSyncInterval));this.name="SchemaSemanticValueHistorySetNet";
+    this.attentionStateDim=globalDim+temporalDim;this.queryInputDim=actionDim+this.attentionStateDim;this.contextDim=globalDim+temporalDim+entityDim*2+2;this.headInputDim=this.contextDim+entityDim+actionDim;this.valueInputDim=this.headDim+this.actionDim+1;
     this.setSchema(schema);this.setActions(actions);this.initialize();
   }
   initialize(){
@@ -123,7 +123,7 @@ export class NeuralSetResidualQ{
     this.queryLayer=new Dense(this.queryInputDim,this.entityDim,rng,{activation:"tanh"});
     this.headLayer=new Dense(this.headInputDim,this.headDim,rng);
     this.semanticLayer=new Dense(this.headDim,1,rng,{activation:"linear"});
-    this.valueLayer=new Dense(this.headDim,this.valueHidden,rng,{activation:"tanh"});
+    this.valueLayer=new Dense(this.valueInputDim,this.valueHidden,rng,{activation:"tanh"});
     this.valueOutLayers=Array.from({length:this.ensembleSize},()=>new Dense(this.valueHidden,1,rng,{activation:"linear"}));
     for(const layer of this.valueOutLayers)for(let i=0;i<layer.w.length;i++)layer.w[i]*=.02;
     this.bootstrapRng=mulberry32((this.seed^0x9e3779b9)>>>0);
@@ -211,24 +211,29 @@ export class NeuralSetResidualQ{
     for(let r=0;r<n;r++){const w=weights[r]/denom;weights[r]=w;const z=state.latents[r];for(let d=0;d<this.entityDim;d++)attended[d]+=w*z[d]}
     return{queryCache,weights,attended};
   }
-  actionForward(state,actionIndex){
+  actionForward(state,actionIndex,history=null){
     const attn=this.attention(state,actionIndex),input=new Float32Array(this.headInputDim);
     input.set(state.context,0);input.set(attn.attended,this.contextDim);input.set(this.actionEmbeddings[actionIndex],this.contextDim+this.entityDim);
-    const h=this.headLayer.forward(input),semanticOut=this.semanticLayer.forward(h.out),valueHidden=this.valueLayer.forward(h.out);
+    const h=this.headLayer.forward(input),semanticOut=this.semanticLayer.forward(h.out),valueInput=new Float32Array(this.valueInputDim);
+    valueInput.set(h.out,0);
+    const previousActionIndex=Number.isInteger(history?.previousActionIndex)?history.previousActionIndex:-1;
+    if(previousActionIndex>=0&&previousActionIndex<this.actionEmbeddings.length)valueInput.set(this.actionEmbeddings[previousActionIndex],this.headDim);
+    valueInput[this.valueInputDim-1]=Math.tanh(Math.max(0,Number(history?.streak||0))/4);
+    const valueHidden=this.valueLayer.forward(valueInput);
     const valueOuts=this.valueOutLayers.map(layer=>layer.forward(valueHidden.out)),valueMemberScores=valueOuts.map(o=>o.out[0]);
     const semanticScore=semanticOut.out[0],valueScore=valueMemberScores.reduce((a,b)=>a+b,0)/valueMemberScores.length;
     const memberScores=valueMemberScores.map(value=>semanticScore+this.valueWeight*value),score=semanticScore+this.valueWeight*valueScore;
-    return{score,semanticScore,valueScore,memberScores,valueMemberScores,h,semanticOut,valueHidden,valueOuts,state,actionIndex,...attn};
+    return{score,semanticScore,valueScore,memberScores,valueMemberScores,h,semanticOut,valueHidden,valueOuts,valueInput,state,actionIndex,history,...attn};
   }
-  scoreStatsObservation(observation,{temporal=null}={}){
+  scoreStatsObservation(observation,{temporal=null,history=null}={}){
     const state=this.encodeState(observation,{temporal}),scores=new Array(this.actions.length),semanticScores=new Array(this.actions.length),valueScores=new Array(this.actions.length),memberScores=new Array(this.actions.length);
-    for(let i=0;i<scores.length;i++){const f=this.actionForward(state,i);scores[i]=f.score;semanticScores[i]=f.semanticScore;valueScores[i]=f.valueScore;memberScores[i]=f.memberScores}
+    for(let i=0;i<scores.length;i++){const f=this.actionForward(state,i,history);scores[i]=f.score;semanticScores[i]=f.semanticScore;valueScores[i]=f.valueScore;memberScores[i]=f.memberScores}
     return{scores,semanticScores,valueScores,memberScores};
   }
-  scoresObservation(observation,{temporal=null}={}){return this.scoreStatsObservation(observation,{temporal}).scores}
-  valueScoresObservation(observation,{temporal=null}={}){return this.scoreStatsObservation(observation,{temporal}).valueScores}
-  inspectAttention(observation,actionIndex,{topK=8,temporal=null}={}){
-    const state=this.encodeState(observation,{temporal}),forward=this.actionForward(state,actionIndex);
+  scoresObservation(observation,{temporal=null,history=null}={}){return this.scoreStatsObservation(observation,{temporal,history}).scores}
+  valueScoresObservation(observation,{temporal=null,history=null}={}){return this.scoreStatsObservation(observation,{temporal,history}).valueScores}
+  inspectAttention(observation,actionIndex,{topK=8,temporal=null,history=null}={}){
+    const state=this.encodeState(observation,{temporal}),forward=this.actionForward(state,actionIndex,history);
     return state.records.map((meta,i)=>({...meta,weight:forward.weights[i]||0})).sort((a,b)=>b.weight-a.weight).slice(0,topK);
   }
 
@@ -271,9 +276,9 @@ export class NeuralSetResidualQ{
       const g1=this.entityLayer2.backward(cache.recordCaches[r].c2,g);this.entityLayer1.backward(cache.recordCaches[r].c1,g1);
     }
   }
-  updateTransition({observation,temporal=null,actionIndex,reward,nextObservation,nextTemporal=null,done=false}){
-    const current=this.encodeState(observation,{cache:false,temporal}),chosen=this.actionForward(current,actionIndex);
-    const bootstrapModel=this.targetNet||this,nextScores=done?[]:bootstrapModel.valueScoresObservation(nextObservation,{temporal:nextTemporal});
+  updateTransition({observation,temporal=null,history=null,actionIndex,reward,nextObservation,nextTemporal=null,nextHistory=null,done=false}){
+    const current=this.encodeState(observation,{cache:false,temporal}),chosen=this.actionForward(current,actionIndex,history);
+    const bootstrapModel=this.targetNet||this,nextScores=done?[]:bootstrapModel.valueScoresObservation(nextObservation,{temporal:nextTemporal,history:nextHistory});
     const target=reward+(done?0:this.gamma*Math.max(...nextScores)),td=clamp(target-chosen.valueScore,-4,4);
     this.zeroGrad();this.backwardValue(chosen,-td,{bootstrap:true});this.applyLayers(this.valueLayers);this.updates++;
     if(this.targetNet&&this.updates%this.targetSyncInterval===0)this.syncTarget();
@@ -281,7 +286,7 @@ export class NeuralSetResidualQ{
   }
   distill(observation,teacherScores,{strength=.35,temporal=null}={}){
     if(!teacherScores||teacherScores.length!==this.actions.length)return null;
-    const state=this.encodeState(observation,{cache:true,temporal}),forwards=this.actions.map((_,i)=>this.actionForward(state,i)),student=softmax(forwards.map(x=>x.semanticScore),1),teacher=softmax(teacherScores,1);
+    const state=this.encodeState(observation,{cache:true,temporal}),forwards=this.actions.map((_,i)=>this.actionForward(state,i,null)),student=softmax(forwards.map(x=>x.semanticScore),1),teacher=softmax(teacherScores,1);
     const gradContext=new Float32Array(this.contextDim),entityExtra=zeroEntityGrads(state.latents.length,this.entityDim);this.zeroGrad();let loss=0;
     for(let i=0;i<this.actions.length;i++){
       loss-=teacher[i]*Math.log(Math.max(1e-8,student[i]));
