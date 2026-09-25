@@ -83,7 +83,7 @@ function render(){
   ui.steps.textContent=controller.steps;ui.episodes.textContent=controller.episodes;ui.ret.textContent=controller.episodeReturn.toFixed(3);ui.updates.textContent=policy.q.updates;ui.teacherCalls.textContent=policy.teacherCalls;ui.decodeTemp.textContent=policy.temperature.toFixed(3);ui.replaySize.textContent=String(policy.replay?.length||0);ui.teacherReplaySize.textContent=String(policy.teacherReplay?.length||0);ui.valueBeta.textContent=Number(controller.lastDecision?.valueBeta||0).toFixed(3);ui.priorKL.textContent=Number(controller.lastDecision?.priorKL||0).toFixed(3);ui.klUtilization.textContent=(Number(controller.lastDecision?.klUtilization||0)*100).toFixed(0)+"%"+(controller.lastDecision?.valueBetaSaturated?" cap":"");
   ui.backbone.textContent=(policy.q.name||"neural")+" · "+policy.q.parameterCount()+" params";
   const lat=controller.latencySummary();ui.latLast.textContent=lat.last.toFixed(2)+" ms";ui.latP95.textContent=lat.p95.toFixed(2)+" ms";ui.latSemantic.textContent=(policy.lastTeacherLatencyMs||0).toFixed(1)+" ms";
-  const outcome=controller.lastDecision?.outcome||env.lastOutcome;ui.damageDealt.textContent=Number(outcome?.damageDealt||0).toFixed(0);ui.damageReceived.textContent=Math.max(0,-Number(outcome?.healthDelta||0)).toFixed(0);
+  const outcome=controller.lastDecision?.outcome||env.lastOutcome;ui.damageDealt.textContent=Number(outcome?.hostileHpLoss??outcome?.damageDealt??0).toFixed(0);ui.damageReceived.textContent=Math.max(0,-Number(outcome?.healthDelta||0)).toFixed(0);
   const d=controller.lastDecision;
   if(d){
     const decisionObs=controller.trace.at(-1)?.observation||obs;
