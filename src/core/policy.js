@@ -1,4 +1,4 @@
-import {argmax,clamp,entropyNormalized,mulberry32,softmax} from "./math.js";
+import {argmax,clamp,entropyNormalized,mulberry32,sampleCategorical,softmax} from "./math.js";
 import {TemporalMemory} from "./memory.js";
 import {LinearResidualQ} from "./residual.js";
 import {NeuralSetResidualQ} from "./neural-set-residual.js";
@@ -197,13 +197,17 @@ export class SemanticResidualPolicy{
     }
 
     const decodeTemperature=mode==="hybrid"&&!useResidual?1:this.temperature;
-    const probs=softmax(logits,decodeTemperature);let chosen=argmax(probs);
-    if(explore&&this.rng()<this.epsilon)chosen=Math.floor(this.rng()*this.actions.length);
+    const probs=softmax(logits,decodeTemperature);let chosen=argmax(probs),explorationStrategy="greedy";
+    if(explore){
+      const mix=clamp(this.epsilon,0,1),uniform=1/Math.max(1,probs.length);
+      const sampling=probs.map(p=>(1-mix)*p+mix*uniform);
+      chosen=sampleCategorical(sampling,this.rng);explorationStrategy="policy-proportional";
+    }
     const stats=confidenceStats(probs);this.decisionCount++;
     return{
       actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:q,semanticPriorScores:residualEval.semanticScores||null,valueScores:residualEval.valueScores||null,features:encoded.features,temporal:encoded.temporal,
       uncertainty:{...stats,novelty,epistemic},latencyMs:performance.now()-t0,semanticLatencyMs:semanticMs,residualLatencyMs:residualMs,
-      teacherUsed,teacherPending:!!this.teacherPromise,semanticUsed,inferenceMode:mode,teacherCalls:this.teacherCalls,teacherScheduled:this.teacherScheduled,lastTeacherLatencyMs:this.lastTeacherLatencyMs
+      teacherUsed,teacherPending:!!this.teacherPromise,semanticUsed,inferenceMode:mode,explorationStrategy,teacherCalls:this.teacherCalls,teacherScheduled:this.teacherScheduled,lastTeacherLatencyMs:this.lastTeacherLatencyMs
     };
   }
   learn(transition){
