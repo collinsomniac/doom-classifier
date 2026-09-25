@@ -39,15 +39,19 @@ export class ExperimentController extends EventTarget{
     }catch(err){console.error(err);this.loopVersion++;if(this.timer)clearTimeout(this.timer);this.timer=null;this.setState(ControllerState.ERROR);this.dispatchEvent(new CustomEvent("error",{detail:err}));return false}
     finally{this.inFlight=false}
   }
-  async trainBurst({steps=128,epsilon=.16,onProgress=()=>{}}={}){
+  async trainBurst({steps=128,epsilon=.16,rolloutHorizon=0,onProgress=()=>{}}={}){
     this.loopVersion++;if(this.timer)clearTimeout(this.timer);this.timer=null;
     const previous={training:this.training,explore:this.explore,epsilon:this.policy.epsilon};
     this.training=true;this.explore=true;this.policy.epsilon=epsilon;this.setState(ControllerState.TUNING);
-    const startUpdates=this.policy.q.updates,startEpisodes=this.episodes,startStep=this.steps,startTrace=this.trace.length;
+    const startUpdates=this.policy.q.updates,startEpisodes=this.episodes,startStep=this.steps,startTrace=this.trace.length;let rolloutRestarts=0;
     try{
       for(let i=0;i<steps;i++){
         const ok=await this.tick();if(!ok&&this.state===ControllerState.ERROR)break;
-        if(i===0||(i+1)%4===0||i+1===steps)onProgress({completed:i+1,total:steps,ratio:(i+1)/steps,steps:this.steps,episodes:this.episodes,updates:this.policy.q.updates});
+        if(rolloutHorizon>0&&i+1<steps&&(i+1)%rolloutHorizon===0){
+          this.policy.flushLearning?.();await this.policy.awaitTeacher?.();
+          await this.environment.reset();this.policy.resetEpisode();this.episodeReturn=0;rolloutRestarts++;
+        }
+        if(i===0||(i+1)%4===0||i+1===steps)onProgress({completed:i+1,total:steps,ratio:(i+1)/steps,steps:this.steps,episodes:this.episodes,updates:this.policy.q.updates,rolloutRestarts});
         await Promise.resolve();
       }
       const creditFlush=this.policy.flushLearning?.()||null;
@@ -58,7 +62,7 @@ export class ExperimentController extends EventTarget{
         if(item.action===last)streak++;else{if(last!==null)switches++;streak=1;last=item.action}
         maxStreak=Math.max(maxStreak,streak);
       }
-      return{requested:steps,completed:this.steps-startStep,updates:this.policy.q.updates-startUpdates,episodes:this.episodes-startEpisodes,return:this.episodeReturn,actionDiversity:Object.keys(counts).length,switches,maxStreak,actionCounts:counts,creditFlush};
+      const trainingReturn=segment.reduce((sum,item)=>sum+Number(item.reward||0),0);\n      return{requested:steps,completed:this.steps-startStep,updates:this.policy.q.updates-startUpdates,episodes:this.episodes-startEpisodes,rolloutHorizon,rolloutRestarts,return:trainingReturn,actionDiversity:Object.keys(counts).length,switches,maxStreak,actionCounts:counts,creditFlush};
     }finally{
       this.training=previous.training;this.explore=previous.explore;this.policy.epsilon=previous.epsilon;
       if(this.state!==ControllerState.ERROR)this.setState(ControllerState.PAUSED);
