@@ -91,7 +91,7 @@ export class DoomWasmArena{
         {id:"velocity_x",label:"player x velocity",description:"player horizontal x momentum",scale:32},
         {id:"velocity_y",label:"player y velocity",description:"player horizontal y momentum",scale:32},
         {id:"heading",label:"player heading",description:"player view angle as a signed normalized turn",min:-1,max:1},
-        {id:"kills",label:"kills",description:"hostile actors defeated by the player in the current episode",min:0,max:100},
+        {id:"kills",label:"intermission kill count",description:"single-player Chocolate Doom kill statistic; may include monster deaths caused by other monsters and is therefore telemetry, not player-attributed reward",min:0,max:100},
         {id:"visited_cells",label:"visited spatial cells",description:"number of distinct coarse player-position cells visited this episode",min:0,max:500},
         {id:"cell_visits",label:"current cell visits",description:"number of control transitions ending in the current coarse spatial cell",scale:16},
         {id:"exploration_novelty",label:"exploration novelty",description:"inverse revisit count of the current spatial cell; higher means less familiar",min:0,max:1}
@@ -215,13 +215,14 @@ export class DoomWasmArena{
     const killDelta=Math.max(0,Number(cur.kills||0)-Number(prev.kills||0));
     const hostileHpLoss=Math.max(0,hostileHealth(previous)-hostileHealth(next));
     const explorationBonus=exploration?.newCell ? .015 : 0;
-    const attributedCombatReward=killDelta*1.25;
-    let reward=-.001+attributedCombatReward+explorationBonus;
+    const attributedCombatReward=0;
+    let reward=-.001+explorationBonus;
     if(healthDelta<0)reward+=healthDelta*.03;else if(healthDelta>0)reward+=healthDelta*.005;
     if(Number(cur.health||0)<=0)reward-=2;
     return{
-      reward,hostileHpLoss,damageDealt:hostileHpLoss,damageAttributed:false,attributedCombatReward,
-      healthDelta,killDelta,explorationBonus,newCell:!!exploration?.newCell,visitedCells:Number(exploration?.visitedCells||0),dead:Number(cur.health||0)<=0
+      reward,hostileHpLoss,damageDealt:hostileHpLoss,damageAttributed:false,killDelta,killAttributed:false,
+      combatAttributionAvailable:false,attributedCombatReward,
+      healthDelta,explorationBonus,newCell:!!exploration?.newCell,visitedCells:Number(exploration?.visitedCells||0),dead:Number(cur.health||0)<=0
     };
   }
   reward(previous,next){return this.outcome(previous,next).reward}
