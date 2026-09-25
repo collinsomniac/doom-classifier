@@ -97,12 +97,11 @@ The browser learner uses:
 
 Current DOOM reward uses only signals the borrowed bridge can attribute safely:
 
-- player-attributed kill-count increases;
 - player health loss/recovery and death;
 - a small step cost;
 - a small first-visit spatial novelty bonus.
 
-The bridge also exposes hostile entity HP, so the adapter reports hostile HP loss as structured telemetry. That HP loss is **not rewarded** because the bridge does not identify who caused it; monster infighting or other world events could otherwise teach false action values. The novelty bonus provides a progress signal without telling the policy which door, corridor or direction is correct.
+The bridge also exposes hostile entity HP and Chocolate Doom’s single-player intermission kill count. Both remain structured telemetry, but neither is **rewarded**: hostile HP loss lacks attacker attribution, and vanilla single-player killcount deliberately includes monster deaths caused by other monsters. Rewarding either would teach false action values. The novelty bonus provides a progress signal without telling the policy which door, corridor or direction is correct.
 
 ## Current measurements
 
