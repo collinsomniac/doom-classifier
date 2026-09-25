@@ -250,7 +250,7 @@ export class DoomWasmArena{
     if(healthDelta<0)reward+=healthDelta*.03;else if(healthDelta>0)reward+=healthDelta*.005;
     if(Number(cur.health||0)<=0)reward-=2;
     return{
-      reward,hostileHpLoss,damageDealt:events.available?events.playerDamageDealt:hostileHpLoss,damageAttributed:events.available,
+      reward,hostileHpLoss,damageDealt:events.playerDamageDealt,damageAttributed:events.available,
       killDelta,playerKillDelta:events.playerKills,killAttributed:events.available,playerPickupDelta:events.playerPickups,
       levelCompletionDelta:events.levelCompletions,secretExitDelta:events.secretExits,
       combatAttributionAvailable:events.available,attributedCombatReward,pickupReward,completionReward,
