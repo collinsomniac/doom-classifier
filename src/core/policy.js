@@ -52,7 +52,7 @@ export class SemanticResidualPolicy{
     schema,actions,semantic,residual="linear",residualWeight=.9,temperature=.8,epsilon=.08,seed=2026,
     inferenceMode="hybrid",teacherInterval=32,teacherMinGap=8,teacherEntropy=.78,teacherMargin=.10,teacherNovelty=.85,teacherEpistemic=.025,distillSteps=4,replayCapacity=96,replayBatch=2,
     teacherReplayCapacity=8,teacherReplayBatch=2,teacherReplayStrength=.2,
-    priorKlBudget=.08,valueBetaMax=64,valueBetaSearchSteps=12,valueTrustUpdates=192
+    priorKlBudget=.08,valueBetaMax=4096,valueBetaSearchSteps=12,valueTrustUpdates=192
   }){
     this.schema=schema;this.actions=actions;this.residualWeight=residualWeight;this.baseTemperature=temperature;this.temperature=temperature;this.epsilon=epsilon;this.seed=seed;this.rng=mulberry32(seed);
     this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;
@@ -93,7 +93,7 @@ export class SemanticResidualPolicy{
   }
   fusePriorValue(priorScores,valueScores,valueMemberScores=null,{temperature=this.temperature}={}){
     if(!priorScores?.length||!valueScores?.length||priorScores.length!==valueScores.length){
-      return{scores:priorScores||[],memberScores:null,valueBeta:0,priorKL:0,valueTrust:0,priorKlBudget:0};
+      return{scores:priorScores||[],memberScores:null,valueBeta:0,priorKL:0,valueTrust:0,priorKlBudget:0,klUtilization:0,valueBetaSaturated:false};
     }
     const valueTrust=clamp(Number(this.q?.updates||0)/this.valueTrustUpdates,0,1),budget=this.priorKlBudget*valueTrust,temp=Math.max(.05,Number(temperature)||1);
     const prior=softmax(priorScores,temp),center=valueScores.reduce((a,b)=>a+b,0)/valueScores.length,centered=valueScores.map(v=>v-center);
@@ -101,24 +101,31 @@ export class SemanticResidualPolicy{
       const scores=priorScores.map((v,i)=>v+beta*centered[i]),probs=softmax(scores,temp);
       return{beta,scores,probs,kl:klDivergence(probs,prior)};
     };
-    let chosen=evaluate(0);
+    let chosen=evaluate(0),valueBetaSaturated=false;
     if(budget>0&&this.valueBetaMax>0){
-      const upper=evaluate(this.valueBetaMax);
-      if(upper.kl<=budget)chosen=upper;
-      else{
-        let lo=0,hi=this.valueBetaMax;
+      let lo=0,hi=Math.min(1,this.valueBetaMax),candidate=evaluate(hi);
+      while(candidate.kl<=budget&&hi<this.valueBetaMax){
+        chosen=candidate;lo=hi;
+        const next=Math.min(this.valueBetaMax,hi*2);
+        if(next===hi)break;
+        hi=next;candidate=evaluate(hi);
+      }
+      if(candidate.kl<=budget){
+        chosen=candidate;valueBetaSaturated=hi>=this.valueBetaMax&&candidate.kl<budget*.98;
+      }else{
         for(let i=0;i<this.valueBetaSearchSteps;i++){
-          const mid=(lo+hi)/2,candidate=evaluate(mid);
-          if(candidate.kl<=budget){lo=mid;chosen=candidate}else hi=mid;
+          const mid=(lo+hi)/2,test=evaluate(mid);
+          if(test.kl<=budget){lo=mid;chosen=test}else hi=mid;
         }
       }
     }
+    const klUtilization=budget>0?clamp(chosen.kl/budget,0,1):0;
     let memberScores=null;
     if(valueMemberScores?.length===priorScores.length&&Array.isArray(valueMemberScores[0])){
       const members=valueMemberScores[0].length;
       memberScores=priorScores.map((semantic,a)=>Array.from({length:members},(_,m)=>semantic+chosen.beta*(Number(valueMemberScores[a]?.[m]||0)-center)));
     }
-    return{scores:chosen.scores,memberScores,valueBeta:chosen.beta,priorKL:chosen.kl,valueTrust,priorKlBudget:budget,priorProbs:prior};
+    return{scores:chosen.scores,memberScores,valueBeta:chosen.beta,priorKL:chosen.kl,valueTrust,priorKlBudget:budget,klUtilization,valueBetaSaturated,priorProbs:prior};
   }
   residualEvaluation(obs,features,temporal=null){
     if(this.q.scoreStatsObservation){
@@ -130,7 +137,7 @@ export class SemanticResidualPolicy{
       return raw;
     }
     const scores=this.q.scoresObservation?this.q.scoresObservation(obs,{temporal}):this.q.scores(features);
-    return{scores,memberScores:null,valueBeta:0,priorKL:0,valueTrust:0,priorKlBudget:0};
+    return{scores,memberScores:null,valueBeta:0,priorKL:0,valueTrust:0,priorKlBudget:0,klUtilization:0,valueBetaSaturated:false};
   }
   residualScores(obs,features,temporal=null){return this.residualEvaluation(obs,features,temporal).scores}
   async semanticScores(obs,semantic=this.semantic){
@@ -247,7 +254,7 @@ export class SemanticResidualPolicy{
     const stats=confidenceStats(probs);this.decisionCount++;
     return{
       actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:logits,semanticPriorScores:activeFusion.semanticScores||residualEval.semanticScores||null,valueScores:residualEval.valueScores||null,features:encoded.features,temporal:encoded.temporal,
-      valueBeta:Number(activeFusion.valueBeta||0),priorKL:Number(activeFusion.priorKL||0),valueTrust:Number(activeFusion.valueTrust||0),priorKlBudget:Number(activeFusion.priorKlBudget||0),
+      valueBeta:Number(activeFusion.valueBeta||0),priorKL:Number(activeFusion.priorKL||0),valueTrust:Number(activeFusion.valueTrust||0),priorKlBudget:Number(activeFusion.priorKlBudget||0),klUtilization:Number(activeFusion.klUtilization||0),valueBetaSaturated:!!activeFusion.valueBetaSaturated,
       uncertainty:{...stats,novelty,epistemic},latencyMs:performance.now()-t0,semanticLatencyMs:semanticMs,residualLatencyMs:residualMs,
       teacherUsed,teacherPending:!!this.teacherPromise,semanticUsed,inferenceMode:mode,explorationStrategy,teacherCalls:this.teacherCalls,teacherScheduled:this.teacherScheduled,lastTeacherLatencyMs:this.lastTeacherLatencyMs
     };
