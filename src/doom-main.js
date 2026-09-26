@@ -6,7 +6,8 @@ import {TransformersNLIAdapter,NLI_PRESETS} from "./model-adapters/transformers-
 import {MiniLMSchemaCompiler,SCHEMA_EMBEDDING_PRESET} from "./model-adapters/schema-embedding-compiler.js";
 
 const OWNED_RUNTIME_BASE="https://raw.githubusercontent.com/collinsomniac/doom-classifier/engine-runtime";
-const requestedRuntime=new URLSearchParams(globalThis.location?.search||"").get("runtime")||"owned";
+const STARTER_MODEL_BASE="https://raw.githubusercontent.com/collinsomniac/doom-classifier/model-runtime";
+const query=new URLSearchParams(globalThis.location?.search||""),requestedRuntime=query.get("runtime")||"owned",starterMode=query.get("starter")||"auto";
 const $=id=>document.getElementById(id);
 const ui={
   boot:$("bootBtn"),prepare:$("prepareBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),runtime:$("runtimeStatus"),runtimeTitle:$("runtimeTitle"),bootStatus:$("bootStatus"),
@@ -243,6 +244,7 @@ async function boot(){
     const counts=env.lastObservation?._collections||{};ui.bootStatus.textContent=DOOM_RUNTIME_PROVENANCE.engine+" · "+env.contentName+" · "+policy.q.parameterCount()+" params · "+(counts.entities?.length||0)+" entities · "+(counts.geometry?.length||0)+" lines";
     ui.prepareStatus.textContent="Engine ready. Prepare Recommended before model-controlled play.";ui.schemaStatus.textContent="Lexical feature hash only.";ui.modelStatus.textContent="No learned teacher loaded.";
     applyProfile("assisted");setRuntime("ENGINE READY");window.__doomLab={get env(){return env},get policy(){return policy},get controller(){return controller}};render();
+    if(starterMode==="auto")void maybeAutoLoadStarter();
   }catch(error){ui.boot.disabled=false;setRuntime("BOOT FAILED",true);ui.bootStatus.textContent=String(error?.message||error);ui.log.textContent=String(error?.stack||error)}
   finally{setBusy(false)}
 }
@@ -262,12 +264,33 @@ async function importPortableCheckpoint(checkpoint,label="checkpoint"){
   }catch(error){ui.checkpointStatus.textContent="checkpoint load failed · "+String(error?.message||error);setRuntime("CHECKPOINT ERROR",true)}
   finally{setBusy(false)}
 }
-async function loadBundledCheckpoint(){
+async function fetchStarterCheckpoint(){
+  const urls=[STARTER_MODEL_BASE+"/doom-starter.json","./models/doom-starter.json"];
+  let last=null;
+  for(const url of urls){
+    try{const response=await fetch(url,{cache:"no-cache"});if(response.ok)return{checkpoint:await response.json(),url};last=new Error("HTTP "+response.status+" from "+url)}
+    catch(error){last=error}
+  }
+  throw last||new Error("validated starter not published yet");
+}
+async function loadBundledCheckpoint({silent=false}={}){
   try{
-    ui.checkpointStatus.textContent="Fetching bundled starter…";
-    const response=await fetch("./models/doom-starter.json",{cache:"no-cache"});if(!response.ok)throw new Error("HTTP "+response.status+" (starter not published yet)");
-    await importPortableCheckpoint(await response.json(),"bundled starter");
-  }catch(error){ui.checkpointStatus.textContent="Bundled starter unavailable · "+String(error?.message||error)}
+    if(!silent)ui.checkpointStatus.textContent="Fetching validated starter…";
+    const {checkpoint,url}=await fetchStarterCheckpoint();
+    await importPortableCheckpoint(checkpoint,"validated starter");
+    ui.checkpointStatus.textContent="Validated starter loaded · "+policy.q.parameterCount()+" params · source "+(url.includes("model-runtime")?"model-runtime snapshot":"local bundle");
+    return true;
+  }catch(error){
+    if(!silent)ui.checkpointStatus.textContent="Validated starter unavailable · "+String(error?.message||error);
+    return false;
+  }
+}
+async function maybeAutoLoadStarter(){
+  if(starterMode==="off"||!engineReady||checkpointReady)return false;
+  ui.checkpointStatus.textContent="Checking for validated starter checkpoint…";
+  const loaded=await loadBundledCheckpoint({silent:true});
+  if(!loaded)ui.checkpointStatus.textContent="No published starter yet · use Prepare Recommended to bootstrap from the generic core.";
+  return loaded;
 }
 async function loadBrowserCheckpoint(){
   try{const raw=localStorage.getItem("doom-classifier-checkpoint-v1");if(!raw)throw new Error("no browser-saved checkpoint");await importPortableCheckpoint(JSON.parse(raw),"browser-saved checkpoint")}
