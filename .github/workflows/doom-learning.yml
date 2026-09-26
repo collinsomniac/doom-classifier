@@ -24,10 +24,21 @@ on:
           - "64"
           - "128"
           - "256"
+      rollout_horizon:
+        description: "Reset environment after this many training decisions"
+        required: false
+        type: choice
+        default: "64"
+        options:
+          - "0"
+          - "32"
+          - "64"
+          - "128"
 
 env:
   DOOM_RUNTIME_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.runtime || 'owned' }}
   DOOM_TRAIN_STEPS: ${{ github.event_name == 'workflow_dispatch' && inputs.steps || '256' }}
+  DOOM_ROLLOUT_HORIZON: ${{ github.event_name == 'workflow_dispatch' && inputs.rollout_horizon || '64' }}
 
 permissions:
   contents: read

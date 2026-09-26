@@ -3,7 +3,7 @@ import {test,expect} from "@playwright/test";
 test.setTimeout(600000);
 
 test("prepared real-Doom policy reports pre/post short fine-tune behavior",async({page})=>{
-  const runtimeMode=process.env.DOOM_RUNTIME_MODE||"borrowed",trainSteps=Math.max(1,Number(process.env.DOOM_TRAIN_STEPS||64));
+  const runtimeMode=process.env.DOOM_RUNTIME_MODE||"borrowed",trainSteps=Math.max(1,Number(process.env.DOOM_TRAIN_STEPS||64)),rolloutHorizon=Math.max(0,Number(process.env.DOOM_ROLLOUT_HORIZON||0));
   const errors=[];page.on("pageerror",e=>errors.push("pageerror: "+String(e)));page.on("console",m=>{if(m.type()==="error")errors.push("console: "+m.text())});
   await page.goto("http://127.0.0.1:8000/doom.html"+(runtimeMode==="owned"?"?runtime=owned":""),{waitUntil:"domcontentloaded"});
   await page.locator("#bootBtn").click();
@@ -13,7 +13,7 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
   const status=await page.locator("#prepareStatus").textContent();
   if(status?.includes("failed"))throw new Error(status);
 
-  const result=await page.evaluate(async(trainSteps)=>{
+  const result=await page.evaluate(async([trainSteps,rolloutHorizon])=>{
     const lab=window.__doomLab,{controller:c,policy:p}=lab;
     const evaluate=async(steps)=>{
       c.pause();c.training=false;c.explore=false;c.memory=true;c.useResidual=true;p.setInferenceMode("neural");
@@ -47,7 +47,7 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
     const before=await evaluate(24);
     await c.reset({learning:false});c.training=true;c.explore=true;c.memory=true;c.useResidual=true;p.setInferenceMode("adaptive");
     const updatesBefore=p.q.updates,distillBefore=p.q.distillUpdates||0,teacherBefore=p.teacherCalls,traceStart=c.trace.length;
-    const train=await c.trainBurst({steps:trainSteps,epsilon:.16});
+    const train=await c.trainBurst({steps:trainSteps,epsilon:.16,rolloutHorizon});
     const trainingTrace=c.trace.slice(traceStart),trainingCounts={},rewardByAction={};let trainingSwitches=0,trainingMaxStreak=0,trainingLast=null,trainingStreak=0,trainingAttributedDamage=0,trainingPlayerKills=0,trainingPickups=0,trainingAttributionTicks=0;
     for(const t of trainingTrace){
       trainingCounts[t.action]=(trainingCounts[t.action]||0)+1;rewardByAction[t.action]=(rewardByAction[t.action]||0)+t.reward;
@@ -71,8 +71,8 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
     };
     const klSweepResult=await klSweep();
     const after=await evaluate(24);
-    return{version:"owned-causal-reward-nstep4-adaptive-kl-"+trainSteps,runtime:lab.env.runtime,initialDistribution,before,training,trainedDistribution,klSweep:klSweepResult,after,params:p.q.parameterCount(),model:p.q.name,targetSyncs:p.q.targetSyncs??0,splitHeads:typeof p.q.valueScoresObservation==="function"};
-  },trainSteps);
+    return{version:"owned-causal-reward-nstep4-adaptive-kl-"+trainSteps+"-rollout"+rolloutHorizon,runtime:lab.env.runtime,initialDistribution,before,training,trainedDistribution,klSweep:klSweepResult,after,params:p.q.parameterCount(),model:p.q.name,targetSyncs:p.q.targetSyncs??0,splitHeads:typeof p.q.valueScoresObservation==="function"};
+  },[trainSteps,rolloutHorizon]);
 
   console.log("DOOM_LEARNING_BENCHMARK "+JSON.stringify(result));
   expect(result.params).toBeGreaterThan(0);expect(result.params).toBeLessThan(8000);expect(result.splitHeads).toBe(true);expect(result.model).toContain("SemanticValue");
