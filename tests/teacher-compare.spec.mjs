@@ -3,7 +3,7 @@ import {test,expect} from "@playwright/test";
 test.setTimeout(600000);
 
 test("compare browser NLI teachers on identical structured DOOM probes",async({page})=>{
-  await page.goto("http://127.0.0.1:8000/doom.html",{waitUntil:"domcontentloaded"});
+  await page.goto("http://127.0.0.1:8000/doom.html?starter=off",{waitUntil:"domcontentloaded"});
   await page.locator("#bootBtn").click();
   await page.waitForFunction(()=>document.querySelector("#runtimeStatus")?.textContent==="ENGINE READY",null,{timeout:90000});
   await page.locator("#prepareBtn").click();
