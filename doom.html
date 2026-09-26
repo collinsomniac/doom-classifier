@@ -44,7 +44,7 @@
   <p class="kicker">WHAT IS ACTIVE?</p><h2>Decision path</h2>
   <div class="toggle-grid">
     <label><span>Teacher</span><select id="teacherModeSelect" disabled><option value="adaptive">Adaptive</option><option value="every">Every decision</option><option value="off">Off</option></select><small>Adaptive = asynchronous supervisor for later ticks; Every decision = teacher is in the decode path; Off = neural-only lowest latency.</small></label>
-    <label><span>Neural value</span><input id="useNeuralToggle" type="checkbox" checked disabled /><small>The 7,316-parameter fast semantic-prior + consequence-value controller.</small></label>
+    <label><span>Neural value</span><input id="useNeuralToggle" type="checkbox" checked disabled /><small>The tiny fast semantic-prior + consequence-value controller; parameter count is shown live after boot.</small></label>
     <label><span>Reward learning</span><input id="learnToggle" type="checkbox" disabled /><small>Updates neural weights from game consequences.</small></label>
     <label><span>Temporal memory</span><input id="memoryToggle" type="checkbox" checked disabled /><small>Recent state changes enter the neural query.</small></label>
     <label><span>Exploration</span><input id="exploreToggle" type="checkbox" disabled /><small>Occasional random action during learning only.</small></label>

@@ -5,6 +5,8 @@ const schema={fields:[{id:"signal",label:"threat signal",description:"current th
 const actions=[{id:"act",label:"act",description:"respond to the threat"},{id:"hold",label:"hold",description:"hold position"}];
 const obs={signal:.8,_collections:{}},next={signal:.4,_collections:{}};
 const net=new NeuralSetResidualQ(schema,actions,{seed:211,targetSyncInterval:4});
+assert.ok(net.valueHeadLayer,"consequence branch should have an independent action-conditioned adapter");
+assert.ok(net.parameterCount()<12000,"critic decoupling should remain a tiny browser model");
 
 for(let i=0;i<40;i++)net.distill(obs,[3,-2],{strength:.6});
 net.syncTarget();
