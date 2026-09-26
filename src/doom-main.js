@@ -382,14 +382,65 @@ async function switchTeacher(){
   }catch(error){policy.setSemantic(hashSemantic);teacherReady=false;ui.modelSelect.value="hash";ui.modelProgress.value=0;ui.modelStatus.textContent="teacher load failed · "+String(error?.message||error);render()}
   finally{setBusy(false)}
 }
-async function tuneAgent(){
-  if(!prepared)return;controller.pause();setBusy(true);applyProfile("learning");ui.tuneProgress.value=0;ui.tuneBadge.textContent="training";
-  const steps=Number(ui.tuneSteps.value)||128,startUpdates=policy.q.updates,startTeacher=policy.teacherCalls;
+async function stagedValidation({steps=24,repeats=2}={}){
+  const previous={profile:ui.profile.value,mode:policy.inferenceMode,training:controller.training,explore:controller.explore};
+  applyProfile("frozen");ui.profile.value="frozen";
+  const runs=[];
   try{
-    const result=await controller.trainBurst({steps,epsilon:.16,rolloutHorizon:64,onProgress:p=>{ui.tuneProgress.value=p.ratio*100;ui.tuneStatus.textContent="training "+p.completed+"/"+p.total+" · updates "+(p.updates-startUpdates)+" · rollout restarts "+p.rolloutRestarts}});
-    applyProfile("frozen");ui.profile.value="frozen";ui.tuneBadge.textContent="frozen neural";
-    ui.tuneStatus.textContent="TRAINING COMPLETE · "+result.completed+" decisions across "+(result.rolloutRestarts+1)+" rollouts · "+result.actionDiversity+" actions explored · "+result.updates+" reward updates · "+(policy.teacherCalls-startTeacher)+" teacher refreshes · ready for teacher-off playback";
-    setRuntime("TRAINED · FROZEN");render();
+    for(let repeat=0;repeat<repeats;repeat++){
+      await controller.reset({learning:false});syncRuntimeConfig();
+      const teacherBefore=policy.teacherCalls;let reward=0,actions={};
+      for(let i=0;i<steps;i++){
+        const ok=await controller.tick();if(!ok&&controller.state==="ERROR")throw new Error("controller error during staged validation");
+        const d=controller.lastDecision;if(!d)continue;
+        reward+=Number(d.reward||0);actions[d.action.id]=(actions[d.action.id]||0)+1;
+      }
+      const dominant=Object.entries(actions).sort((a,b)=>b[1]-a[1])[0]||["—",0];
+      runs.push({reward,teacherCalls:policy.teacherCalls-teacherBefore,dominant});
+    }
+  }finally{
+    controller.training=previous.training;controller.explore=previous.explore;policy.setInferenceMode(previous.mode);
+  }
+  const sorted=[...runs].sort((a,b)=>a.reward-b.reward),median=sorted[Math.floor(sorted.length/2)]?.reward||0,min=sorted[0]?.reward||0;
+  return{runs,median,min};
+}
+function stagedCandidateAccepts(candidate,best){
+  const tolerance=Math.max(.02,Math.abs(best.median)*.05);
+  if(best.median>0&&candidate.median<=0)return false;
+  return candidate.median>=best.median-tolerance&&candidate.min>=best.min-tolerance*2;
+}
+async function tuneAgent(){
+  if(!prepared)return;controller.pause();setBusy(true);ui.tuneProgress.value=0;ui.tuneBadge.textContent="training + validation";
+  const requested=Math.max(1,Number(ui.tuneSteps.value)||128),stageSize=64,stages=Math.ceil(requested/stageSize),startUpdates=policy.q.updates,startTeacher=policy.teacherCalls;
+  try{
+    ui.tuneStatus.textContent="validating current teacher-free policy…";
+    const baselineCheckpoint=policy.exportCheckpoint(),baseline=await stagedValidation({steps:24,repeats:2});
+    let best={checkpoint:baselineCheckpoint,evaluation:baseline,stage:0,trained:0},completed=0,totalRewardUpdates=0,totalTeacherRefreshes=0,stoppedEarly=false;
+    for(let stage=1;stage<=stages;stage++){
+      const stageSteps=Math.min(stageSize,requested-completed);if(stageSteps<=0)break;
+      applyProfile("learning");
+      const updatesBefore=policy.q.updates,teacherBefore=policy.teacherCalls;
+      const result=await controller.trainBurst({steps:stageSteps,epsilon:.16,rolloutHorizon:stageSize,onProgress:p=>{
+        const overall=(completed+p.completed)/requested;ui.tuneProgress.value=overall*100;
+        ui.tuneStatus.textContent="stage "+stage+"/"+stages+" · training "+p.completed+"/"+stageSteps+" · updates "+(p.updates-updatesBefore);
+      }});
+      await policy.awaitTeacher?.();completed+=result.completed;totalRewardUpdates+=result.updates;totalTeacherRefreshes+=policy.teacherCalls-teacherBefore;
+      ui.tuneStatus.textContent="stage "+stage+"/"+stages+" · teacher-off validation…";
+      const candidateCheckpoint=policy.exportCheckpoint(),evaluation=await stagedValidation({steps:24,repeats:2});
+      const accepted=stagedCandidateAccepts(evaluation,best.evaluation);
+      if(accepted&&evaluation.median>=best.evaluation.median-1e-9){
+        best={checkpoint:candidateCheckpoint,evaluation,stage,trained:completed};
+        ui.tuneStatus.textContent="stage "+stage+" accepted · median return "+evaluation.median.toFixed(3);
+      }else if(!accepted){
+        policy.importCheckpoint(best.checkpoint);stoppedEarly=true;
+        ui.tuneStatus.textContent="stage "+stage+" rejected · rollback to stage "+best.stage+" · "+evaluation.median.toFixed(3)+" vs best "+best.evaluation.median.toFixed(3);
+        break;
+      }
+    }
+    policy.importCheckpoint(best.checkpoint);checkpointReady=true;applyProfile("frozen");ui.profile.value="frozen";ui.tuneProgress.value=100;ui.tuneBadge.textContent=stoppedEarly?"rollback protected":"validated frozen";
+    ui.tuneStatus.textContent="SAFE FINE-TUNE COMPLETE · kept stage "+best.stage+" / "+stages+" · "+best.trained+" accepted decisions · median return "+best.evaluation.median.toFixed(3)+" · min "+best.evaluation.min.toFixed(3)+" · "+totalRewardUpdates+" reward updates · "+totalTeacherRefreshes+" teacher refreshes · teacher-off playback";
+    ui.checkpointStatus.textContent="Validated in-browser checkpoint · stage "+best.stage+" · "+policy.q.parameterCount()+" params";
+    setRuntime(stoppedEarly?"TRAINED · ROLLED BACK TO BEST":"TRAINED · VALIDATED");render();
   }catch(error){ui.tuneStatus.textContent="training failed · "+String(error?.message||error);setRuntime("TRAINING ERROR",true)}
   finally{setBusy(false)}
 }
