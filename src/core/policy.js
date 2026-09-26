@@ -89,7 +89,7 @@ export class SemanticResidualPolicy{
   }
   exportCheckpoint(){
     if(!this.q?.exportCheckpoint)throw new Error("Residual model does not support checkpoints");
-    const clone=value=>globalThis.structuredClone?globalThis.structuredClone(value):JSON.parse(JSON.stringify(value));
+    const clone=value=>JSON.parse(JSON.stringify(value,(_key,v)=>ArrayBuffer.isView(v)?Array.from(v):v));
     return{
       format:"doom-classifier-policy",version:1,createdAt:new Date().toISOString(),
       schema:clone(this.schema),actions:clone(this.actions),temperature:this.temperature,baseTemperature:this.baseTemperature,
