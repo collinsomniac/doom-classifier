@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {projectValueToActionFields} from "../src/core/action-factorization.js";
+import {compileActionFieldProjector,projectValueToActionFields} from "../src/core/action-factorization.js";
 
 const schema={actionFields:[
   {id:"forward",label:"forward",min:0,max:1},
@@ -20,6 +20,11 @@ assert.ok(projected.projected[idx.forward_fire]>projected.projected[idx.fire],"f
 assert.ok(projected.projected[idx.fire]>projected.projected[idx.forward],"fire contribution should remain stronger than forward");
 assert.ok(projected.coefficients.find(x=>x.id==="forward").weight>0);
 assert.ok(projected.coefficients.find(x=>x.id==="fire").weight>0);
+
+const compiled=compileActionFieldProjector(schema,actions,{ridge:.01,maxBlend:1}),compiledResult=compiled.project(noisy);
+assert.equal(compiled.basisSize,3);
+assert.ok(compiledResult.scores.every((v,i)=>Math.abs(v-projected.scores[i])<1e-10),"compiled projector must match one-shot projection");
+assert.ok(compiledResult.projected.every((v,i)=>Math.abs(v-projected.projected[i])<1e-10));
 
 const enumSchema={actionFields:[{id:"mode",label:"mode",enum:{0:"slow",1:"fast"}}]};
 const enumActions=[{id:"slow",params:{mode:0}},{id:"fast",params:{mode:1}}];
