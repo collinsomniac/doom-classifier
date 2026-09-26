@@ -9,14 +9,14 @@ async function boot(page){
   await page.locator("#bootBtn").click();
   await expect(page.locator("#runtimeStatus")).toContainText("ENGINE READY",{timeout:120000});
 }
-async function canonicalProbe(page){
-  return page.evaluate(async()=>{
+async function canonicalProbe(page,observation=null){
+  return page.evaluate(async supplied=>{
     const {policy:p,controller:c,env}=window.__doomLab;
     c.pause();c.training=false;c.explore=false;c.memory=false;c.useResidual=true;p.setInferenceMode("neural");
-    await c.reset({learning:false});p.resetEpisode();
-    const teacherBefore=p.teacherCalls,obs=env.observe(),d=await p.decide(obs,{useResidual:true,memory:false,explore:false});
-    return{action:d.action.id,probs:[...d.probs],qScores:[...d.qScores],semantic:[...(d.semanticPriorScores||[])],value:[...(d.valueScores||[])],teacherCalls:p.teacherCalls-teacherBefore};
-  });
+    if(!supplied)await c.reset({learning:false});p.resetEpisode();
+    const teacherBefore=p.teacherCalls,obs=supplied||env.observe(),d=await p.decide(obs,{useResidual:true,memory:false,explore:false});
+    return{observation:obs,action:d.action.id,probs:[...d.probs],qScores:[...d.qScores],semantic:[...(d.semanticPriorScores||[])],value:[...(d.valueScores||[])],teacherCalls:p.teacherCalls-teacherBefore};
+  },observation);
 }
 
 async function frozenEval(page,steps=24){
@@ -72,7 +72,7 @@ test("build and round-trip a quality-gated teacher-free starter checkpoint",asyn
   await fresh.locator("#loadSavedBtn").click();
   await expect(fresh.locator("#checkpointStatus")).toContainText("loaded",{timeout:30000});
   await expect(fresh.locator("#teacherChip")).toContainText("teacher-free checkpoint");
-  const replayProbe=await canonicalProbe(fresh);
+  const replayProbe=await canonicalProbe(fresh,probe.observation);
   expect(replayProbe.teacherCalls).toBe(0);
   expect(replayProbe.action).toBe(probe.action);
   expect(replayProbe.probs.length).toBe(probe.probs.length);
