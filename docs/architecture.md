@@ -361,3 +361,17 @@ Add held-out Brier score, log score, ECE/reliability, and test whether epistemic
 ### Multi-environment transfer
 
 DOOM cannot prove generality. Add unrelated structured environments with renamed/paraphrased schemas and different action parameter types.
+
+## Consequence learning stability
+
+The reward-specific branch uses several training-only stabilizers while leaving the frozen inference path unchanged:
+
+- four-step n-step returns;
+- bounded replay;
+- a delayed target network;
+- **Double-DQN bootstrap targets**: the online critic selects the next action and the delayed target critic evaluates that selected action, reducing maximization bias from taking the target network's own noisy maximum;
+- a three-head bootstrap ensemble whose disagreement limits policy authority;
+- KL-constrained fusion against the semantic prior, with confidence-gated state-dependent expansion.
+
+The Double-DQN change adds no inference cost. It only changes how reward targets are constructed during browser fine-tuning.
+
