@@ -108,8 +108,8 @@ class Dense{
 function zeroEntityGrads(n,dim){return Array.from({length:n},()=>new Float32Array(dim))}
 
 export class NeuralSetResidualQ{
-  constructor(schema,actions,{seed=2026,hashDim=48,globalDim=16,temporalDim=8,entityHidden=24,entityDim=16,actionDim=24,headDim=32,valueHidden=16,valueWeight=.5,ensembleSize=3,bootstrapProbability=.8,lr=.008,gamma=.96,l2=1e-6,useTargetNetwork=true,targetSyncInterval=24}={}){
-    this.schema=schema;this.actions=actions;this.seed=seed;this.hashDim=hashDim;this.globalDim=globalDim;this.temporalDim=temporalDim;this.entityHidden=entityHidden;this.entityDim=entityDim;this.actionDim=actionDim;this.headDim=headDim;this.valueHidden=valueHidden;this.valueWeight=valueWeight;this.ensembleSize=ensembleSize;this.bootstrapProbability=bootstrapProbability;
+  constructor(schema,actions,{seed=2026,hashDim=48,globalDim=16,temporalDim=8,entityHidden=24,entityDim=16,actionDim=24,headDim=32,valueHeadDim=24,valueHidden=16,valueWeight=.5,ensembleSize=3,bootstrapProbability=.8,lr=.008,gamma=.96,l2=1e-6,useTargetNetwork=true,targetSyncInterval=24}={}){
+    this.schema=schema;this.actions=actions;this.seed=seed;this.hashDim=hashDim;this.globalDim=globalDim;this.temporalDim=temporalDim;this.entityHidden=entityHidden;this.entityDim=entityDim;this.actionDim=actionDim;this.headDim=headDim;this.valueHeadDim=valueHeadDim;this.valueHidden=valueHidden;this.valueWeight=valueWeight;this.ensembleSize=ensembleSize;this.bootstrapProbability=bootstrapProbability;
     this.lr=lr;this.gamma=gamma;this.l2=l2;this.useTargetNetwork=useTargetNetwork;this.targetSyncInterval=Math.max(1,Math.floor(targetSyncInterval));this.name="SchemaSemanticValueSetNet";
     this.attentionStateDim=globalDim+temporalDim;this.queryInputDim=actionDim+this.attentionStateDim;this.contextDim=globalDim+temporalDim+entityDim*2+2;this.headInputDim=this.contextDim+entityDim+actionDim;
     this.setSchema(schema);this.setActions(actions);this.initialize();
@@ -123,8 +123,8 @@ export class NeuralSetResidualQ{
     this.queryLayer=new Dense(this.queryInputDim,this.entityDim,rng,{activation:"tanh"});
     this.headLayer=new Dense(this.headInputDim,this.headDim,rng);
     this.semanticLayer=new Dense(this.headDim,1,rng,{activation:"linear"});
-    this.valueHeadLayer=new Dense(this.headInputDim,this.headDim,rng,{activation:"tanh"});
-    this.valueLayer=new Dense(this.headDim,this.valueHidden,rng,{activation:"tanh"});
+    this.valueHeadLayer=new Dense(this.headInputDim,this.valueHeadDim,rng,{activation:"tanh"});
+    this.valueLayer=new Dense(this.valueHeadDim,this.valueHidden,rng,{activation:"tanh"});
     this.valueOutLayers=Array.from({length:this.ensembleSize},()=>new Dense(this.valueHidden,1,rng,{activation:"linear"}));
     for(const layer of this.valueOutLayers)for(let i=0;i<layer.w.length;i++)layer.w[i]*=.02;
     this.bootstrapRng=mulberry32((this.seed^0x9e3779b9)>>>0);
@@ -135,7 +135,7 @@ export class NeuralSetResidualQ{
     if(this.useTargetNetwork){
       if(!this.targetNet){
         this.targetNet=new NeuralSetResidualQ(this.schema,this.actions,{
-          seed:this.seed,hashDim:this.hashDim,globalDim:this.globalDim,temporalDim:this.temporalDim,entityHidden:this.entityHidden,entityDim:this.entityDim,actionDim:this.actionDim,headDim:this.headDim,valueHidden:this.valueHidden,valueWeight:this.valueWeight,
+          seed:this.seed,hashDim:this.hashDim,globalDim:this.globalDim,temporalDim:this.temporalDim,entityHidden:this.entityHidden,entityDim:this.entityDim,actionDim:this.actionDim,headDim:this.headDim,valueHeadDim:this.valueHeadDim,valueHidden:this.valueHidden,valueWeight:this.valueWeight,
           ensembleSize:this.ensembleSize,bootstrapProbability:this.bootstrapProbability,lr:this.lr,gamma:this.gamma,l2:this.l2,useTargetNetwork:false,targetSyncInterval:this.targetSyncInterval
         });
       }else{
