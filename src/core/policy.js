@@ -2,6 +2,7 @@ import {argmax,clamp,entropyNormalized,mulberry32,sampleCategorical,softmax} fro
 import {TemporalMemory} from "./memory.js";
 import {LinearResidualQ} from "./residual.js";
 import {NeuralSetResidualQ} from "./neural-set-residual.js";
+import {projectValueToActionFields} from "./action-factorization.js";
 
 function numericFeatures(schema,obs){
   const out=[1];
@@ -52,7 +53,7 @@ export class SemanticResidualPolicy{
     schema,actions,semantic,residual="linear",residualWeight=.9,temperature=.8,epsilon=.08,seed=2026,
     inferenceMode="hybrid",teacherInterval=32,teacherMinGap=8,teacherEntropy=.78,teacherMargin=.10,teacherNovelty=.85,teacherEpistemic=.025,distillSteps=4,replayCapacity=96,replayBatch=2,
     teacherReplayCapacity=8,teacherReplayBatch=2,teacherReplayStrength=.2,nStep=4,
-    priorKlBudget=.08,valueBetaMax=4096,valueBetaSearchSteps=12,valueTrustUpdates=192,valueEpistemicBudget=.025
+    priorKlBudget=.08,valueBetaMax=4096,valueBetaSearchSteps=12,valueTrustUpdates=192,valueEpistemicBudget=.025,typedValueBlend=.65,typedValueRidge=.05
   }){
     this.schema=schema;this.actions=actions;this.residualWeight=residualWeight;this.baseTemperature=temperature;this.temperature=temperature;this.epsilon=epsilon;this.seed=seed;this.rng=mulberry32(seed);
     this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;
@@ -61,7 +62,7 @@ export class SemanticResidualPolicy{
     else this.q=new LinearResidualQ(actions.length,this.featureSize);
     this.inferenceMode=inferenceMode;this.teacherInterval=teacherInterval;this.teacherMinGap=teacherMinGap;this.teacherEntropy=teacherEntropy;this.teacherMargin=teacherMargin;this.teacherNovelty=teacherNovelty;this.teacherEpistemic=teacherEpistemic;this.distillSteps=distillSteps;this.replayCapacity=replayCapacity;this.replayBatch=replayBatch;this.replay=[];this.replayRng=mulberry32((seed^0x517cc1b7)>>>0);
     this.teacherReplayCapacity=Math.max(0,Math.floor(teacherReplayCapacity));this.teacherReplayBatch=Math.max(0,Math.floor(teacherReplayBatch));this.teacherReplayStrength=teacherReplayStrength;this.teacherReplay=[];this.teacherReplayRng=mulberry32((seed^0xa341316c)>>>0);this.nStep=Math.max(1,Math.floor(nStep));this.nStepBuffer=[];
-    this.priorKlBudget=Math.max(0,Number(priorKlBudget)||0);this.valueBetaMax=Math.max(0,Number(valueBetaMax)||0);this.valueBetaSearchSteps=Math.max(1,Math.floor(valueBetaSearchSteps));this.valueTrustUpdates=Math.max(1,Math.floor(valueTrustUpdates));this.valueEpistemicBudget=clamp(Number(valueEpistemicBudget??.025),0,1);
+    this.priorKlBudget=Math.max(0,Number(priorKlBudget)||0);this.valueBetaMax=Math.max(0,Number(valueBetaMax)||0);this.valueBetaSearchSteps=Math.max(1,Math.floor(valueBetaSearchSteps));this.valueTrustUpdates=Math.max(1,Math.floor(valueTrustUpdates));this.valueEpistemicBudget=clamp(Number(valueEpistemicBudget??.025),0,1);this.typedValueBlend=clamp(Number(typedValueBlend??.65),0,1);this.typedValueRidge=Math.max(1e-6,Number(typedValueRidge)||.05);
     this.novelty=new NoveltyTracker(this.baseSize);
     this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherGeneration=0;this.teacherPromise=null;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];this.onTeacherResult=null;
     this.setSemantic(semantic);
@@ -116,10 +117,16 @@ export class SemanticResidualPolicy{
       return{scores:priorScores||[],memberScores:null,valueBeta:0,priorKL:0,valueTrust:0,priorKlBudget:0,klUtilization:0,valueEpistemic:0,valueEpistemicBudget:this.valueEpistemicBudget,epistemicUtilization:0,valueBetaSaturated:false};
     }
     const valueTrust=clamp(Number(this.q?.updates||0)/this.valueTrustUpdates,0,1),budget=this.priorKlBudget*valueTrust,temp=Math.max(.05,Number(temperature)||1),epistemicBudget=this.valueEpistemicBudget;
-    const prior=softmax(priorScores,temp),center=valueScores.reduce((a,b)=>a+b,0)/valueScores.length,centered=valueScores.map(v=>v-center);
+    const prior=softmax(priorScores,temp),typed=projectValueToActionFields(this.schema,this.actions,valueScores,{ridge:this.typedValueRidge,maxBlend:this.typedValueBlend}),effectiveValue=typed.scores;
+    const center=effectiveValue.reduce((a,b)=>a+b,0)/effectiveValue.length,centered=effectiveValue.map(v=>v-center);
     const hasMembers=valueMemberScores?.length===priorScores.length&&Array.isArray(valueMemberScores[0])&&valueMemberScores[0].length>1;
+    let effectiveMembers=null;
+    if(hasMembers){
+      const memberCount=valueMemberScores[0].length,projected=Array.from({length:memberCount},(_,member)=>projectValueToActionFields(this.schema,this.actions,valueMemberScores.map(row=>Number(row?.[member]||0)),{ridge:this.typedValueRidge,maxBlend:this.typedValueBlend}).scores);
+      effectiveMembers=priorScores.map((_,a)=>projected.map(scores=>scores[a]));
+    }
     const evaluate=beta=>{
-      const scores=priorScores.map((v,i)=>v+beta*centered[i]),probs=softmax(scores,temp),memberScores=hasMembers?priorScores.map((semantic,a)=>Array.from({length:valueMemberScores[0].length},(_,m)=>semantic+beta*(Number(valueMemberScores[a]?.[m]||0)-center))):null;
+      const scores=priorScores.map((v,i)=>v+beta*centered[i]),probs=softmax(scores,temp),memberScores=hasMembers?priorScores.map((semantic,a)=>Array.from({length:valueMemberScores[0].length},(_,m)=>semantic+beta*Number(effectiveMembers[a]?.[m]||0))):null;
       const epistemic=memberScores?ensembleDisagreement(memberScores,temp):0;
       return{beta,scores,probs,memberScores,kl:klDivergence(probs,prior),epistemic};
     };
@@ -143,7 +150,7 @@ export class SemanticResidualPolicy{
       }
     }
     const klUtilization=budget>0?clamp(chosen.kl/budget,0,1):0,epistemicUtilization=epistemicBudget>0?clamp(chosen.epistemic/epistemicBudget,0,1):0;
-    return{scores:chosen.scores,memberScores:chosen.memberScores,valueBeta:chosen.beta,priorKL:chosen.kl,valueTrust,priorKlBudget:budget,klUtilization,valueEpistemic:chosen.epistemic,valueEpistemicBudget:epistemicBudget,epistemicUtilization,valueBetaSaturated,priorProbs:prior};
+    return{scores:chosen.scores,memberScores:chosen.memberScores,valueBeta:chosen.beta,priorKL:chosen.kl,valueTrust,priorKlBudget:budget,klUtilization,valueEpistemic:chosen.epistemic,valueEpistemicBudget:epistemicBudget,epistemicUtilization,valueBetaSaturated,priorProbs:prior,typedValueScores:effectiveValue,typedValueProjected:typed.projected,typedValueFit:typed.fitQuality,typedValueBlendUsed:typed.blendUsed,typedFieldCoefficients:typed.coefficients};
   }
   residualEvaluation(obs,features,temporal=null){
     if(this.q.scoreStatsObservation){
@@ -305,7 +312,7 @@ export class SemanticResidualPolicy{
     const stats=confidenceStats(probs);this.decisionCount++;
     return{
       actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:logits,semanticPriorScores:activeFusion.semanticScores||residualEval.semanticScores||null,valueScores:residualEval.valueScores||null,features:encoded.features,temporal:encoded.temporal,
-      valueBeta:Number(activeFusion.valueBeta||0),priorKL:Number(activeFusion.priorKL||0),valueTrust:Number(activeFusion.valueTrust||0),priorKlBudget:Number(activeFusion.priorKlBudget||0),klUtilization:Number(activeFusion.klUtilization||0),valueEpistemic:Number(activeFusion.valueEpistemic||0),valueEpistemicBudget:Number(activeFusion.valueEpistemicBudget??this.valueEpistemicBudget),epistemicUtilization:Number(activeFusion.epistemicUtilization||0),valueBetaSaturated:!!activeFusion.valueBetaSaturated,
+      valueBeta:Number(activeFusion.valueBeta||0),priorKL:Number(activeFusion.priorKL||0),valueTrust:Number(activeFusion.valueTrust||0),priorKlBudget:Number(activeFusion.priorKlBudget||0),klUtilization:Number(activeFusion.klUtilization||0),valueEpistemic:Number(activeFusion.valueEpistemic||0),valueEpistemicBudget:Number(activeFusion.valueEpistemicBudget??this.valueEpistemicBudget),epistemicUtilization:Number(activeFusion.epistemicUtilization||0),valueBetaSaturated:!!activeFusion.valueBetaSaturated,typedValueScores:activeFusion.typedValueScores||null,typedValueFit:Number(activeFusion.typedValueFit||0),typedValueBlendUsed:Number(activeFusion.typedValueBlendUsed||0),typedFieldCoefficients:activeFusion.typedFieldCoefficients||null,
       uncertainty:{...stats,novelty,epistemic},latencyMs:performance.now()-t0,semanticLatencyMs:semanticMs,residualLatencyMs:residualMs,
       teacherUsed,teacherPending:!!this.teacherPromise,semanticUsed,inferenceMode:mode,explorationStrategy,teacherCalls:this.teacherCalls,teacherScheduled:this.teacherScheduled,lastTeacherLatencyMs:this.lastTeacherLatencyMs
     };

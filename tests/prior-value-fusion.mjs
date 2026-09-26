@@ -64,6 +64,25 @@ assert.ok(scaled.priorKL>.07&&scaled.priorKL<=.0805,"adaptive fusion should spen
 assert.ok(scaled.klUtilization>.85,"KL utilization should expose that the trust budget was actually used");
 assert.equal(scaled.valueBetaSaturated,false,"beta should stop on KL boundary, not the safety ceiling");
 
+const typedSchema={fields:[{id:"x",label:"x",min:0,max:1}],collections:[],actionFields:[{id:"forward",label:"forward",min:0,max:1},{id:"fire",label:"fire",min:0,max:1}]};
+const typedActions=[
+  {id:"wait",label:"wait",params:{forward:0,fire:0}},
+  {id:"forward",label:"forward",params:{forward:1,fire:0}},
+  {id:"fire",label:"fire",params:{forward:0,fire:1}},
+  {id:"forward_fire",label:"forward + fire",params:{forward:1,fire:1}}
+];
+const typedQ={updates:100,scoreStatsObservation(){return{
+  scores:[0,0,0,0],semanticScores:[0,.2,.4,.45],valueScores:[0,.5,1,.55],
+  valueMemberScores:[[0,.01,-.01],[.48,.5,.52],[.98,1,1.02],[.53,.55,.57]],memberScores:[[0,0,0],[0,0,0],[0,0,0],[0,0,0]]
+}},reset(){},parameterCount(){return 0}};
+const typedSemantic={name:"stub",backend:"test",compile(){},async score(){return[0,0,0,0]}};
+const typedPolicy=new SemanticResidualPolicy({schema:typedSchema,actions:typedActions,semantic:typedSemantic,residual:typedQ,temperature:.7,priorKlBudget:.08,valueTrustUpdates:1,valueEpistemicBudget:1,typedValueBlend:1,inferenceMode:"neural"});
+const typedDecision=await typedPolicy.decide({x:.5,_collections:{}},{useResidual:true,memory:false,explore:false});
+assert.ok(typedDecision.typedValueFit>.4,"policy fusion should expose meaningful typed-action value fit");
+assert.ok(typedDecision.typedValueBlendUsed>.4,"typed value smoothing should activate in proportion to fit quality");
+assert.equal(typedDecision.typedValueScores.length,typedActions.length);
+assert.ok(typedDecision.typedFieldCoefficients.some(x=>x.id==="fire"&&x.weight>0),"typed fusion should recover positive fire contribution");
+
 const uncertainQ={...q,updates:100,scoreStatsObservation(){return{
   scores:[0,0,0],semanticScores:[.8,0,-.4],valueScores:[0,1,0],
   valueMemberScores:[[-.1,0,.1],[-2,1,4],[-.1,0,.1]],memberScores:[[0,0,0],[0,0,0],[0,0,0]]
