@@ -168,7 +168,8 @@ function renderTrainingStream(){
   ui.trainingOutput.textContent=rows.map(t=>{
     const maxP=Math.max(...Object.values(t.probabilities||{x:0})),learn=t.learning;
     const eventBits=[];if(Number(t.outcome?.damageDealt||0)>0)eventBits.push("dmg+"+Number(t.outcome.damageDealt).toFixed(0));if(Number(t.outcome?.playerKillDelta||0)>0)eventBits.push("kill+"+Number(t.outcome.playerKillDelta).toFixed(0));if(Number(t.outcome?.playerPickupDelta||0)>0)eventBits.push("pickup+"+Number(t.outcome.playerPickupDelta).toFixed(0));
-    const td=learn?" td="+Number(learn.td||0).toFixed(3)+" H"+Number(learn.nStepHorizon||0):"";
+    const bootstrap=learn?.doubleDqn&&Number(learn.bootstrapActionIndex)>=0?" boot→"+(policy.actions[learn.bootstrapActionIndex]?.id||learn.bootstrapActionIndex)+"@"+Number(learn.bootstrapValue||0).toFixed(3):"";
+    const td=learn?" td="+Number(learn.td||0).toFixed(3)+"→"+Number(learn.target||0).toFixed(3)+" H"+Number(learn.nStepHorizon||0)+bootstrap:"";
     return "s"+String(t.step).padStart(4,"0")+" "+(t.mode?.training?"TRAIN":"PLAY ")+" "+String(t.action).padEnd(19)+" p="+maxP.toFixed(3)+" r="+Number(t.reward||0).toFixed(3)+td+" β="+Number(t.valueBeta||0).toFixed(2)+" KL="+(Number(t.klUtilization||0)*100).toFixed(0)+"% "+(eventBits.join(",")||"—");
   }).join("\n");
   ui.trainingOutput.scrollTop=ui.trainingOutput.scrollHeight;
