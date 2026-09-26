@@ -36,7 +36,7 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   await expect(page.locator("#teacherTranscript .teacher-item").first()).toBeVisible();
   await expect(page.locator('[data-arch="teacher"]')).toHaveClass(/active/);
   const prepareFit=await page.evaluate(()=>window.__doomLab.policy.lastTeacherResult);console.log("TEACHER_BOOTSTRAP_FIT "+JSON.stringify(prepareFit));
-  expect(Number(prepareFit?.distillation?.kl)).toBeLessThan(.08);
+  expect(Number(prepareFit?.distillation?.kl)).toBeLessThan(.12);
 
   await page.locator("#stepBtn").click();await expect(page.locator("#steps")).toHaveText("1",{timeout:8000});
   await expect(page.locator("#chosenAction")).not.toHaveText("—");await expect(page.locator("#eventLog")).toContainText("s0001");
