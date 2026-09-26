@@ -56,6 +56,18 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
     }
     const training={...train,neuralUpdates:p.q.updates-updatesBefore,semanticDistillUpdates:(p.q.distillUpdates||0)-distillBefore,teacherCalls:p.teacherCalls-teacherBefore,replaySize:p.replay?.length||0,teacherReplaySize:p.teacherReplay?.length||0,temperature:p.temperature,counts:trainingCounts,rewardByAction,attributedDamage:trainingAttributedDamage,playerKills:trainingPlayerKills,pickups:trainingPickups,combatAttributionTicks:trainingAttributionTicks,switches:trainingSwitches,maxStreak:trainingMaxStreak,explorationStrategies:[...new Set(trainingTrace.map(t=>t.explorationStrategy))]};
     const trainedDistribution=await distribution();
+    const typedBlendSweep=async()=>{
+      const original=p.typedValueBlend,out=[];
+      try{
+        for(const blend of [0,.15,.30,.45,.65]){
+          p.typedValueBlend=blend;
+          const metrics=await evaluate(16);
+          out.push({blend,...metrics});
+        }
+      }finally{p.typedValueBlend=original}
+      return out;
+    };
+    const typedBlendSweepResult=await typedBlendSweep();
     const klSweep=async()=>{
       await c.reset({learning:false});c.training=false;c.explore=false;c.memory=false;c.useResidual=true;p.setInferenceMode("neural");
       const original=p.priorKlBudget,out=[];
@@ -71,7 +83,7 @@ test("prepared real-Doom policy reports pre/post short fine-tune behavior",async
     };
     const klSweepResult=await klSweep();
     const after=await evaluate(24);
-    return{version:"owned-causal-reward-nstep4-adaptive-kl-"+trainSteps+"-rollout"+rolloutHorizon,runtime:lab.env.runtime,initialDistribution,before,training,trainedDistribution,klSweep:klSweepResult,after,params:p.q.parameterCount(),model:p.q.name,targetSyncs:p.q.targetSyncs??0,splitHeads:typeof p.q.valueScoresObservation==="function"};
+    return{version:"owned-causal-reward-nstep4-adaptive-kl-"+trainSteps+"-rollout"+rolloutHorizon,runtime:lab.env.runtime,initialDistribution,before,training,trainedDistribution,typedBlendSweep:typedBlendSweepResult,klSweep:klSweepResult,after,params:p.q.parameterCount(),model:p.q.name,targetSyncs:p.q.targetSyncs??0,splitHeads:typeof p.q.valueScoresObservation==="function"};
   },[trainSteps,rolloutHorizon]);
 
   console.log("DOOM_LEARNING_BENCHMARK "+JSON.stringify(result));
