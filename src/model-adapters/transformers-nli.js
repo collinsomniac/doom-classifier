@@ -90,7 +90,13 @@ export class TransformersNLIAdapter{
     this.presetKey=preset;this.preset=NLI_PRESETS[preset];this.name=this.preset.label;this.onProgress=onProgress;this.maxStateChars=maxStateChars;this.maxPremiseTokens=maxPremiseTokens;
     this.schema=null;this.actions=null;this.labels=null;this.classifier=null;this.backend="unloaded";
   }
-  compile(schema,actions){this.schema=schema;this.actions=actions;this.labels=actions.map(a=>a.label+" — "+a.description)}
+  compile(schema,actions){
+    this.schema=schema;this.actions=actions;
+    this.labels=actions.map(a=>{
+      const active=Object.entries(a.params||{}).filter(([,v])=>Number(v)>0).map(([k])=>k.replaceAll("_"," "));
+      return a.label+" — controller buttons: "+(active.length?active.join(", "):"none")+"; "+a.description;
+    });
+  }
   report(info){this.onProgress({...info,normalizedProgress:normalizeProgress(info)})}
   async load(){
     if(this.classifier)return this;
@@ -111,25 +117,36 @@ export class TransformersNLIAdapter{
     }
     throw lastError||new Error("Unable to load NLI model");
   }
+  fullStateObject(observation){
+    const scalars={};
+    for(const field of this.schema?.fields||[]){
+      const raw=observation?.[field.id]??0,category=field.enum?.[String(raw)];
+      scalars[field.id]=category===undefined?raw:{value:raw,label:String(category)};
+    }
+    const collections={};
+    for(const collection of this.schema?.collections||[])collections[collection.id]=observation?._collections?.[collection.id]||[];
+    return{
+      environment:this.schema?.environment||"structured interactive environment",
+      objective:this.schema?.objective||"choose a controller input from the observed state",
+      control_interval_ms:Number.isFinite(Number(this.schema?.controlHorizonMs))?Number(this.schema.controlHorizonMs):null,
+      observation:{scalars,collections}
+    };
+  }
+  stateObject(observation){
+    const full=this.fullStateObject(observation),collections={};
+    for(const collection of this.schema?.collections||[]){
+      const records=full.observation.collections[collection.id]||[];
+      collections[collection.id]={count:records.length,summary:summarizeCollection(collection,records)};
+    }
+    return{
+      environment:full.environment,objective:full.objective,control_interval_ms:full.control_interval_ms,
+      observation:{scalars:full.observation.scalars,collections},
+      projection:{bounded:true,reason:"semantic teacher token budget; fast neural core receives the full structured observation"}
+    };
+  }
   stateText(observation){
-    const objective=this.schema?.objective||"choose the action that best advances the environment objective";
-    const environment=this.schema?.environment||"structured interactive environment";
-    const horizon=Number(this.schema?.controlHorizonMs);
-    const scalar=(this.schema.fields||[]).map(field=>{
-      const value=Number(observation[field.id]??0),label=field.label||field.id;
-      return label+"="+fieldValueText(field,value);
-    });
-    const lines=["Environment: "+environment,"Objective: "+objective];
-    if(Number.isFinite(horizon))lines.push("Control interval: "+horizon+" ms per selected controller input.");
-    lines.push("Current scalar state: "+scalar.join("; "));
-    const collections=(this.schema.collections||[]).map(collection=>{
-      const records=observation?._collections?.[collection.id]||[];
-      return{records,text:"Collection: "+summarizeCollection(collection,records)};
-    });
-    for(const item of collections.filter(x=>x.records.length))lines.push(item.text);
-    for(const item of collections.filter(x=>!x.records.length))lines.push(item.text);
-    const text=lines.join("\n");
-    return text.length<=this.maxStateChars?text:text.slice(0,this.maxStateChars)+"\n[bounded teacher synopsis truncated]";
+    const text=JSON.stringify(this.stateObject(observation));
+    return text.length<=this.maxStateChars?text:text.slice(0,Math.max(0,this.maxStateChars-32))+'..."truncated":true}';
   }
   boundedPremise(observation){
     const text=this.stateText(observation),tokenizer=this.classifier?.tokenizer;
@@ -148,7 +165,7 @@ export class TransformersNLIAdapter{
   }
   async score(observation){
     if(!this.classifier)await this.load();
-    const output=await this.classifier(this.boundedPremise(observation),this.labels,{multi_label:true,hypothesis_template:"Given only the stated environment, current state, objective, and literal controller meaning, selecting {} is an appropriate next controller input now."});
+    const output=await this.classifier(this.boundedPremise(observation),this.labels,{multi_label:true,hypothesis_template:"Given only the observed game state and literal controller meanings, using {} for the next control interval is contextually appropriate."});
     const independent=new Map(output.labels.map((label,i)=>[label,output.scores[i]])),eps=1e-6;
     return this.labels.map(label=>{
       const p=Math.max(eps,Math.min(1-eps,Number(independent.get(label)??eps)));
