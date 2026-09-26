@@ -1,0 +1,56 @@
+name: dueling-critic-experiment
+
+on:
+  push:
+    branches:
+      - "experiment/dueling-critic"
+    paths:
+      - "src/core/neural-set-residual.js"
+      - "src/core/policy.js"
+      - "src/core/controller.js"
+      - "tests/dueling-critic.mjs"
+      - "tests/doom-learning.spec.mjs"
+      - ".github/workflows/dueling-experiment.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dueling-critic-experiment
+  cancel-in-progress: true
+
+jobs:
+  invariants:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run dueling critic invariant
+        run: node tests/dueling-critic.mjs
+      - name: Run task-agnostic adapter invariant
+        run: node tests/task-adapter-contract.mjs
+
+  doom-benchmark:
+    needs: invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DOOM_RUNTIME_MODE: owned
+      DOOM_TRAIN_STEPS: "256"
+      DOOM_ROLLOUT_HORIZON: "64"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Chromium tooling
+        run: |
+          npm install --no-save --no-package-lock @playwright/test@1.55.0
+          npx playwright install chromium
+      - name: Start static server
+        run: python3 -m http.server 8000 --bind 127.0.0.1 > /tmp/dueling-http.log 2>&1 &
+      - name: Run identical owned-runtime causal benchmark
+        run: npx playwright test tests/doom-learning.spec.mjs --reporter=line
