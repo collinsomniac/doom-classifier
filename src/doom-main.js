@@ -98,7 +98,8 @@ function renderArchitecture(obs,d,outcome){
   setArchNode("teacher",{active:isLearnedTeacher(),hot:!!d?.teacherUsed||teacherFresh,pending:!!d?.teacherPending,value:isLearnedTeacher()?(policy.semantic.name+(teacherTop?" → "+teacherTop.id+" "+(teacherTop.probability*100).toFixed(0)+"%":"")+" · "+Number(policy.lastTeacherLatencyMs||0).toFixed(0)+" ms"):"off"});
   setArchNode("semantic",{active:prepared||!!d,hot:!!d?.semanticUsed||teacherFresh,value:semanticTop>=0?("prior → "+policy.actions[semanticTop].id+" · "+Number(d.semanticPriorScores[semanticTop]||0).toFixed(3)):"unprepared"});
   setArchNode("replay",{active:(policy?.replay?.length||0)>0||learning,hot:learning,learning,value:(policy?.replay?.length||0)+" transitions · H"+Number(learnInfo?.nStepHorizon||policy?.nStep||1)+(learnInfo?" · TD "+Number(learnInfo.td||0).toFixed(3):"")});
-  setArchNode("value",{active:(policy?.q?.updates||0)>0||!!d,hot:learning,learning,value:valueTop>=0?("value → "+policy.actions[valueTop].id+" · "+Number(d.valueScores[valueTop]||0).toFixed(3)+" · "+(policy.q.updates||0)+" updates"):"untrained"});
+  const rankedValues=d?.valueScores?.length?[...d.valueScores].sort((a,b)=>b-a):[],valueGap=rankedValues.length>1?Number(rankedValues[0]-rankedValues[1]):0;
+  setArchNode("value",{active:(policy?.q?.updates||0)>0||!!d,hot:learning,learning,value:valueTop>=0?("value → "+policy.actions[valueTop].id+" · ΔQ "+valueGap.toFixed(4)+" · "+(policy.q.updates||0)+" updates"):"untrained"});
   setArchNode("fusion",{active:!!d,hot:!!d&&Number(d.valueBeta||0)>0,value:d?("β "+Number(d.valueBeta||0).toFixed(2)+" · KL "+(Number(d.klUtilization||0)*100).toFixed(0)+"% · → "+d.action.id):"β 0 · KL 0%"});
   setArchNode("actions",{active:!!d,hot:!!d,value:d?(d.action.label+" · p "+Number(d.probs?.[d.actionIndex]||0).toFixed(3)):"waiting"});
   setArchNode("actuator",{active:!!d,hot:!!d,value:d?("primitive mask "+String(env.actionMasks?.[d.action.id]??"—")):"idle"});
