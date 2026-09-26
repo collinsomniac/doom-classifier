@@ -23,6 +23,7 @@ const ui={
 };
 let env=null,policy=null,controller=null,hashSemantic=null;
 let engineReady=false,schemaCompiled=false,teacherReady=false,checkpointReady=false,busy=false,prepared=false;
+let lastArchPulseDecision=-1;
 
 const PROFILES={
   assisted:{label:"Adaptive assisted",teacher:"adaptive",neural:true,learning:false,memory:true,explore:false,hint:"Fast neural decisions every tick; MobileBERT is scheduled only when uncertainty/novelty warrants it."},
@@ -140,6 +141,13 @@ function setArchNode(id,{active=false,hot=false,pending=false,learning=false,val
 }
 function renderArchitecture(obs,d,outcome){
   if(!ui.architecture)return;
+  const pulseDecision=Number(policy?.decisionCount||0);
+  if(d&&pulseDecision!==lastArchPulseDecision){
+    lastArchPulseDecision=pulseDecision;
+    ui.architecture.classList.remove("tick-pulse");
+    void ui.architecture.offsetWidth;
+    ui.architecture.classList.add("tick-pulse");
+  }
   const entities=obs?._collections?.entities?.length||0,geometry=obs?._collections?.geometry?.length||0,lastTeacher=policy?.lastTeacherResult;
   const teacherFresh=!!lastTeacher&&Math.abs(Number(policy?.decisionCount||0)-Number(lastTeacher.step||0))<=2;
   const learning=!!controller?.training||!!d?.learningInfo;
