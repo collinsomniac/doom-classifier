@@ -134,6 +134,8 @@ export class NeuralSetResidualQ{
     this.queryLayer=new Dense(this.queryInputDim,this.entityDim,rng,{activation:"tanh"});
     this.headLayer=new Dense(this.headInputDim,this.headDim,rng);
     this.semanticLayer=new Dense(this.headDim,1,rng,{activation:"linear"});
+    this.semanticAdapterLayer=new Dense(this.headInputDim,1,rng,{activation:"linear"});
+    this.semanticAdapterLayer.w.fill(0);this.semanticAdapterLayer.b.fill(0);
     // Preserve the original semantic-hidden -> value path, then add a tiny reward-only residual adapter.
     // Creating valueLayer/valueOutLayers before the adapter retains the original critic initialization.
     this.valueLayer=new Dense(this.headDim,this.valueHidden,rng,{activation:"tanh"});
@@ -143,7 +145,7 @@ export class NeuralSetResidualQ{
     this.valueAdapterUp=new Dense(this.valueHeadDim,this.headDim,rng,{activation:"linear"});
     for(let i=0;i<this.valueAdapterUp.w.length;i++)this.valueAdapterUp.w[i]*=.05;
     this.bootstrapRng=mulberry32((this.seed^0x9e3779b9)>>>0);
-    this.semanticLayers=[this.globalLayer,this.temporalLayer,this.entityLayer1,this.entityLayer2,this.queryLayer,this.headLayer,this.semanticLayer];
+    this.semanticLayers=[this.globalLayer,this.temporalLayer,this.entityLayer1,this.entityLayer2,this.queryLayer,this.headLayer,this.semanticLayer,this.semanticAdapterLayer];
     this.valueLayers=[this.valueHeadLayer,this.valueAdapterUp,this.valueLayer,...this.valueOutLayers];
     this.layers=[...this.semanticLayers,...this.valueLayers];
     this.updates=0;this.distillUpdates=0;this.targetSyncs=0;
@@ -230,12 +232,12 @@ export class NeuralSetResidualQ{
   actionForward(state,actionIndex){
     const attn=this.attention(state,actionIndex),input=new Float32Array(this.headInputDim);
     input.set(state.context,0);input.set(attn.attended,this.contextDim);input.set(this.actionEmbeddings[actionIndex],this.contextDim+this.entityDim);
-    const h=this.headLayer.forward(input),semanticOut=this.semanticLayer.forward(h.out),valueHead=this.valueHeadLayer.forward(input),valueResidual=this.valueAdapterUp.forward(valueHead.out),valueInput=new Float32Array(this.headDim);
+    const h=this.headLayer.forward(input),semanticOut=this.semanticLayer.forward(h.out),semanticAdapterOut=this.semanticAdapterLayer.forward(input),valueHead=this.valueHeadLayer.forward(input),valueResidual=this.valueAdapterUp.forward(valueHead.out),valueInput=new Float32Array(this.headDim);
     for(let d=0;d<this.headDim;d++)valueInput[d]=h.out[d]+valueResidual.out[d];
     const valueHidden=this.valueLayer.forward(valueInput),valueOuts=this.valueOutLayers.map(layer=>layer.forward(valueHidden.out)),valueMemberScores=valueOuts.map(o=>o.out[0]);
-    const semanticScore=semanticOut.out[0],valueScore=valueMemberScores.reduce((a,b)=>a+b,0)/valueMemberScores.length;
+    const semanticScore=semanticOut.out[0]+semanticAdapterOut.out[0],valueScore=valueMemberScores.reduce((a,b)=>a+b,0)/valueMemberScores.length;
     const memberScores=valueMemberScores.map(value=>semanticScore+this.valueWeight*value),score=semanticScore+this.valueWeight*valueScore;
-    return{score,semanticScore,valueScore,memberScores,valueMemberScores,h,semanticOut,valueHead,valueResidual,valueHidden,valueOuts,state,actionIndex,...attn};
+    return{score,semanticScore,valueScore,memberScores,valueMemberScores,input,h,semanticOut,semanticAdapterOut,valueHead,valueResidual,valueHidden,valueOuts,state,actionIndex,...attn};
   }
   scoreStatsObservation(observation,{temporal=null}={}){
     const state=this.encodeState(observation,{temporal}),scores=new Array(this.actions.length),semanticScores=new Array(this.actions.length),valueScores=new Array(this.actions.length),memberScores=new Array(this.actions.length),valueMemberScores=new Array(this.actions.length);
@@ -259,7 +261,7 @@ export class NeuralSetResidualQ{
       const state=this.encodeState(example.observation,{cache:false,temporal:example.temporal||null}),mean=example.scores.reduce((a,b)=>a+Number(b||0),0)/example.scores.length;
       for(let ai=0;ai<this.actions.length;ai++){
         const f=this.actionForward(state,ai),x=new Float64Array(n);for(let d=0;d<this.headDim;d++)x[d]=f.h.out[d];x[this.headDim]=1;
-        const y=Number(example.scores[ai]||0)-mean;
+        const y=Number(example.scores[ai]||0)-mean-Number(f.semanticAdapterOut?.out?.[0]||0);
         for(let i=0;i<n;i++){vector[i]+=x[i]*y;for(let j=0;j<n;j++)matrix[i*n+j]+=x[i]*x[j]}rows++;
       }
     }
@@ -273,8 +275,10 @@ export class NeuralSetResidualQ{
   }
 
   backwardSemantic(forward,gradScore,entityExtra){
-    const gh=this.semanticLayer.backward(forward.semanticOut,new Float32Array([gradScore])),gin=this.headLayer.backward(forward.h,gh);
+    const gradScalar=new Float32Array([gradScore]),gh=this.semanticLayer.backward(forward.semanticOut,gradScalar),gin=this.headLayer.backward(forward.h,gh),adapterIn=this.semanticAdapterLayer.backward(forward.semanticAdapterOut,gradScalar);
     const gradContext=gin.slice(0,this.contextDim),gradAttended=gin.slice(this.contextDim,this.contextDim+this.entityDim),n=forward.state.latents.length;
+    for(let d=0;d<this.contextDim;d++)gradContext[d]+=adapterIn[d];
+    for(let d=0;d<this.entityDim;d++)gradAttended[d]+=adapterIn[this.contextDim+d];
     if(n){
       const q=forward.queryCache.out,scale=1/Math.sqrt(this.entityDim),gradQuery=new Float32Array(this.entityDim);
       for(let r=0;r<n;r++){
