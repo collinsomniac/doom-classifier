@@ -54,7 +54,7 @@ export class SemanticResidualPolicy{
     inferenceMode="hybrid",teacherInterval=32,teacherMinGap=8,teacherEntropy=.78,teacherMargin=.10,teacherNovelty=.85,teacherEpistemic=.025,distillSteps=4,replayCapacity=96,replayBatch=2,
     teacherReplayCapacity=8,teacherReplayBatch=2,teacherReplayStrength=.2,nStep=4,
     priorKlBudget=.08,valueBetaMax=4096,valueBetaSearchSteps=12,valueTrustUpdates=192,valueEpistemicBudget=.025,typedValueBlend=.65,typedValueRidge=.05,
-    criticKlExpansion=1,criticKlFloor=.10,criticAgreementFloor=.67,criticSnrFloor=.75,criticSnrTarget=2,criticGapShareTarget=.25
+    criticKlExpansion=1,criticKlFloor=.10,criticAgreementFloor=.67,criticSnrFloor=.75,criticSnrTarget=2,criticGapShareTarget=.25,replayEvidenceBandwidth=.08,replayEvidenceTarget=3
   }){
     this.schema=schema;this.actions=actions;this.residualWeight=residualWeight;this.baseTemperature=temperature;this.temperature=temperature;this.epsilon=epsilon;this.seed=seed;this.rng=mulberry32(seed);
     this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;
@@ -64,7 +64,7 @@ export class SemanticResidualPolicy{
     this.inferenceMode=inferenceMode;this.teacherInterval=teacherInterval;this.teacherMinGap=teacherMinGap;this.teacherEntropy=teacherEntropy;this.teacherMargin=teacherMargin;this.teacherNovelty=teacherNovelty;this.teacherEpistemic=teacherEpistemic;this.distillSteps=distillSteps;this.replayCapacity=replayCapacity;this.replayBatch=replayBatch;this.replay=[];this.replayRng=mulberry32((seed^0x517cc1b7)>>>0);
     this.teacherReplayCapacity=Math.max(0,Math.floor(teacherReplayCapacity));this.teacherReplayBatch=Math.max(0,Math.floor(teacherReplayBatch));this.teacherReplayStrength=teacherReplayStrength;this.teacherReplay=[];this.teacherReplayRng=mulberry32((seed^0xa341316c)>>>0);this.nStep=Math.max(1,Math.floor(nStep));this.nStepBuffer=[];
     this.priorKlBudget=Math.max(0,Number(priorKlBudget)||0);this.valueBetaMax=Math.max(0,Number(valueBetaMax)||0);this.valueBetaSearchSteps=Math.max(1,Math.floor(valueBetaSearchSteps));this.valueTrustUpdates=Math.max(1,Math.floor(valueTrustUpdates));this.valueEpistemicBudget=clamp(Number(valueEpistemicBudget??.025),0,1);this.typedValueBlend=clamp(Number(typedValueBlend??.65),0,1);this.typedValueRidge=Math.max(1e-6,Number(typedValueRidge)||.05);
-    this.criticKlExpansion=Math.max(0,Number(criticKlExpansion)||0);this.criticKlFloor=clamp(Number(criticKlFloor??.10),0,1);this.criticAgreementFloor=clamp(Number(criticAgreementFloor??.67),0,.99);this.criticSnrFloor=Math.max(0,Number(criticSnrFloor??.75));this.criticSnrTarget=Math.max(this.criticSnrFloor+1e-6,Number(criticSnrTarget??2));this.criticGapShareTarget=Math.max(1e-6,Number(criticGapShareTarget??.25));
+    this.criticKlExpansion=Math.max(0,Number(criticKlExpansion)||0);this.criticKlFloor=clamp(Number(criticKlFloor??.10),0,1);this.criticAgreementFloor=clamp(Number(criticAgreementFloor??.67),0,.99);this.criticSnrFloor=Math.max(0,Number(criticSnrFloor??.75));this.criticSnrTarget=Math.max(this.criticSnrFloor+1e-6,Number(criticSnrTarget??2));this.criticGapShareTarget=Math.max(1e-6,Number(criticGapShareTarget??.25));this.replayEvidenceBandwidth=Math.max(1e-6,Number(replayEvidenceBandwidth)||.08);this.replayEvidenceTarget=Math.max(1,Number(replayEvidenceTarget)||3);
     this.novelty=new NoveltyTracker(this.baseSize);
     this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherGeneration=0;this.teacherPromise=null;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];this.onTeacherResult=null;
     this.setSemantic(semantic);
@@ -114,7 +114,30 @@ export class SemanticResidualPolicy{
     const base=numericFeatures(this.schema,obs),temporal=commit?this.memory.update(base,memoryEnabled):this.memory.preview(base,memoryEnabled);
     const x=new Float32Array(this.featureSize);x.set(base,0);x.set(temporal,this.baseSize);return{base,temporal,features:x};
   }
-  fusePriorValue(priorScores,valueScores,valueMemberScores=null,{temperature=this.temperature}={}){
+  replayActionEvidence(stateSignature,actionIndex){
+    const signature=stateSignature&&Array.from(stateSignature);if(!signature?.length)return{count:0,localSupport:0,effectiveN:0,meanReturn:0,variance:0,nearestMse:Infinity};
+    const rows=[];for(const sample of this.replay){
+      if(Number(sample?.actionIndex)!==Number(actionIndex)||!sample?.stateSignature)continue;
+      const other=sample.stateSignature,n=Math.min(signature.length,other.length||0);if(!n)continue;
+      let mse=0;for(let i=0;i<n;i++){const d=Number(signature[i]||0)-Number(other[i]||0);mse+=d*d}mse/=n;
+      const weight=Math.exp(-mse/this.replayEvidenceBandwidth);rows.push({weight,mse,reward:Number(sample.reward||0)});
+    }
+    if(!rows.length)return{count:0,localSupport:0,effectiveN:0,meanReturn:0,variance:0,nearestMse:Infinity};
+    let sumW=0,sumW2=0,sumR=0,nearest=Infinity;for(const row of rows){sumW+=row.weight;sumW2+=row.weight*row.weight;sumR+=row.weight*row.reward;nearest=Math.min(nearest,row.mse)}
+    const mean=sumW?sumR/sumW:0;let variance=0;for(const row of rows)variance+=row.weight*(row.reward-mean)*(row.reward-mean);variance=sumW?variance/sumW:0;
+    return{count:rows.length,localSupport:sumW,effectiveN:sumW2>0?sumW*sumW/sumW2:0,meanReturn:mean,variance,nearestMse:nearest};
+  }
+  replayOverrideEvidence(stateSignature,criticActionIndex,priorActionIndex){
+    const critic=this.replayActionEvidence(stateSignature,criticActionIndex),prior=this.replayActionEvidence(stateSignature,priorActionIndex);
+    if(Number(criticActionIndex)===Number(priorActionIndex))return{critic,prior,returnDelta:0,z:0,supportGate:1,advantageGate:1,confidence:1,agrees:true};
+    const supportGate=Math.sqrt(clamp(critic.localSupport/this.replayEvidenceTarget,0,1)*clamp(prior.localSupport/this.replayEvidenceTarget,0,1));
+    const returnDelta=critic.meanReturn-prior.meanReturn;
+    const criticDen=Math.max(1,critic.effectiveN),priorDen=Math.max(1,prior.effectiveN),standardError=Math.sqrt(critic.variance/criticDen+prior.variance/priorDen);
+    const z=standardError>1e-6?returnDelta/standardError:(returnDelta>1e-9?4:returnDelta<-1e-9?-4:0);
+    const advantageGate=clamp(.5+.5*Math.tanh(z/2),0,1),confidence=supportGate*advantageGate;
+    return{critic,prior,returnDelta,z,supportGate,advantageGate,confidence,agrees:false};
+  }
+  fusePriorValue(priorScores,valueScores,valueMemberScores=null,{temperature=this.temperature,stateSignature=null}={}){
     if(!priorScores?.length||!valueScores?.length||priorScores.length!==valueScores.length){
       return{scores:priorScores||[],memberScores:null,valueBeta:0,priorKL:0,valueTrust:0,priorKlBudget:0,klUtilization:0,valueEpistemic:0,valueEpistemicBudget:this.valueEpistemicBudget,epistemicUtilization:0,valueBetaSaturated:false};
     }
@@ -127,7 +150,7 @@ export class SemanticResidualPolicy{
       const memberCount=valueMemberScores[0].length,projected=Array.from({length:memberCount},(_,member)=>projectValueToActionFields(this.schema,this.actions,valueMemberScores.map(row=>Number(row?.[member]||0)),{ridge:this.typedValueRidge,maxBlend:this.typedValueBlend}).scores);
       effectiveMembers=priorScores.map((_,a)=>projected.map(scores=>scores[a]));
     }
-    const criticRank=[...effectiveValue.keys()].sort((a,b)=>effectiveValue[b]-effectiveValue[a]),criticTop=criticRank[0]??0,criticRunner=criticRank[1]??criticTop,criticGap=Math.max(0,Number(effectiveValue[criticTop]||0)-Number(effectiveValue[criticRunner]||0));
+    const criticRank=[...effectiveValue.keys()].sort((a,b)=>effectiveValue[b]-effectiveValue[a]),criticTop=criticRank[0]??0,criticRunner=criticRank[1]??criticTop,criticGap=Math.max(0,Number(effectiveValue[criticTop]||0)-Number(effectiveValue[criticRunner]||0));const priorTop=argmax(priorScores),replayEvidence=this.replayOverrideEvidence(stateSignature,criticTop,priorTop);
     const criticMin=Math.min(...effectiveValue),criticMax=Math.max(...effectiveValue),criticSpread=Math.max(0,criticMax-criticMin),criticGapShare=criticSpread>1e-9?clamp(criticGap/criticSpread,0,1):0;
     let criticTopAgreement=0,criticMarginMean=criticGap,criticMarginStd=0,criticMarginSnr=0;
     if(effectiveMembers?.[criticTop]?.length){
@@ -172,13 +195,13 @@ export class SemanticResidualPolicy{
       }
     }
     const klUtilization=budget>0?clamp(chosen.kl/budget,0,1):0,epistemicUtilization=epistemicBudget>0?clamp(chosen.epistemic/epistemicBudget,0,1):0;
-    return{scores:chosen.scores,memberScores:chosen.memberScores,valueBeta:chosen.beta,priorKL:chosen.kl,valueTrust,basePriorKlBudget:baseBudget,priorKlBudget:budget,klUtilization,valueEpistemic:chosen.epistemic,valueEpistemicBudget:epistemicBudget,epistemicUtilization,valueBetaSaturated,priorProbs:prior,typedValueScores:effectiveValue,typedValueProjected:typed.projected,typedValueFit:typed.fitQuality,typedValueBlendUsed:typed.blendUsed,typedFieldCoefficients:typed.coefficients,criticTopIndex:criticTop,criticRunnerIndex:criticRunner,criticGap,criticSpread,criticGapShare,criticTopAgreement,criticMarginMean,criticMarginStd,criticMarginSnr,criticRankingConfidence,criticAuthority,criticKlGate,criticKlMultiplier};
+    return{scores:chosen.scores,memberScores:chosen.memberScores,valueBeta:chosen.beta,priorKL:chosen.kl,valueTrust,basePriorKlBudget:baseBudget,priorKlBudget:budget,klUtilization,valueEpistemic:chosen.epistemic,valueEpistemicBudget:epistemicBudget,epistemicUtilization,valueBetaSaturated,priorProbs:prior,typedValueScores:effectiveValue,typedValueProjected:typed.projected,typedValueFit:typed.fitQuality,typedValueBlendUsed:typed.blendUsed,typedFieldCoefficients:typed.coefficients,criticTopIndex:criticTop,criticRunnerIndex:criticRunner,criticGap,criticSpread,criticGapShare,criticTopAgreement,criticMarginMean,criticMarginStd,criticMarginSnr,criticRankingConfidence,criticAuthority,criticKlGate,criticKlMultiplier,replayEvidenceConfidence:replayEvidence.confidence,replayEvidenceSupportGate:replayEvidence.supportGate,replayEvidenceAdvantageGate:replayEvidence.advantageGate,replayEvidenceReturnDelta:replayEvidence.returnDelta,replayEvidenceZ:replayEvidence.z,replayCriticSupport:replayEvidence.critic.localSupport,replayPriorSupport:replayEvidence.prior.localSupport,replayCriticMeanReturn:replayEvidence.critic.meanReturn,replayPriorMeanReturn:replayEvidence.prior.meanReturn,replayCriticNearestMse:replayEvidence.critic.nearestMse,replayPriorNearestMse:replayEvidence.prior.nearestMse};
   }
   residualEvaluation(obs,features,temporal=null){
     if(this.q.scoreStatsObservation){
       const raw=this.q.scoreStatsObservation(obs,{temporal});
       if(raw.semanticScores&&raw.valueScores){
-        const fused=this.fusePriorValue(raw.semanticScores,raw.valueScores,raw.valueMemberScores,{temperature:this.temperature});
+        const fused=this.fusePriorValue(raw.semanticScores,raw.valueScores,raw.valueMemberScores,{temperature:this.temperature,stateSignature:raw.stateSignature});
         return{...raw,...fused,rawScores:raw.scores};
       }
       return raw;
@@ -313,7 +336,7 @@ export class SemanticResidualPolicy{
       this.teacherCalls++;this.lastTeacherStep=this.decisionCount;this.lastTeacherLatencyMs=result.ms;this.lastTeacherError=null;
       this.recordTeacherResult(obs,sem,{kind:"decode",reason:"teacher in decode path",ms:result.ms,step:this.decisionCount});
       if(useResidual&&residualEval.valueScores){
-        const direct=this.fusePriorValue(sem,residualEval.valueScores,residualEval.valueMemberScores,{temperature:this.temperature});
+        const direct=this.fusePriorValue(sem,residualEval.valueScores,residualEval.valueMemberScores,{temperature:this.temperature,stateSignature:residualEval.stateSignature});
         activeFusion={...residualEval,...direct};logits=direct.scores;epistemic=ensembleDisagreement(direct.memberScores,this.temperature);
       }else logits=useResidual?sem.map((v,i)=>v+this.residualWeight*q[i]):sem;
     }else if(mode==="adaptive"){
@@ -333,8 +356,8 @@ export class SemanticResidualPolicy{
     }
     const stats=confidenceStats(probs);this.decisionCount++;
     return{
-      actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:logits,semanticPriorScores:activeFusion.semanticScores||residualEval.semanticScores||null,valueScores:residualEval.valueScores||null,features:encoded.features,temporal:encoded.temporal,
-      valueBeta:Number(activeFusion.valueBeta||0),priorKL:Number(activeFusion.priorKL||0),valueTrust:Number(activeFusion.valueTrust||0),basePriorKlBudget:Number(activeFusion.basePriorKlBudget||0),priorKlBudget:Number(activeFusion.priorKlBudget||0),klUtilization:Number(activeFusion.klUtilization||0),valueEpistemic:Number(activeFusion.valueEpistemic||0),valueEpistemicBudget:Number(activeFusion.valueEpistemicBudget??this.valueEpistemicBudget),epistemicUtilization:Number(activeFusion.epistemicUtilization||0),valueBetaSaturated:!!activeFusion.valueBetaSaturated,typedValueScores:activeFusion.typedValueScores||null,typedValueFit:Number(activeFusion.typedValueFit||0),typedValueBlendUsed:Number(activeFusion.typedValueBlendUsed||0),typedFieldCoefficients:activeFusion.typedFieldCoefficients||null,criticTopIndex:Number(activeFusion.criticTopIndex??-1),criticRunnerIndex:Number(activeFusion.criticRunnerIndex??-1),criticGap:Number(activeFusion.criticGap||0),criticSpread:Number(activeFusion.criticSpread||0),criticGapShare:Number(activeFusion.criticGapShare||0),criticTopAgreement:Number(activeFusion.criticTopAgreement||0),criticMarginMean:Number(activeFusion.criticMarginMean||0),criticMarginStd:Number(activeFusion.criticMarginStd||0),criticMarginSnr:Number(activeFusion.criticMarginSnr||0),criticRankingConfidence:Number(activeFusion.criticRankingConfidence||0),criticAuthority:Number(activeFusion.criticAuthority||0),criticKlGate:Number(activeFusion.criticKlGate??1),criticKlMultiplier:Number(activeFusion.criticKlMultiplier||1),
+      actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:logits,semanticPriorScores:activeFusion.semanticScores||residualEval.semanticScores||null,valueScores:residualEval.valueScores||null,features:encoded.features,temporal:encoded.temporal,stateSignature:residualEval.stateSignature?new Float32Array(residualEval.stateSignature):null,
+      valueBeta:Number(activeFusion.valueBeta||0),priorKL:Number(activeFusion.priorKL||0),valueTrust:Number(activeFusion.valueTrust||0),basePriorKlBudget:Number(activeFusion.basePriorKlBudget||0),priorKlBudget:Number(activeFusion.priorKlBudget||0),klUtilization:Number(activeFusion.klUtilization||0),valueEpistemic:Number(activeFusion.valueEpistemic||0),valueEpistemicBudget:Number(activeFusion.valueEpistemicBudget??this.valueEpistemicBudget),epistemicUtilization:Number(activeFusion.epistemicUtilization||0),valueBetaSaturated:!!activeFusion.valueBetaSaturated,typedValueScores:activeFusion.typedValueScores||null,typedValueFit:Number(activeFusion.typedValueFit||0),typedValueBlendUsed:Number(activeFusion.typedValueBlendUsed||0),typedFieldCoefficients:activeFusion.typedFieldCoefficients||null,criticTopIndex:Number(activeFusion.criticTopIndex??-1),criticRunnerIndex:Number(activeFusion.criticRunnerIndex??-1),criticGap:Number(activeFusion.criticGap||0),criticSpread:Number(activeFusion.criticSpread||0),criticGapShare:Number(activeFusion.criticGapShare||0),criticTopAgreement:Number(activeFusion.criticTopAgreement||0),criticMarginMean:Number(activeFusion.criticMarginMean||0),criticMarginStd:Number(activeFusion.criticMarginStd||0),criticMarginSnr:Number(activeFusion.criticMarginSnr||0),criticRankingConfidence:Number(activeFusion.criticRankingConfidence||0),criticAuthority:Number(activeFusion.criticAuthority||0),criticKlGate:Number(activeFusion.criticKlGate??1),criticKlMultiplier:Number(activeFusion.criticKlMultiplier||1),replayEvidenceConfidence:Number(activeFusion.replayEvidenceConfidence||0),replayEvidenceSupportGate:Number(activeFusion.replayEvidenceSupportGate||0),replayEvidenceAdvantageGate:Number(activeFusion.replayEvidenceAdvantageGate||0),replayEvidenceReturnDelta:Number(activeFusion.replayEvidenceReturnDelta||0),replayEvidenceZ:Number(activeFusion.replayEvidenceZ||0),replayCriticSupport:Number(activeFusion.replayCriticSupport||0),replayPriorSupport:Number(activeFusion.replayPriorSupport||0),replayCriticMeanReturn:Number(activeFusion.replayCriticMeanReturn||0),replayPriorMeanReturn:Number(activeFusion.replayPriorMeanReturn||0),
       uncertainty:{...stats,novelty,epistemic},latencyMs:performance.now()-t0,semanticLatencyMs:semanticMs,residualLatencyMs:residualMs,
       teacherUsed,teacherPending:!!this.teacherPromise,semanticUsed,inferenceMode:mode,explorationStrategy,teacherCalls:this.teacherCalls,teacherScheduled:this.teacherScheduled,lastTeacherLatencyMs:this.lastTeacherLatencyMs
     };
