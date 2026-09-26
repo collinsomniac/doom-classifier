@@ -63,6 +63,8 @@ jobs:
         run: node tests/schema-transfer.mjs
       - name: Run task-agnostic adapter contract
         run: node tests/task-adapter-contract.mjs
+      - name: Run cross-task core reconfiguration
+        run: node tests/cross-task-reconfigure.mjs
       - name: Run typed-action factorization invariants
         run: node tests/action-factorization.mjs
       - name: Run compiled semantic vector invariants
