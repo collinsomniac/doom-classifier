@@ -1,0 +1,12 @@
+doom-classifier owned telemetry build
+
+Corresponding upstream source:
+https://github.com/lukaske/jev-doom-agent.git
+commit 318c32a24851444c1170bf083671c38723f3a35a
+
+Instrumentation source:
+engine/scripts/instrument_engine.py in the doom-classifier repository.
+
+The exact applied diff is included as telemetry.patch.
+
+Chocolate Doom is GPL-2.0-or-later. Freedoom content retains its own license.

@@ -1,0 +1,163 @@
+diff --git a/vendor/chocolate-doom/src/doom/browser_doom_bridge.c b/vendor/chocolate-doom/src/doom/browser_doom_bridge.c
+index 4521641..bd58655 100644
+--- a/vendor/chocolate-doom/src/doom/browser_doom_bridge.c
++++ b/vendor/chocolate-doom/src/doom/browser_doom_bridge.c
+@@ -15,6 +15,44 @@ extern thinker_t thinkercap;
+ static char promptfps_state[65536];
+ static int promptfps_controls;
+ 
++static unsigned int promptfps_player_damage_dealt;
++static unsigned int promptfps_player_kills;
++static unsigned int promptfps_player_pickups;
++static unsigned int promptfps_level_completions;
++static unsigned int promptfps_secret_exits;
++
++void PromptFPS_RecordPlayerDamage(int damage)
++{
++    if (damage > 0)
++        promptfps_player_damage_dealt += (unsigned int) damage;
++}
++
++void PromptFPS_RecordPlayerKill(void)
++{
++    ++promptfps_player_kills;
++}
++
++void PromptFPS_RecordPlayerPickup(void)
++{
++    ++promptfps_player_pickups;
++}
++
++void PromptFPS_RecordLevelComplete(int secret_exit)
++{
++    ++promptfps_level_completions;
++    if (secret_exit)
++        ++promptfps_secret_exits;
++}
++
++static void PromptFPS_ResetEvents(void)
++{
++    promptfps_player_damage_dealt = 0;
++    promptfps_player_kills = 0;
++    promptfps_player_pickups = 0;
++    promptfps_level_completions = 0;
++    promptfps_secret_exits = 0;
++}
++
+ enum { PF_FORWARD=1, PF_BACK=2, PF_TURN_LEFT=4, PF_TURN_RIGHT=8,
+        PF_STRAFE_LEFT=16, PF_STRAFE_RIGHT=32, PF_FIRE=64, PF_USE=128 };
+ 
+@@ -85,13 +123,18 @@ EMSCRIPTEN_KEEPALIVE const char *PromptFPS_Observation(void)
+         "\"under_fire\":%s,\"x\":%d,\"y\":%d,\"z\":%d,"
+         "\"vx\":%d,\"vy\":%d,\"angle\":%u,\"kills\":%d},"
+         "\"engine_state\":{\"gametic\":%d,\"gamestate\":%d,\"paused\":%s,\"controls\":%d},"
++        "\"events\":{\"player_damage_dealt\":%u,\"player_kills\":%u,"
++        "\"player_pickups\":%u,\"level_completions\":%u,\"secret_exits\":%u},"
+         "\"visible_enemies\":[",
+         p->mo->health, p->armorpoints, (int) p->readyweapon, p->ammo[am_clip],
+         p->ammo[am_shell], p->ammo[am_misl], p->ammo[am_cell], p->damagecount,
+         p->damagecount > 0 ? "true" : "false", p->mo->x >> FRACBITS,
+         p->mo->y >> FRACBITS, p->mo->z >> FRACBITS, p->mo->momx >> FRACBITS,
+         p->mo->momy >> FRACBITS, (unsigned int) p->mo->angle, p->killcount,
+-        gametic, gamestate, paused ? "true" : "false", promptfps_controls);
++        gametic, gamestate, paused ? "true" : "false", promptfps_controls,
++        promptfps_player_damage_dealt, promptfps_player_kills,
++        promptfps_player_pickups, promptfps_level_completions,
++        promptfps_secret_exits);
+ 
+     for (th = thinkercap.next; th != &thinkercap && n < (int) sizeof(promptfps_state) - 2048; th = th->next)
+     {
+@@ -159,6 +202,7 @@ EMSCRIPTEN_KEEPALIVE void PromptFPS_SetStart(void)
+         {224, 0}, {256, 64}, {256, -64}, {320, 0}
+     };
+     unsigned int i;
++    PromptFPS_ResetEvents();
+     G_InitNew(sk_baby, 1, 1);
+     p = &players[consoleplayer];
+     if (p->mo == NULL) return;
+diff --git a/vendor/chocolate-doom/src/doom/g_game.c b/vendor/chocolate-doom/src/doom/g_game.c
+index a012ce1..f9c12b5 100644
+--- a/vendor/chocolate-doom/src/doom/g_game.c
++++ b/vendor/chocolate-doom/src/doom/g_game.c
+@@ -75,6 +75,9 @@
+ 
+ #include "g_game.h"
+ 
++#if defined(__EMSCRIPTEN__)
++extern void PromptFPS_RecordLevelComplete(int secret_exit);
++#endif
+ 
+ #define SAVEGAMESIZE	0x2c000
+ 
+@@ -1416,6 +1419,10 @@ void G_SecretExitLevel (void)
+ void G_DoCompleted (void) 
+ { 
+     int             i; 
++
++#if defined(__EMSCRIPTEN__)
++    PromptFPS_RecordLevelComplete(secretexit ? 1 : 0);
++#endif
+ 	 
+     gameaction = ga_nothing; 
+  
+diff --git a/vendor/chocolate-doom/src/doom/p_inter.c b/vendor/chocolate-doom/src/doom/p_inter.c
+index b6e4032..b96520c 100644
+--- a/vendor/chocolate-doom/src/doom/p_inter.c
++++ b/vendor/chocolate-doom/src/doom/p_inter.c
+@@ -39,6 +39,11 @@
+ 
+ #include "p_inter.h"
+ 
++#if defined(__EMSCRIPTEN__)
++extern void PromptFPS_RecordPlayerDamage(int damage);
++extern void PromptFPS_RecordPlayerKill(void);
++extern void PromptFPS_RecordPlayerPickup(void);
++#endif
+ 
+ #define BONUSADD	6
+ 
+@@ -659,6 +664,11 @@ P_TouchSpecialThing
+ 	I_Error ("P_SpecialThing: Unknown gettable thing");
+     }
+ 	
++#if defined(__EMSCRIPTEN__)
++    if (player == &players[consoleplayer])
++        PromptFPS_RecordPlayerPickup();
++#endif
++
+     if (special->flags & MF_COUNTITEM)
+ 	player->itemcount++;
+     P_RemoveMobj (special);
+@@ -687,6 +697,12 @@ P_KillMobj
+     target->flags |= MF_CORPSE|MF_DROPOFF;
+     target->height >>= 2;
+ 
++#if defined(__EMSCRIPTEN__)
++    if (source && source->player == &players[consoleplayer]
++        && (target->flags & MF_COUNTKILL))
++        PromptFPS_RecordPlayerKill();
++#endif
++
+     if (source && source->player)
+     {
+ 	// count for intermission
+@@ -896,6 +912,19 @@ P_DamageMobj
+ 	    I_Tactile (40,10,40+temp*2);
+     }
+     
++#if defined(__EMSCRIPTEN__)
++    if (source && source->player == &players[consoleplayer]
++        && target != source && target->player == NULL
++        && (target->flags & MF_COUNTKILL))
++    {
++        int attributed_damage = damage;
++        if (attributed_damage > target->health)
++            attributed_damage = target->health;
++        if (attributed_damage > 0)
++            PromptFPS_RecordPlayerDamage(attributed_damage);
++    }
++#endif
++
+     // do the damage	
+     target->health -= damage;	
+     if (target->health <= 0)
