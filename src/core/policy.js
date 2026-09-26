@@ -199,12 +199,12 @@ export class SemanticResidualPolicy{
     this.teacherReplay.push(this.snapshotTeacherExample(obs,scores,temporal));
     if(this.teacherReplay.length>this.teacherReplayCapacity)this.teacherReplay.shift();
   }
-  applyTeacherScores(obs,scores,steps=this.distillSteps,temporal=null,{maxSteps=steps,targetKL=null}={}){
+  applyTeacherScores(obs,scores,steps=this.distillSteps,temporal=null,{maxSteps=steps,targetKL=null,strength=.5}={}){
     if(!this.q.distill)return null;
     const replay=this.replayTeacherDistillation(),teacher=softmax(scores,1);let result=null,used=0,kl=Infinity;
     const cap=Math.max(steps,Math.floor(maxSteps||steps));
     for(let i=0;i<cap;i++){
-      result=this.q.distill(obs,scores,{strength:.5,temporal});used=i+1;
+      result=this.q.distill(obs,scores,{strength,temporal});used=i+1;
       if(result?.student){kl=klDivergence(teacher,result.student);if(used>=steps&&targetKL!=null&&kl<=targetKL)break}
       if(used>=steps&&targetKL==null)break;
     }
@@ -216,7 +216,7 @@ export class SemanticResidualPolicy{
     const semantic=this.semantic,generation=this.teacherGeneration,requestedStep=this.decisionCount;
     const result=await this.semanticScores(obs,semantic);
     if(generation!==this.teacherGeneration||semantic!==this.semantic)return{stale:true,ms:result.ms};
-    const distillation=this.applyTeacherScores(obs,result.scores,steps,temporal,{maxSteps,targetKL});const calibration=this.calibrateTemperature(obs,result.scores,temporal,{blend:.65});
+    const distillation=this.applyTeacherScores(obs,result.scores,steps,temporal,{maxSteps,targetKL,strength:2});const calibration=this.calibrateTemperature(obs,result.scores,temporal,{blend:.65});
     this.teacherCalls++;this.lastTeacherStep=requestedStep;this.lastTeacherLatencyMs=result.ms;this.lastTeacherError=null;
     this.recordTeacherResult(obs,result.scores,{kind:"bootstrap",reason:"semantic bootstrap",ms:result.ms,distillation,calibration,step:requestedStep});
     return{stale:false,ms:result.ms,scores:result.scores,calibration,distillation};
