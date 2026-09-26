@@ -251,7 +251,7 @@ export class NeuralSetResidualQ{
     return state.records.map((meta,i)=>({...meta,weight:forward.weights[i]||0})).sort((a,b)=>b.weight-a.weight).slice(0,topK);
   }
 
-  fitSemanticHead(examples,{ridge=.02}={}){
+  fitSemanticHead(examples,{ridge=.002}={}){
     if(!examples?.length)return null;
     const n=this.headDim+1,matrix=new Float64Array(n*n),vector=new Float64Array(n);let rows=0;
     for(const example of examples){
