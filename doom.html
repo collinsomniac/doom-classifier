@@ -92,6 +92,16 @@
     <section class="monitor-column"><div class="monitor-head"><strong>transition / TD stream</strong><span>what the tiny model is learning from</span></div><pre id="trainingOutput" class="training-output">No decisions yet.</pre></section>
     <section class="monitor-column"><div class="monitor-head"><strong>semantic teacher transcript</strong><span>bounded JSON projection + ranked outputs; fast core sees full structured state</span></div><div id="teacherTranscript" class="teacher-transcript"><div class="teacher-empty">Prepare a semantic teacher to inspect its responses.</div></div></section>
   </div>
+  <details class="model-io" id="modelIO">
+    <summary>Inspect exact model I/O</summary>
+    <p class="caption">Fast policy: full structured object. Optional teacher: bounded JSON projection. Actions: literal controller candidates.</p>
+    <button id="refreshModelViews" class="secondary model-io-refresh">Refresh snapshots</button>
+    <div class="model-io-grid">
+      <section><div class="monitor-head"><strong>fast policy input</strong><span>full state object</span></div><pre id="policyInputJSON" class="model-io-pre">No snapshot yet.</pre></section>
+      <section><div class="monitor-head"><strong>teacher projection</strong><span>actual bounded JSON input</span></div><pre id="teacherPremise" class="model-io-pre">No snapshot yet.</pre></section>
+      <section><div class="monitor-head"><strong>typed action menu</strong><span>literal controller candidates</span></div><pre id="actionMenuJSON" class="model-io-pre">No snapshot yet.</pre></section>
+    </div>
+  </details>
 </article>
 
 <article class="panel tune-panel">
