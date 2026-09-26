@@ -28,7 +28,7 @@ assert.equal(r.teacherReplayUpdates,1);
 assert.equal(r.teacherAnchorUpdates,1);
 assert.equal(r.teacherReplaySize,1);
 assert.equal(r.teacherAnchorSize,1);
-assert.deepEqual(q.calls.slice(1).map(x=>[x.tag,x.strength]),[[1,.2],[2,.5]],"pinned bootstrap anchor must rehearse before the newest fit");
+assert.deepEqual(q.calls.slice(1,5).map(x=>[x.tag,x.strength]),[[1,.2],[2,.5],[1,.45],[1,.45]],"adaptive update must rehearse the pinned anchor both before and after fitting the newest state");
 
 r=p.applyTeacherScores({tag:3,x:.3,_collections:{}},[1,0],1,new Float32Array([.3]));
 assert.equal(r.teacherReplayUpdates,2);
