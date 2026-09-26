@@ -4,6 +4,10 @@ on:
   push:
     paths:
       - tests/doom-learning.spec.mjs
+      - src/core/neural-set-residual.js
+      - src/core/policy.js
+      - src/core/controller.js
+      - src/env/doom-wasm.js
       - .github/workflows/doom-learning.yml
   workflow_dispatch:
     inputs:
