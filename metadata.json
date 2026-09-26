@@ -1,0 +1,7 @@
+{
+  "source_commit": "8dcb2fc0bb0750bad9329194c4c07a9c3e7b8d6a",
+  "workflow_run": "36216305270",
+  "runtime_branch": "engine-runtime",
+  "quality_gate": "best staged checkpoint among semantic baseline + four 64-decision causal fine-tune stages; selected 24-step teacher-free evaluation requires kills >= baseline, return >= 70% baseline, attributed damage >= 60% baseline; exact canonical policy-output round trip in a fresh engine",
+  "teacher": "MobileBERT-MNLI with null-state label-bias calibration"
+}
