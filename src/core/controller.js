@@ -11,9 +11,15 @@ export class ExperimentController extends EventTarget{
   setHz(hz){this.hz=hz;if(this.state===ControllerState.RUNNING){this.pause();this.start()}}
   start(){if(this.state===ControllerState.RUNNING)return;this.loopVersion++;const token=this.loopVersion;this.setState(ControllerState.RUNNING);this.schedule(token,0)}
   pause(){this.loopVersion++;if(this.timer)clearTimeout(this.timer);this.timer=null;if(this.state!==ControllerState.ERROR&&this.state!==ControllerState.TUNING)this.setState(ControllerState.PAUSED)}
+  async quiesce({teacher=true}={}){
+    this.pause();
+    while(this.inFlight)await new Promise(resolve=>setTimeout(resolve,0));
+    if(teacher&&this.policy.awaitTeacher)await this.policy.awaitTeacher();
+    return true;
+  }
   schedule(token,delay){if(this.state!==ControllerState.RUNNING||token!==this.loopVersion)return;this.timer=setTimeout(async()=>{const started=performance.now();await this.tick();const remaining=Math.max(0,1000/this.hz-(performance.now()-started));this.schedule(token,remaining)},delay)}
   async reset({learning=false}={}){
-    this.loopVersion++;if(this.timer)clearTimeout(this.timer);this.timer=null;this.setState(ControllerState.RESETTING);
+    await this.quiesce({teacher:true});this.setState(ControllerState.RESETTING);
     await this.environment.reset();this.policy.resetEpisode();if(learning)this.policy.resetLearning();
     this.steps=0;this.episodes=0;this.episodeReturn=0;this.returns=[];this.trace=[];this.latencies=[];this.lastDecision=null;this.setState(ControllerState.READY);this.dispatchEvent(new Event("tick"));
   }
@@ -40,8 +46,8 @@ export class ExperimentController extends EventTarget{
     finally{this.inFlight=false}
   }
   async trainBurst({steps=128,epsilon=.16,rolloutHorizon=0,onProgress=()=>{}}={}){
-    this.loopVersion++;if(this.timer)clearTimeout(this.timer);this.timer=null;
     const previous={training:this.training,explore:this.explore,epsilon:this.policy.epsilon};
+    await this.quiesce({teacher:true});
     this.training=true;this.explore=true;this.policy.epsilon=epsilon;this.setState(ControllerState.TUNING);
     const startUpdates=this.policy.q.updates,startEpisodes=this.episodes,startStep=this.steps,startTrace=this.trace.length;let rolloutRestarts=0;
     try{

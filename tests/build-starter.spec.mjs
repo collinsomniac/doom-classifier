@@ -22,8 +22,8 @@ async function canonicalProbe(page,observation=null){
 async function frozenEval(page,steps=24){
   return page.evaluate(async steps=>{
     const {policy:p,controller:c}=window.__doomLab;
-    c.pause();c.training=false;c.explore=false;c.memory=true;c.useResidual=true;p.setInferenceMode("neural");
-    await p.awaitTeacher?.();
+    c.training=false;c.explore=false;c.memory=true;c.useResidual=true;
+    await c.quiesce({teacher:true});p.setInferenceMode("neural");
     await c.reset({learning:false});p.resetEpisode();const teacherBefore=p.teacherCalls,actions={};let reward=0,damage=0,kills=0;
     for(let i=0;i<steps;i++){
       const ok=await c.tick();if(!ok&&c.state==="ERROR")throw new Error("controller error during frozen evaluation");
