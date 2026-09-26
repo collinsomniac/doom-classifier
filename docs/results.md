@@ -357,6 +357,42 @@ A budget sweep from 0.04 through 0.32 did **not** increase value authority: the 
 
 This is a stability improvement rather than a final performance win: frozen return still trails its own pre-training baseline, but the earlier post-training collapse to zero kills was avoided.
 
+## Typed-action projection ablation
+
+The current critic can project its per-candidate Q estimates onto the schema's typed action fields and blend that structured projection back into the critic scores before fusion. This is deliberately generic: the projection uses `schema.actionFields`, not DOOM-specific button names.
+
+A fixed-policy Chromium sweep varied the maximum typed-value blend **after one 256-decision / 64-step-rollout training run**, so no retraining confounded the comparison.
+
+| typed blend | frozen return | attributed damage | kills | dominant action |
+|---:|---:|---:|---:|---|
+| 0.00 | +2.034 | 40 | 1 | fire |
+| 0.15 | +2.034 | 40 | 1 | fire |
+| 0.30 | +2.034 | 40 | 1 | fire |
+| 0.45 | +2.034 | 40 | 1 | fire |
+| 0.65 | +2.034 | 40 | 1 | fire |
+
+The mean critic top-two gap remained about **0.0040** throughout. In this particular trained state, post-hoc typed smoothing therefore did **not** change behavior. It remains useful for:
+
+- exposing reusable primitive/field preferences;
+- regularizing noisy exact-action values;
+- transferring structure to schemas with combinatorial action menus;
+- diagnosing whether compound-action disagreement is really field-level disagreement.
+
+The same trained policy was also swept over semantic KL authority:
+
+| KL budget | fused action |
+|---:|---|
+| 0.04 | fire |
+| 0.08 | fire |
+| 0.12 | fire |
+| 0.16 | strafe right + fire |
+| 0.24 | strafe right + fire |
+| 0.32 | strafe right + fire |
+
+The raw critic preferred **strafe right + fire**. At the first flip (~0.16 KL), fused ensemble disagreement was only about **0.0096**, below the current 0.025 epistemic ceiling. This isolates the remaining issue: the critic can earn enough confidence to disagree with the semantic prior, but the default semantic trust region may still be the active limiter in some states.
+
+The next trust experiment should therefore be **state-dependent**, not a global KL increase. Candidate signals now exposed by the policy include bootstrap-head top-action agreement, top-vs-runner-up critic gap, and bootstrap margin signal-to-noise ratio.
+
 ## What remains unproven
 
 The strongest missing evidence is still:
