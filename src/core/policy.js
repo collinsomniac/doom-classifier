@@ -203,10 +203,10 @@ export class SemanticResidualPolicy{
     if(!this.q.distill)return null;
     const replay=this.replayTeacherDistillation(),teacher=softmax(scores,1),current=this.snapshotTeacherExample(obs,scores,temporal);
     const headFit=this.q.fitSemanticHead?.([...this.teacherReplay,current])||null;
-    let result=null,used=0,kl=Infinity;
+    let result=null,used=0,kl=Infinity,headFitKL=Infinity;
     if(headFit&&this.q.scoreStatsObservation){
       const student=softmax(this.q.scoreStatsObservation(obs,{temporal}).semanticScores,1);
-      kl=klDivergence(teacher,student);result={teacher,student,loss:crossEntropy(teacher,student),headFit};
+      headFitKL=klDivergence(teacher,student);kl=headFitKL;result={teacher,student,loss:crossEntropy(teacher,student),headFit};
     }
     const cap=Math.max(steps,Math.floor(maxSteps||steps)),alreadyFit=targetKL!=null&&Number.isFinite(kl)&&kl<=targetKL;
     if(!alreadyFit){
@@ -218,7 +218,7 @@ export class SemanticResidualPolicy{
     }
     this.rememberTeacherExample(obs,scores,temporal);
     this.q.syncTarget?.({value:false});
-    return result?{...result,headFit,stepsUsed:used,kl,teacherReplayUpdates:replay.updates,teacherReplayMeanLoss:replay.meanLoss,teacherReplaySize:this.teacherReplay.length}:null;
+    return result?{...result,headFit,headFitKL,stepsUsed:used,kl,teacherReplayUpdates:replay.updates,teacherReplayMeanLoss:replay.meanLoss,teacherReplaySize:this.teacherReplay.length}:null;
   }
   async primeTeacher(obs,{steps=Math.max(4,this.distillSteps),maxSteps=steps,targetKL=null,temporal=null}={}){
     const semantic=this.semantic,generation=this.teacherGeneration,requestedStep=this.decisionCount;
