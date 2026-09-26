@@ -105,12 +105,13 @@ function renderTypedFields(d){
   if(!d||!fields.length){ui.typedFieldGrid.innerHTML='<div class="typed-field-empty">Field-level agreement appears after the first decision.</div>';return}
   const semantic=localSoftmax(d.semanticPriorScores||[],Math.max(.25,policy.temperature||1));
   const valueScores=d.valueScores||[],mean=valueScores.reduce((a,b)=>a+Number(b||0),0)/Math.max(1,valueScores.length),variance=valueScores.reduce((a,b)=>a+(Number(b||0)-mean)**2,0)/Math.max(1,valueScores.length),scale=Math.max(.02,Math.sqrt(variance));
-  const value=localSoftmax(valueScores,scale),fused=d.probs||[];
+  const value=localSoftmax(valueScores,scale),typedScores=d.typedValueScores||valueScores,typedMean=typedScores.reduce((a,b)=>a+Number(b||0),0)/Math.max(1,typedScores.length),typedVariance=typedScores.reduce((a,b)=>a+(Number(b||0)-typedMean)**2,0)/Math.max(1,typedScores.length),typedScale=Math.max(.02,Math.sqrt(typedVariance)),typed=localSoftmax(typedScores,typedScale),fused=d.probs||[];
   const branch=(name,item,cls="")=>'<div class="typed-branch '+cls+'"><span>'+name+'</span><div class="typed-meter"><i style="width:'+(item.strength*100).toFixed(1)+'%"></i></div><b>'+escapeHtml(item.label)+'</b></div>';
+  const coefficientFor=field=>Number((d.typedFieldCoefficients||[]).find(x=>x.id===field.id)?.weight||0);
   ui.typedFieldGrid.innerHTML=fields.map(field=>{
-    const prior=fieldExpectation(field,semantic),learned=fieldExpectation(field,value),final=fieldExpectation(field,fused),spread=Math.max(prior.strength,learned.strength,final.strength)-Math.min(prior.strength,learned.strength,final.strength);
+    const prior=fieldExpectation(field,semantic),raw=fieldExpectation(field,value),structured=fieldExpectation(field,typed),final=fieldExpectation(field,fused),spread=Math.max(prior.strength,structured.strength,final.strength)-Math.min(prior.strength,structured.strength,final.strength),coef=coefficientFor(field);
     const cls=spread>.25?"field-disagree":spread<.08?"field-agree":"";
-    return '<div class="typed-field '+cls+'" title="branch spread '+spread.toFixed(3)+'"><strong>'+escapeHtml(field.label||field.id)+'</strong><div class="typed-field-values">'+branch("prior",prior)+branch("value",learned,"field-value")+branch("fused",final,"field-fused")+'</div></div>';
+    return '<div class="typed-field '+cls+'" title="branch spread '+spread.toFixed(3)+'"><div class="typed-field-title"><strong>'+escapeHtml(field.label||field.id)+'</strong><em>ΔQ '+(coef>=0?"+":"")+coef.toFixed(3)+'</em></div><div class="typed-field-values">'+branch("prior",prior)+branch("raw Q",raw,"field-raw")+branch("typed Q",structured,"field-value")+branch("fused",final,"field-fused")+'</div></div>';
   }).join("");
 }
 function setArchNode(id,{active=false,hot=false,pending=false,learning=false,value=null}={}){
