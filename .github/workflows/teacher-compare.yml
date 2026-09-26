@@ -4,11 +4,19 @@ on:
   push:
     paths:
       - tests/teacher-compare.spec.mjs
+      - src/model-adapters/transformers-nli.js
+      - src/core/policy.js
+      - src/core/neural-set-residual.js
+      - src/doom-main.js
       - .github/workflows/teacher-compare.yml
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: teacher-comparison
+  cancel-in-progress: true
 
 jobs:
   compare:
