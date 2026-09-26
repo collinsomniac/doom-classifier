@@ -83,7 +83,19 @@
     <div class="arch-node" data-arch="actuator"><span class="arch-tag">ACTUATION</span><strong>Environment control</strong><small class="arch-value">idle</small></div>
   </div>
   <div class="arch-feedback"><span>↺ causal feedback</span><strong id="archFeedback">reward/events feed the consequence branch; teacher supervision feeds only the semantic prior</strong></div>
-  <div class="typed-field-head"><strong>typed action fields</strong><span>semantic prior · raw critic · typed projection · fused policy</span></div><div id="typedFieldGrid" class="typed-field-grid"><div class="typed-field-empty">Field-level agreement appears after the first decision.</div></div>
+  <div class="typed-field-head"><strong>typed action flow</strong><span>exact-action critic → reusable primitive structure → trust-gated fused action</span></div>
+  <div id="typedTrace" class="typed-trace" aria-label="typed action projection trace">
+    <div class="typed-stage"><span>raw critic</span><strong id="typedRawTop">—</strong><small id="typedRawMeta">exact-action values</small></div>
+    <div class="typed-stage-arrow">→</div>
+    <div class="typed-stage"><span>typed projector</span><strong id="typedProjector">—</strong><small id="typedProjectorMeta">fit / blend</small></div>
+    <div class="typed-stage-arrow">→</div>
+    <div class="typed-stage"><span>strongest field</span><strong id="typedStrongField">—</strong><small id="typedStrongFieldMeta">primitive coefficient</small></div>
+    <div class="typed-stage-arrow">→</div>
+    <div class="typed-stage"><span>trust</span><strong id="typedTrust">—</strong><small id="typedTrustMeta">ensemble authority</small></div>
+    <div class="typed-stage-arrow">→</div>
+    <div class="typed-stage typed-stage-final"><span>fused action</span><strong id="typedFused">—</strong><small id="typedFusedMeta">executed distribution</small></div>
+  </div>
+  <div class="typed-field-head typed-field-subhead"><strong>primitive field detail</strong><span>prior · raw Q · projected Q · final policy</span></div><div id="typedFieldGrid" class="typed-field-grid"><div class="typed-field-empty">Field-level agreement appears after the first decision.</div></div>
 </article>
 
 <article class="panel monitor-panel">

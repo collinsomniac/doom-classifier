@@ -43,6 +43,10 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   await expect(page.locator("#attentionList .attention-row").first()).toBeVisible();
   await expect(page.locator("#trainingOutput")).toContainText("s0001");
   await expect(page.locator('[data-arch="actions"]')).toHaveClass(/hot/);
+  await expect(page.locator("#typedTrace")).toBeVisible();
+  await expect(page.locator("#typedRawTop")).not.toHaveText("—");
+  await expect(page.locator("#typedProjector")).toContainText("fit");
+  await expect(page.locator("#typedFused")).not.toHaveText("—");
   await expect(page.locator("#typedFieldGrid .typed-field")).toHaveCount(8);
 
   const semanticProbes=await page.evaluate(async()=>{

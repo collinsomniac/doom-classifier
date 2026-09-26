@@ -18,7 +18,7 @@ const ui={
   bars:$("actionBars"),chosen:$("chosenAction"),chosenSemantic:$("chosenSemantic"),chosenValue:$("chosenValue"),chosenScore:$("chosenScore"),intentFire:$("intentFire"),intentStrafe:$("intentStrafe"),intentTurn:$("intentTurn"),intentForward:$("intentForward"),intentBack:$("intentBack"),intentUse:$("intentUse"),entropy:$("entropy"),margin:$("margin"),epistemic:$("epistemic"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),
   attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),decodeTemp:$("decodeTemp"),replaySize:$("replaySize"),teacherReplaySize:$("teacherReplaySize"),valueBeta:$("valueBeta"),priorKL:$("priorKL"),klUtilization:$("klUtilization"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),
   schemaCompile:$("schemaCompileBtn"),schemaStatus:$("schemaStatus"),state:$("stateTable"),objective:$("objectiveText"),steps:$("steps"),episodes:$("episodes"),ret:$("return"),updates:$("updates"),lastReward:$("lastReward"),damageDealt:$("damageDealt"),hostileHpLoss:$("hostileHpLoss"),damageReceived:$("damageReceived"),combatAttribution:$("combatAttribution"),
-  architecture:$("architectureFlow"),archMode:$("archMode"),archFeedback:$("archFeedback"),typedFieldGrid:$("typedFieldGrid"),trainingModeBadge:$("trainingModeBadge"),trainingOutput:$("trainingOutput"),teacherTranscript:$("teacherTranscript"),
+  architecture:$("architectureFlow"),archMode:$("archMode"),archFeedback:$("archFeedback"),typedTrace:$("typedTrace"),typedRawTop:$("typedRawTop"),typedRawMeta:$("typedRawMeta"),typedProjector:$("typedProjector"),typedProjectorMeta:$("typedProjectorMeta"),typedStrongField:$("typedStrongField"),typedStrongFieldMeta:$("typedStrongFieldMeta"),typedTrust:$("typedTrust"),typedTrustMeta:$("typedTrustMeta"),typedFused:$("typedFused"),typedFusedMeta:$("typedFusedMeta"),typedFieldGrid:$("typedFieldGrid"),trainingModeBadge:$("trainingModeBadge"),trainingOutput:$("trainingOutput"),teacherTranscript:$("teacherTranscript"),
   log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot")
 };
 let env=null,policy=null,controller=null,hashSemantic=null;
@@ -103,12 +103,30 @@ function fieldExpectation(field,dist){
 }
 function renderTypedFields(d){
   if(!ui.typedFieldGrid||!policy)return;const fields=policy.schema.actionFields||[];
-  if(!d||!fields.length){ui.typedFieldGrid.innerHTML='<div class="typed-field-empty">Field-level agreement appears after the first decision.</div>';return}
+  if(!d||!fields.length){
+    ui.typedFieldGrid.innerHTML='<div class="typed-field-empty">Field-level agreement appears after the first decision.</div>';
+    for(const element of [ui.typedRawTop,ui.typedProjector,ui.typedStrongField,ui.typedTrust,ui.typedFused])if(element)element.textContent="—";
+    return
+  }
   const semantic=localSoftmax(d.semanticPriorScores||[],Math.max(.25,policy.temperature||1));
   const valueScores=d.valueScores||[],mean=valueScores.reduce((a,b)=>a+Number(b||0),0)/Math.max(1,valueScores.length),variance=valueScores.reduce((a,b)=>a+(Number(b||0)-mean)**2,0)/Math.max(1,valueScores.length),scale=Math.max(.02,Math.sqrt(variance));
   const value=localSoftmax(valueScores,scale),typedScores=d.typedValueScores||valueScores,typedMean=typedScores.reduce((a,b)=>a+Number(b||0),0)/Math.max(1,typedScores.length),typedVariance=typedScores.reduce((a,b)=>a+(Number(b||0)-typedMean)**2,0)/Math.max(1,typedScores.length),typedScale=Math.max(.02,Math.sqrt(typedVariance)),typed=localSoftmax(typedScores,typedScale),fused=d.probs||[];
   const branch=(name,item,cls="")=>'<div class="typed-branch '+cls+'"><span>'+name+'</span><div class="typed-meter"><i style="width:'+(item.strength*100).toFixed(1)+'%"></i></div><b>'+escapeHtml(item.label)+'</b></div>';
   const coefficientFor=field=>Number((d.typedFieldCoefficients||[]).find(x=>x.id===field.id)?.weight||0);
+  const rawTopIndex=valueScores.length?valueScores.reduce((best,v,i,a)=>Number(v)>Number(a[best])?i:best,0):-1;
+  const rawTop=rawTopIndex>=0?policy.actions[rawTopIndex]:null;
+  const strongest=[...(d.typedFieldCoefficients||[])].sort((a,b)=>Math.abs(Number(b.weight||0))-Math.abs(Number(a.weight||0)))[0]||null;
+  if(ui.typedRawTop)ui.typedRawTop.textContent=rawTop?rawTop.id:"—";
+  if(ui.typedRawMeta)ui.typedRawMeta.textContent=rawTop?("Q "+Number(valueScores[rawTopIndex]||0).toFixed(4)+" · gap "+Number(d.criticGap||0).toFixed(4)):"exact-action values";
+  if(ui.typedProjector)ui.typedProjector.textContent=(Number(d.typedValueFit||0)*100).toFixed(0)+"% fit";
+  if(ui.typedProjectorMeta)ui.typedProjectorMeta.textContent=(Number(d.typedValueBlendUsed||0)*100).toFixed(0)+"% structured blend";
+  if(ui.typedStrongField)ui.typedStrongField.textContent=strongest?(strongest.id+" "+(Number(strongest.weight||0)>=0?"+":"")+Number(strongest.weight||0).toFixed(3)):"—";
+  if(ui.typedStrongFieldMeta)ui.typedStrongFieldMeta.textContent=strongest?"learned primitive coefficient":"primitive coefficient";
+  if(ui.typedTrust)ui.typedTrust.textContent=(Number(d.criticAuthority||0)*100).toFixed(0)+"% authority";
+  if(ui.typedTrustMeta)ui.typedTrustMeta.textContent="heads "+(Number(d.criticTopAgreement||0)*100).toFixed(0)+"% · SNR "+Number(d.criticMarginSnr||0).toFixed(1)+" · KL "+Number(d.priorKlBudget||0).toFixed(3);
+  if(ui.typedFused)ui.typedFused.textContent=d.action?.id||"—";
+  if(ui.typedFusedMeta)ui.typedFusedMeta.textContent="p "+Number(d.probs?.[d.actionIndex]||0).toFixed(3)+" · β "+Number(d.valueBeta||0).toFixed(2);
+  ui.typedTrace?.classList.toggle("typed-trace-disagree",!!rawTop&&rawTop.id!==d.action?.id);
   ui.typedFieldGrid.innerHTML=fields.map(field=>{
     const prior=fieldExpectation(field,semantic),raw=fieldExpectation(field,value),structured=fieldExpectation(field,typed),final=fieldExpectation(field,fused),spread=Math.max(prior.strength,structured.strength,final.strength)-Math.min(prior.strength,structured.strength,final.strength),coef=coefficientFor(field);
     const cls=spread>.25?"field-disagree":spread<.08?"field-agree":"";
