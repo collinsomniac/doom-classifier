@@ -153,3 +153,11 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
 @media(max-width:420px){.typed-field-grid{grid-template-columns:1fr}}
 
 .checkpoint-controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}.checkpoint-controls button{flex:1 1 150px}.checkpoint-controls+.model-status{margin-top:7px}
+
+.model-io{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.model-io>summary{cursor:pointer;font:800 11px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em;color:#cbd5df}
+.model-io-refresh{margin:8px 0}
+.model-io-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.model-io-grid section{min-width:0;border:1px solid #202731;border-radius:10px;background:#090d12;padding:9px}
+.model-io-pre{margin:0;max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:9.5px;line-height:1.45;background:#05080b;color:#b7c2cd}
+@media(max-width:1050px){.model-io-grid{grid-template-columns:1fr}}
