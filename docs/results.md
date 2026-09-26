@@ -316,6 +316,47 @@ However, frozen performance still regressed:
 
 The important negative result is that more causal experience alone does not solve policy improvement. The critic can consume the full KL authority while its bootstrap members still disagree. This motivated a second, state-dependent trust constraint that bounds value authority by critic epistemic disagreement in addition to prior KL.
 
+## Dual-trust policy fusion benchmark
+
+The repeated-rollout experiment showed that a KL budget alone could grant full policy authority while the critic's bootstrap members still disagreed. The current fusion therefore constrains learned value by **two state-dependent trust boundaries**:
+
+1. KL divergence from the semantic prior;
+2. bootstrap-ensemble epistemic disagreement.
+
+On the same 256-decision / 64-step-rollout setup:
+
+### Frozen before training
+
+- return: **+2.626**
+- player-attributed hostile damage: **70**
+- player-attributed kills: **1**
+- dominant action: **fire**
+
+### Training
+
+- player-attributed hostile damage: **170**
+- player-attributed kills: **2**
+- causal attribution: **256 / 256 decisions**
+- value/replay updates: **765**
+- rollout restarts: **3**
+- action diversity: **15 / 15**
+
+### Frozen after training
+
+- return: **+2.141**
+- player-attributed hostile damage: **45**
+- player-attributed kills: **1**
+- dominant action: **forward + fire** (22 / 24)
+- mean prior KL: **0.0330**
+- mean KL-budget utilization: **41.3%**
+- mean epistemic disagreement: **~0.0250**, at the configured critic trust cap
+- mean value top-two gap: **~0.00077**
+- p95 decision time: **~7.58 ms**
+
+A budget sweep from 0.04 through 0.32 did **not** increase value authority: the epistemic limit bound first at beta ~222 and prior KL ~0.026. This is the intended behavior. Raising the semantic KL allowance cannot force an uncertain critic to dominate.
+
+This is a stability improvement rather than a final performance win: frozen return still trails its own pre-training baseline, but the earlier post-training collapse to zero kills was avoided.
+
 ## What remains unproven
 
 The strongest missing evidence is still:
