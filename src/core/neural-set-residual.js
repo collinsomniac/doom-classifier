@@ -339,12 +339,18 @@ export class NeuralSetResidualQ{
   }
   updateTransition({observation,temporal=null,actionIndex,reward,nextObservation,nextTemporal=null,done=false,bootstrapDiscount=null}){
     const current=this.encodeState(observation,{cache:false,temporal}),chosen=this.actionForward(current,actionIndex);
-    const bootstrapModel=this.targetNet||this,nextScores=done?[]:bootstrapModel.valueScoresObservation(nextObservation,{temporal:nextTemporal});
-    const discount=bootstrapDiscount==null?this.gamma:Number(bootstrapDiscount);
-    const target=reward+(done?0:discount*Math.max(...nextScores)),td=clamp(target-chosen.valueScore,-4,4);
+    const bootstrapModel=this.targetNet||this,discount=bootstrapDiscount==null?this.gamma:Number(bootstrapDiscount);
+    let bootstrapActionIndex=-1,bootstrapValue=0;
+    if(!done){
+      const onlineNext=this.valueScoresObservation(nextObservation,{temporal:nextTemporal});
+      bootstrapActionIndex=0;for(let i=1;i<onlineNext.length;i++)if(Number(onlineNext[i])>Number(onlineNext[bootstrapActionIndex]))bootstrapActionIndex=i;
+      const targetNext=bootstrapModel.valueScoresObservation(nextObservation,{temporal:nextTemporal});
+      bootstrapValue=Number(targetNext[bootstrapActionIndex]||0);
+    }
+    const target=reward+(done?0:discount*bootstrapValue),td=clamp(target-chosen.valueScore,-4,4);
     this.zeroGrad();this.backwardValue(chosen,-td,{bootstrap:true});this.applyLayers(this.valueLayers);this.updates++;
     if(this.targetNet&&this.updates%this.targetSyncInterval===0)this.syncTarget();
-    return{td,target,q:chosen.valueScore,combined:chosen.score,semantic:chosen.semanticScore,targetNetwork:!!this.targetNet,targetSyncs:this.targetSyncs};
+    return{td,target,q:chosen.valueScore,combined:chosen.score,semantic:chosen.semanticScore,targetNetwork:!!this.targetNet,targetSyncs:this.targetSyncs,bootstrapActionIndex,bootstrapValue,doubleDqn:!!this.targetNet};
   }
   distill(observation,teacherScores,{strength=.35,temporal=null}={}){
     if(!teacherScores||teacherScores.length!==this.actions.length)return null;

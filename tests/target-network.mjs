@@ -12,7 +12,15 @@ const live0=net.scoresObservation(obs),target0=net.targetNet.scoresObservation(o
 assert.deepEqual(live0,target0,"target should begin synchronized");
 
 const transition={observation:obs,temporal:null,actionIndex:0,reward:.7,nextObservation:next,nextTemporal:null,done:false};
+const onlineValue=net.valueScoresObservation.bind(net),targetValue=net.targetNet.valueScoresObservation.bind(net);
+net.valueScoresObservation=(observation,opts)=>observation===next?[1,0]:onlineValue(observation,opts);
+net.targetNet.valueScoresObservation=(observation,opts)=>observation===next?[0,5]:targetValue(observation,opts);
 const one=net.updateTransition(transition);
+net.valueScoresObservation=onlineValue;net.targetNet.valueScoresObservation=targetValue;
+assert.equal(one.doubleDqn,true);
+assert.equal(one.bootstrapActionIndex,0,"online critic must select the bootstrap action");
+assert.equal(one.bootstrapValue,0,"target critic must evaluate the online-selected action instead of taking its own maximum");
+assert.ok(Math.abs(one.target-.7)<1e-9,"disagreed target-network maximum must not inflate the TD target");
 const live1=net.scoresObservation(obs),target1=net.targetNet.scoresObservation(obs);
 const drift1=Math.max(...live1.map((v,i)=>Math.abs(v-target1[i])));
 assert.ok(drift1>1e-8,"online network should diverge between target syncs");
