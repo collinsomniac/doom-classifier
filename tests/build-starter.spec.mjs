@@ -5,7 +5,7 @@ import {dirname,resolve} from "node:path";
 test.setTimeout(720000);
 
 async function boot(page){
-  await page.goto("http://127.0.0.1:8000/doom.html",{waitUntil:"domcontentloaded"});
+  await page.goto("http://127.0.0.1:8000/doom.html?starter=off",{waitUntil:"domcontentloaded"});
   await page.locator("#bootBtn").click();
   await expect(page.locator("#runtimeStatus")).toContainText("ENGINE READY",{timeout:120000});
 }
