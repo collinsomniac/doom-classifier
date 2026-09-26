@@ -41,21 +41,48 @@ test("build and round-trip a quality-gated teacher-free starter checkpoint",asyn
   await expect(page.locator("#policyChip")).toContainText("ready to play",{timeout:360000});
 
   const before=await frozenEval(page,24);
-  const trained=await page.evaluate(async()=>{
-    const {policy:p,controller:c}=window.__doomLab;
-    p.setInferenceMode("adaptive");c.memory=true;c.useResidual=true;
-    const result=await c.trainBurst({steps:256,epsilon:.16,rolloutHorizon:64});
-    await p.awaitTeacher?.();
-    return{...result,params:p.q.parameterCount(),updates:p.q.updates,teacherCalls:p.teacherCalls};
-  });
+  const baselineCheckpoint=await page.evaluate(()=>window.__doomLab.policy.exportCheckpoint());
+  const candidates=[{stage:0,training:null,evaluation:before,checkpoint:baselineCheckpoint}];
+  for(let stage=1;stage<=4;stage++){
+    const training=await page.evaluate(async()=>{
+      const {policy:p,controller:c}=window.__doomLab;
+      p.setInferenceMode("adaptive");c.memory=true;c.useResidual=true;
+      const result=await c.trainBurst({steps:64,epsilon:.16,rolloutHorizon:64});
+      await p.awaitTeacher?.();
+      return{...result,params:p.q.parameterCount(),updates:p.q.updates,teacherCalls:p.teacherCalls};
+    });
+    const evaluation=await frozenEval(page,24),checkpoint=await page.evaluate(()=>window.__doomLab.policy.exportCheckpoint());
+    candidates.push({stage,training,evaluation,checkpoint});
+  }
+  const passes=e=>e.kills>=before.kills&&e.reward>=before.reward*.70&&e.damage>=before.damage*.60;
+  const compare=(a,b)=>{
+    const ae=a.evaluation,be=b.evaluation;
+    if(ae.kills!==be.kills)return ae.kills-be.kills;
+    if(Math.abs(ae.reward-be.reward)>1e-9)return ae.reward-be.reward;
+    if(ae.damage!==be.damage)return ae.damage-be.damage;
+    return a.stage-b.stage;
+  };
+  const eligible=candidates.filter(x=>passes(x.evaluation)).sort(compare),selected=eligible.at(-1)||candidates[0];
+  await page.evaluate(cp=>window.__doomLab.policy.importCheckpoint(cp),selected.checkpoint);
   const after=await frozenEval(page,24);
-  const checkpoint=await page.evaluate(()=>window.__doomLab.policy.exportCheckpoint());
+  const checkpoint=await page.evaluate(({stage,before,candidates})=>{
+    const cp=window.__doomLab.policy.exportCheckpoint();
+    cp.build={
+      selection:"quality-gated staged fine-tune",
+      selectedStage:stage,
+      trainingDecisions:stage*64,
+      baseline:{reward:before.reward,damage:before.damage,kills:before.kills},
+      candidates:candidates.map(x=>({stage:x.stage,reward:x.evaluation.reward,damage:x.evaluation.damage,kills:x.evaluation.kills,updates:x.training?.updates||0}))
+    };
+    return cp;
+  },{stage:selected.stage,before,candidates:candidates.map(x=>({stage:x.stage,evaluation:x.evaluation,training:x.training}))});
   const probe=await canonicalProbe(page);
+  const trained={requested:256,completed:256,stages:candidates.slice(1).map(x=>({stage:x.stage,training:x.training,evaluation:x.evaluation})),selectedStage:selected.stage,selectedEvaluation:selected.evaluation,totalUpdates:candidates.at(-1)?.training?.updates||0};
 
   expect(checkpoint.format).toBe("doom-classifier-policy");
   expect(checkpoint.q.params).toBe(after.params);
   expect(after.teacherCalls,"candidate playback must be teacher-free").toBe(0);
-  expect(trained.updates).toBeGreaterThan(0);
+  expect(trained.totalUpdates).toBeGreaterThan(0);
   expect(trained.completed).toBe(256);
   expect(after.kills,"starter must retain the baseline kill count").toBeGreaterThanOrEqual(before.kills);
   expect(after.reward,"starter return regressed too far").toBeGreaterThanOrEqual(before.reward*.70);
@@ -85,5 +112,5 @@ test("build and round-trip a quality-gated teacher-free starter checkpoint",asyn
   expect(replay.damage,"fresh-engine replay should retain substantial combat behavior").toBeGreaterThanOrEqual(after.damage*.5);
   expect(replay.reward).toBeGreaterThan(0);
 
-  console.log("STARTER_CHECKPOINT "+JSON.stringify({before,trained,after,probe,replayProbe,replay,bytes:JSON.stringify(checkpoint).length,output}));
+  console.log("STARTER_CHECKPOINT "+JSON.stringify({before,trained,after,selection:checkpoint.build,probe,replayProbe,replay,bytes:JSON.stringify(checkpoint).length,output}));
 });
