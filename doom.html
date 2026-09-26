@@ -90,7 +90,7 @@
   <div class="panel-head"><div><p class="kicker">LIVE LEARNING MONITOR</p><h2>Training updates + teacher responses</h2></div><div id="trainingModeBadge" class="choice">idle</div></div>
   <div class="monitor-grid">
     <section class="monitor-column"><div class="monitor-head"><strong>transition / TD stream</strong><span>what the tiny model is learning from</span></div><pre id="trainingOutput" class="training-output">No decisions yet.</pre></section>
-    <section class="monitor-column"><div class="monitor-head"><strong>semantic teacher transcript</strong><span>real scorer inputs and ranked outputs</span></div><div id="teacherTranscript" class="teacher-transcript"><div class="teacher-empty">Prepare a semantic teacher to inspect its responses.</div></div></section>
+    <section class="monitor-column"><div class="monitor-head"><strong>semantic teacher transcript</strong><span>bounded JSON projection + ranked outputs; fast core sees full structured state</span></div><div id="teacherTranscript" class="teacher-transcript"><div class="teacher-empty">Prepare a semantic teacher to inspect its responses.</div></div></section>
   </div>
 </article>
 
@@ -98,6 +98,7 @@
   <div class="panel-head"><div><p class="kicker">OPTIONAL BROWSER FINE-TUNE</p><h2>Learn from real Doom transitions</h2></div><div id="tuneBadge" class="choice">not trained</div></div>
   <p class="help">The default project-owned engine exposes causal event counters, so training can reward player-attributed hostile damage/kills, successful pickups, level completion, survival, and policy-blind exploration without tactical rules such as “enemy visible → fire.” Consequences use a 4-step discounted return. Add <code>?runtime=borrowed</code> to compare against the older attribution-limited bridge.</p>
   <div class="model-controls"><select id="tuneSteps" disabled><option value="64">64 decisions — quick</option><option value="128" selected>128 decisions — recommended</option><option value="256">256 decisions — longer</option></select><button id="tuneBtn" disabled>Train then freeze</button><button id="evalBtn" class="secondary" disabled>Evaluate frozen (48)</button></div>
+  <div class="checkpoint-controls"><button id="loadStarterBtn" class="secondary" disabled>Load bundled starter</button><button id="loadSavedBtn" class="secondary" disabled>Load browser-saved</button><button id="saveCheckpointBtn" class="secondary" disabled>Save current</button><button id="exportCheckpointBtn" class="secondary" disabled>Export checkpoint</button></div><div id="checkpointStatus" class="model-status">Boot the engine to load or save a portable policy checkpoint.</div>
   <progress id="tuneProgress" max="100" value="0"></progress><div id="tuneStatus" class="model-status">Preparation required.</div><div id="evalResults" class="eval-results"><span>Run a frozen evaluation before and after training to compare behavior.</span></div>
 </article>
 
