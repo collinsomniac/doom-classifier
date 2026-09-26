@@ -15,7 +15,8 @@ assert.ok(Math.max(...pistol.map((v,i)=>Math.abs(v-shotgun[i])))>1e-7,"categoric
 
 const teacher=new TransformersNLIAdapter();
 teacher.compile(schema,actions);
-const text=teacher.stateText({tool:1,_collections:{}});
-assert.match(text,/equipped tool=pistol \(code 1\)/);
-assert.doesNotMatch(text,/equipped tool=1\.000/);
+const text=teacher.stateText({tool:1,_collections:{}}),payload=JSON.parse(text);
+assert.deepEqual(payload.observation.scalars.tool,{value:1,label:"pistol"});
+assert.equal(payload.objective,"choose an appropriate operation");
+assert.equal(payload.projection.bounded,true);
 console.log(JSON.stringify({ok:true,pistol,shotgun,text}));
