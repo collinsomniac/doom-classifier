@@ -41,7 +41,7 @@ The page may also mount a user-owned Doom IWAD locally in browser memory.
 
 Model: **SchemaSemanticValueSetNet**
 
-Current trainable parameters: **7,316**
+Current trainable parameters: **7,971**
 
 Components:
 
@@ -51,9 +51,10 @@ Components:
 - mean/max set summary;
 - state-conditioned action attention;
 - typed action parameters;
-- semantic-prior head;
-- separate consequence-value hidden branch;
-- three bootstrap value heads.
+- semantic-prior head plus a tiny semantic calibration residual;
+- separate low-rank reward-specific value residual;
+- three bootstrap value heads;
+- delayed target network and n-step replay.
 
 A regression test confirms reward-only learning does not alter the semantic-prior logits:
 
@@ -67,7 +68,7 @@ A regression test confirms reward-only learning does not alter the semantic-prio
 Latest GitHub Actions CPU stress sample:
 
 - records: 768
-- parameters: 7,316
+- parameters: 7,971
 - p50: **7.45 ms**
 - p95: **9.82 ms**
 
@@ -207,19 +208,11 @@ These categories affect both schema-compiled neural representations and teacher 
 
 They are factual telemetry, not strategy.
 
-## Progress signal
+## Progress and causal events
 
-The borrowed bridge does not expose explicit level completion progress.
+The project-owned runtime now exposes monotonic native counters for player-attributed hostile damage, player-attributed kills, successful pickups, level completions, and secret exits. The browser adapter differences those counters per transition before reward learning.
 
-The current interim reward includes a small first-visit bonus for new coarse player-position cells.
-
-The observation also exposes:
-
-- distinct visited cells;
-- current-cell revisit count;
-- exploration novelty.
-
-This supplies a route-agnostic progress signal without a pathfinder or scripted navigation policy.
+Spatial first-visit novelty remains a small task-agnostic exploration signal. The observation also exposes distinct visited cells, current-cell revisit count, and exploration novelty. No pathfinder or scripted navigation policy is used.
 
 ## Temporal and attention invariants
 
@@ -296,6 +289,33 @@ The project-owned Chocolate Doom WASM runtime is now the default demo runtime. A
 
 The important result is not an improved score yet. It is that the consequence branch is now trained and evaluated against **engine-attributed causal combat events**, while the frozen fast path still runs without teacher calls. The remaining behavioral bottleneck is action separation: the value head shifts strongly during training, but KL-constrained fusion still preserves a dominant semantic-prior action in the frozen encounter.
 
+## Repeated-rollout causal benchmark
+
+A 256-decision fine-tune with a **64-decision rollout horizon** resets the environment three times during training so the learner sees repeated informative starting encounters instead of spending most of the longer run wandering after the initial combat.
+
+On the 7,971-parameter reward-residual model:
+
+- attributed hostile damage during training: **180**
+- player-attributed kills: **4**
+- causal attribution ticks: **256 / 256**
+- value/replay updates: **765**
+- action diversity: **15 / 15**
+- rollout restarts: **3**
+- teacher refreshes: **32**
+
+This doubled attributed damage relative to the earlier 256-step continuous run (90) and increased kills from 3 to 4, confirming that bounded rollouts improve training-data density.
+
+However, frozen performance still regressed:
+
+- before training: **+2.236**, 55 attributed damage, 1 kill, dominant **forward + fire**
+- after training: **+0.776**, 40 attributed damage, 0 kills, dominant **fire**
+- value/prior top-action agreement: **0**
+- mean post-training value top-two gap: only **~0.00045**
+- mean fused ensemble disagreement: **~0.048**
+- KL budget utilization: essentially **100%**
+
+The important negative result is that more causal experience alone does not solve policy improvement. The critic can consume the full KL authority while its bootstrap members still disagree. This motivated a second, state-dependent trust constraint that bounds value authority by critic epistemic disagreement in addition to prior KL.
+
 ## What remains unproven
 
 The strongest missing evidence is still:
@@ -306,14 +326,14 @@ The strongest missing evidence is still:
 4. teacher-query rate vs competence over longer training;
 5. Brier / log-score / ECE calibration;
 6. cross-map generalization;
-7. non-DOOM transfer;
+7. broader non-DOOM transfer beyond the current workload-routing adapter;
 8. controlled comparison against Laya/Jev on equivalent typed-decision tasks.
 
 ## Next experiments
 
-- rerun real-DOOM fine-tune benchmark with named entity/projectile semantics + spatial novelty;
-- compare MobileBERT, DistilBERT and DeBERTa teacher state sensitivity;
-- add previous-action / identity-aware record recurrence;
-- build a project-owned telemetry engine artifact with level-completion, item/secret, projectile and damage-attribution events;
+- compare dual KL + epistemic trust against the repeated-rollout baseline;
+- test schema-driven factored/typed action-value projection before integrating it into live fusion;
+- expand real-DOOM evaluation across seeds/maps and level completion;
 - train/distill a decision-specialized teacher rather than relying on generic MNLI;
-- create a portable tiny checkpoint and measure cold-start vs prepared performance.
+- publish a validated portable tiny starter checkpoint and measure cold-start vs prepared performance;
+- extend the existing non-DOOM workload-routing transfer test to additional structured tasks.
