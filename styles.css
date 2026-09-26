@@ -135,3 +135,19 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
   .lab-grid>.monitor-panel{order:3}
   .lab-grid>.control-panel{order:4}
 }
+
+
+.typed-field-head{display:flex;justify-content:space-between;gap:12px;align-items:baseline;margin-top:12px;padding-top:11px;border-top:1px solid var(--line)}
+.typed-field-head strong{font:800 10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em;color:#c5d0da}
+.typed-field-head span{color:var(--muted);font-size:.65rem}
+.typed-field-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:7px;margin-top:8px}
+.typed-field-empty{grid-column:1/-1;border:1px dashed #29323d;border-radius:9px;padding:11px;color:var(--muted);font-size:.68rem}
+.typed-field{border:1px solid #222c36;background:#090d12;border-radius:9px;padding:8px}
+.typed-field>strong{display:block;font-size:.68rem;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.typed-field-values{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}
+.typed-field-values div{min-width:0;border-radius:6px;background:#0f151c;padding:5px 6px}
+.typed-field-values span{display:block;color:var(--muted);font:8px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.05em}
+.typed-field-values b{display:block;margin-top:2px;font:700 10px ui-monospace,monospace;color:#c6d0da;overflow:hidden;text-overflow:ellipsis}
+.typed-field-values .field-value b{color:#ffb35a}.typed-field-values .field-fused b{color:var(--accent)}
+@media(max-width:650px){.typed-field-head{display:grid}.typed-field-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:420px){.typed-field-grid{grid-template-columns:1fr}}

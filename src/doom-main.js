@@ -17,7 +17,7 @@ const ui={
   bars:$("actionBars"),chosen:$("chosenAction"),chosenSemantic:$("chosenSemantic"),chosenValue:$("chosenValue"),chosenScore:$("chosenScore"),intentFire:$("intentFire"),intentStrafe:$("intentStrafe"),intentTurn:$("intentTurn"),intentForward:$("intentForward"),intentBack:$("intentBack"),intentUse:$("intentUse"),entropy:$("entropy"),margin:$("margin"),epistemic:$("epistemic"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),
   attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),decodeTemp:$("decodeTemp"),replaySize:$("replaySize"),teacherReplaySize:$("teacherReplaySize"),valueBeta:$("valueBeta"),priorKL:$("priorKL"),klUtilization:$("klUtilization"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),
   schemaCompile:$("schemaCompileBtn"),schemaStatus:$("schemaStatus"),state:$("stateTable"),objective:$("objectiveText"),steps:$("steps"),episodes:$("episodes"),ret:$("return"),updates:$("updates"),lastReward:$("lastReward"),damageDealt:$("damageDealt"),hostileHpLoss:$("hostileHpLoss"),damageReceived:$("damageReceived"),combatAttribution:$("combatAttribution"),
-  architecture:$("architectureFlow"),archMode:$("archMode"),archFeedback:$("archFeedback"),trainingModeBadge:$("trainingModeBadge"),trainingOutput:$("trainingOutput"),teacherTranscript:$("teacherTranscript"),
+  architecture:$("architectureFlow"),archMode:$("archMode"),archFeedback:$("archFeedback"),typedFieldGrid:$("typedFieldGrid"),trainingModeBadge:$("trainingModeBadge"),trainingOutput:$("trainingOutput"),teacherTranscript:$("teacherTranscript"),
   log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot")
 };
 let env=null,policy=null,controller=null,hashSemantic=null;
@@ -80,6 +80,29 @@ function applyProfile(id=ui.profile.value){
   ui.profileHint.textContent=cfg.label+" — "+cfg.hint;syncRuntimeConfig();
 }
 function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]))}
+function localSoftmax(scores,temp=1){
+  if(!scores?.length)return[];const t=Math.max(.05,Number(temp)||1),peak=Math.max(...scores),ex=scores.map(v=>Math.exp((Number(v)-peak)/t)),sum=ex.reduce((a,b)=>a+b,0)||1;return ex.map(v=>v/sum)
+}
+function normalizeFieldValue(field,raw){
+  if(field?.enum)return String(field.enum?.[String(raw)]??raw);
+  const v=Number(raw??0),min=Number.isFinite(Number(field?.min))?Number(field.min):0,max=Number.isFinite(Number(field?.max))?Number(field.max):1;
+  return max===min?0:Math.max(0,Math.min(1,(v-min)/(max-min)));
+}
+function fieldExpectation(field,dist){
+  if(field?.enum){
+    const bins=new Map();policy.actions.forEach((action,i)=>{const key=String(action.params?.[field.id]??"unset");bins.set(key,(bins.get(key)||0)+(dist[i]||0))});
+    const [key,p]=[...bins.entries()].sort((a,b)=>b[1]-a[1])[0]||["unset",0];return (field.enum?.[key]??key)+" "+(p*100).toFixed(0)+"%";
+  }
+  let sum=0;policy.actions.forEach((action,i)=>{sum+=(dist[i]||0)*normalizeFieldValue(field,action.params?.[field.id]??0)});return sum.toFixed(2);
+}
+function renderTypedFields(d){
+  if(!ui.typedFieldGrid||!policy)return;const fields=policy.schema.actionFields||[];
+  if(!d||!fields.length){ui.typedFieldGrid.innerHTML='<div class="typed-field-empty">Field-level agreement appears after the first decision.</div>';return}
+  const semantic=localSoftmax(d.semanticPriorScores||[],Math.max(.25,policy.temperature||1));
+  const valueScores=d.valueScores||[],mean=valueScores.reduce((a,b)=>a+Number(b||0),0)/Math.max(1,valueScores.length),variance=valueScores.reduce((a,b)=>a+(Number(b||0)-mean)**2,0)/Math.max(1,valueScores.length),scale=Math.max(.02,Math.sqrt(variance));
+  const value=localSoftmax(valueScores,scale),fused=d.probs||[];
+  ui.typedFieldGrid.innerHTML=fields.map(field=>'<div class="typed-field"><strong>'+escapeHtml(field.label||field.id)+'</strong><div class="typed-field-values"><div><span>prior</span><b>'+escapeHtml(fieldExpectation(field,semantic))+'</b></div><div class="field-value"><span>value</span><b>'+escapeHtml(fieldExpectation(field,value))+'</b></div><div class="field-fused"><span>fused</span><b>'+escapeHtml(fieldExpectation(field,fused))+'</b></div></div></div>').join("");
+}
 function setArchNode(id,{active=false,hot=false,pending=false,learning=false,value=null}={}){
   const node=ui.architecture?.querySelector('[data-arch="'+id+'"]');if(!node)return;
   node.classList.toggle("active",!!active);node.classList.toggle("hot",!!hot);node.classList.toggle("pending",!!pending);node.classList.toggle("learning",!!learning);
@@ -159,7 +182,7 @@ function render(){
     [...ui.bars.children].forEach((row,i)=>{row.querySelector(".bar-fill").style.width=(d.probs[i]*100).toFixed(1)+"%";row.lastElementChild.textContent=d.probs[i].toFixed(3)});
     ui.log.textContent=controller.trace.slice(-14).reverse().map(t=>"s"+String(t.step).padStart(4,"0")+" "+(t.teacherUsed?"Q":t.teacherPending?"…":"·")+" "+t.action.padEnd(19)+" p="+Math.max(...Object.values(t.probabilities)).toFixed(3)+" r="+t.reward.toFixed(3)+" dmg="+Number(t.outcome?.damageDealt||0).toFixed(0)+" "+t.residualLatencyMs.toFixed(1)+"ms").join("\n");
   }
-  renderArchitecture(obs,d,outcome);renderTrainingStream();renderTeacherTranscript();
+  renderArchitecture(obs,d,outcome);renderTypedFields(d);renderTrainingStream();renderTeacherTranscript();
   updateReadiness();
 }
 function bindController(){
