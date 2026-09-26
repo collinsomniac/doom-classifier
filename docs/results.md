@@ -424,6 +424,17 @@ For MobileBERT:
 
 The correction materially reduces MobileBERT's generic FIRE bias and improves state discrimination. DistilBERT did not benefit reliably, so the live path enables this calibration only for the default MobileBERT teacher rather than treating it as a universal NLI correction.
 
+## Cross-task core reconfiguration invariant
+
+The same live neural core is now exercised across unrelated structured tasks in deterministic CI:
+
+- a workload-routing task with queue pressure, compute reserve, variable workers, and three typed dispatch actions;
+- a greenhouse-control task with temperature, moisture, energy reserve, variable plant zones, and five different typed actuator actions.
+
+The policy is trained on the first task, then reconfigured **in place** to the second task. The schema, record semantics, candidate count, and action-field structure all change while the neural parameter count remains fixed. The reconfigured controller continues learning and then runs frozen teacher-free with normalized finite probabilities.
+
+This is an architecture-transfer invariant, not a performance benchmark. Its purpose is to prevent DOOM-specific assumptions from leaking into the reusable core while DOOM remains the primary behavioral demo.
+
 ## What remains unproven
 
 The strongest missing evidence is still:
