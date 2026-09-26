@@ -22,7 +22,7 @@ const ui={
   log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot")
 };
 let env=null,policy=null,controller=null,hashSemantic=null;
-let engineReady=false,schemaCompiled=false,teacherReady=false,checkpointReady=false,busy=false,prepared=false;
+let engineReady=false,schemaCompiled=false,teacherReady=false,checkpointReady=false,busy=false,prepared=false,checkpointInfo=null;
 let lastArchPulseDecision=-1;
 
 const PROFILES={
@@ -164,7 +164,7 @@ function renderArchitecture(obs,d,outcome){
   setArchNode("fusion",{active:!!d,hot:!!d&&Number(d.valueBeta||0)>0,value:d?("β "+Number(d.valueBeta||0).toFixed(2)+" · conf "+(Number(d.criticRankingConfidence||0)*100).toFixed(0)+"% · gate "+(Number(d.criticKlGate??1)*100).toFixed(0)+"% · KL "+Number(d.basePriorKlBudget||0).toFixed(3)+"→"+Number(d.priorKlBudget||0).toFixed(3)+" · used "+(Number(d.klUtilization||0)*100).toFixed(0)+"% · → "+d.action.id):"β 0 · critic gate waiting"});
   setArchNode("actions",{active:!!d,hot:!!d,value:d?(d.action.label+" · p "+Number(d.probs?.[d.actionIndex]||0).toFixed(3)):"waiting"});
   setArchNode("actuator",{active:!!d,hot:!!d,value:d?("primitive mask "+String(env.actionMasks?.[d.action.id]??"—")):"idle"});
-  ui.archMode.textContent=!engineReady?"waiting for engine":learning?"learning":policy?.inferenceMode==="neural"?"frozen / neural":policy?.inferenceMode==="hybrid"?"teacher in decode path":"adaptive supervision";
+  const starterSummary=checkpointReady?checkpointSummary(checkpointInfo):null;ui.archMode.textContent=!engineReady?"waiting for engine":learning?"learning":starterSummary?("validated stage "+starterSummary.stage+" · "+starterSummary.decisions+" decisions · teacher off"):policy?.inferenceMode==="neural"?"frozen / neural":policy?.inferenceMode==="hybrid"?"teacher in decode path":"adaptive supervision";
   const reward=Number(d?.reward||0),dmg=Number(outcome?.damageDealt||0),kills=Number(outcome?.playerKillDelta||0),pickups=Number(outcome?.playerPickupDelta||0);
   ui.archFeedback.textContent=d?("r "+reward.toFixed(3)+" · attributed damage "+dmg.toFixed(0)+" · kills "+kills.toFixed(0)+" · pickups "+pickups.toFixed(0)):"reward/events feed the consequence branch; teacher supervision feeds only the semantic prior";
 }
@@ -284,15 +284,21 @@ async function importPortableCheckpoint(checkpoint,label="checkpoint"){
   try{
     if(policy.semantic&&policy.semantic!==hashSemantic&&policy.semantic?.dispose)await policy.semantic.dispose().catch(()=>{});
     policy.setSemantic(hashSemantic);teacherReady=false;
-    policy.importCheckpoint(checkpoint);schemaCompiled=true;checkpointReady=true;
+    policy.importCheckpoint(checkpoint);schemaCompiled=true;checkpointReady=true;checkpointInfo=checkpoint.build||null;
     await controller.reset({learning:false});applyProfile("frozen");ui.profile.value="frozen";
     ui.modelSelect.value="hash";ui.modelStatus.textContent="Teacher not required · loaded frozen checkpoint.";
     ui.schemaStatus.textContent="Compiled semantic schema restored from checkpoint.";
     ui.prepareStatus.textContent="READY TO PLAY · "+label+" · "+policy.q.parameterCount()+" params · teacher-free neural fast path";
-    ui.checkpointStatus.textContent=label+" loaded · "+policy.q.parameterCount()+" params · "+policy.q.updates+" consequence updates";
+    const summary=checkpointSummary(checkpointInfo);ui.checkpointStatus.textContent=summary?(label+" loaded · quality-gated stage "+summary.stage+" · "+summary.decisions+" causal training decisions · validation "+summary.damage.toFixed(0)+" damage / "+summary.kills.toFixed(0)+" kills / return "+summary.reward.toFixed(3)+" · "+policy.q.parameterCount()+" params"):(label+" loaded · "+policy.q.parameterCount()+" params · "+policy.q.updates+" consequence updates");
     setRuntime("CHECKPOINT READY");render();
   }catch(error){ui.checkpointStatus.textContent="checkpoint load failed · "+String(error?.message||error);setRuntime("CHECKPOINT ERROR",true)}
   finally{setBusy(false)}
+}
+function checkpointSummary(build){
+  if(!build)return null;
+  const stage=Number(build.selectedStage),selected=build.candidates?.find?.(x=>Number(x.stage)===stage),decisions=Number(build.trainingDecisions||stage*64||0);
+  if(!Number.isFinite(stage)||!selected)return null;
+  return{stage,decisions,reward:Number(selected.reward||0),damage:Number(selected.damage||0),kills:Number(selected.kills||0)};
 }
 function starterCheckpointUsable(checkpoint){
   const build=checkpoint?.build,selected=build?.candidates?.find?.(x=>Number(x.stage)===Number(build.selectedStage));
@@ -321,7 +327,7 @@ async function loadBundledCheckpoint({silent=false}={}){
     if(!silent)ui.checkpointStatus.textContent="Fetching validated starter…";
     const {checkpoint,url}=await fetchStarterCheckpoint();
     await importPortableCheckpoint(checkpoint,"validated starter");
-    ui.checkpointStatus.textContent="Validated starter loaded · "+policy.q.parameterCount()+" params · source "+(url.includes("model-runtime")?"model-runtime snapshot":"local bundle");
+    const summary=checkpointSummary(checkpointInfo);ui.checkpointStatus.textContent=(summary?("Validated starter · stage "+summary.stage+" / "+summary.decisions+" causal decisions · "+summary.damage.toFixed(0)+" damage · "+summary.kills.toFixed(0)+" kills · return "+summary.reward.toFixed(3)):"Validated starter loaded")+" · "+policy.q.parameterCount()+" params · source "+(url.includes("model-runtime")?"model-runtime snapshot":"local bundle");
     return true;
   }catch(error){
     if(!silent)ui.checkpointStatus.textContent="Validated starter unavailable · "+String(error?.message||error);
@@ -356,7 +362,7 @@ async function prepareRecommended(){
     if(!schemaCompiled)await compileSchemaOnly();
     ui.prepareStatus.textContent="Loading MobileBERT semantic teacher…";ui.modelSelect.value="mobilebert";
     if(!isLearnedTeacher()||policy.semantic.presetKey!=="mobilebert")await loadTeacherOnly("mobilebert");
-    checkpointReady=false;policy.resetLearning();await controller.reset({learning:false});const prime=await primeCurrentTeacher("MobileBERT",16,{converge:true});
+    checkpointReady=false;checkpointInfo=null;policy.resetLearning();await controller.reset({learning:false});const prime=await primeCurrentTeacher("MobileBERT",16,{converge:true});
     const fit=prime.distillation?" · fit "+prime.distillation.stepsUsed+" steps · KL "+prime.distillation.kl.toFixed(3):"";
     applyProfile("assisted");ui.prepareStatus.textContent="READY TO PLAY · schema compiled · MobileBERT "+prime.ms.toFixed(0)+" ms"+fit+" · fast path is neural";
     ui.tuneStatus.textContent="Optional: run a short real-Doom training burst, then evaluate teacher-off.";setRuntime("READY TO PLAY");render();
