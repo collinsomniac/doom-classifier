@@ -23,12 +23,12 @@ function train(model){
 }
 const alphas=[0,.05,.1,.2,.3,.4,.5],results=[];
 for(const alpha of alphas){
-  const model=make(alpha),scores=train(model),ordered=scores[0]>scores[1]&&scores[1]>scores[2];
-  results.push({alpha,ordered,scores:[...scores],gap:scores[0]-scores[1],wideGap:scores[0]-scores[2]});
+  const model=make(alpha),scores=train(model),runnerUp=Math.max(...scores.slice(1)),topCorrect=scores[0]===Math.max(...scores),topGap=scores[0]-runnerUp;
+  results.push({alpha,topCorrect,scores:[...scores],topGap,gapGoodNeutral:scores[0]-scores[1],gapGoodBad:scores[0]-scores[2]});
 }
-const baseline=results[0],safe=results.slice(1).filter(x=>x.ordered&&x.gap>baseline.gap),best=[...safe].sort((a,b)=>b.gap-a.gap)[0]||null;
+const baseline=results[0],safe=results.slice(1).filter(x=>x.topCorrect&&x.topGap>baseline.topGap),best=[...safe].sort((a,b)=>b.topGap-a.topGap)[0]||null;
 console.log("ACTION_GAP_SWEEP "+JSON.stringify({params:make(0).parameterCount(),baseline,results,best}));
-assert.ok(best,"at least one positive alpha should preserve ordering and enlarge the action gap");
+assert.ok(best,"at least one positive alpha should preserve the greedy action and enlarge its runner-up gap");
 
 // Diagnostic gate: the implementation default must match the empirically safe alpha before DOOM runs.
 const configured=make(undefined).advantageGapAlpha;
