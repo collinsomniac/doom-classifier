@@ -2,6 +2,7 @@ name: teacher-comparison
 
 on:
   push:
+    branches: [main]
     paths:
       - tests/teacher-compare.spec.mjs
       - src/model-adapters/transformers-nli.js
