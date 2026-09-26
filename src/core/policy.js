@@ -165,7 +165,7 @@ export class SemanticResidualPolicy{
     const item={
       id:(this.teacherHistory.at(-1)?.id||0)+1,t:Date.now(),step:Number(step||0),kind,reason,
       model:this.semantic?.name||"semantic teacher",ms:Number(ms||0),top:ranked.slice(0,6),
-      distillation:distillation?{stepsUsed:Number(distillation.stepsUsed||0),kl:Number(distillation.kl||0),loss:Number(distillation.loss||0),teacherReplayUpdates:Number(distillation.teacherReplayUpdates||0)}:null,
+      distillation:distillation?{stepsUsed:Number(distillation.stepsUsed||0),headFitKL:Number(distillation.headFitKL??NaN),kl:Number(distillation.kl||0),loss:Number(distillation.loss||0),teacherReplayUpdates:Number(distillation.teacherReplayUpdates||0)}:null,
       calibration:calibration?{temperature:Number(calibration.temperature||0),bestTemperature:Number(calibration.bestTemperature||0),loss:Number(calibration.loss||0)}:null,
       stateText:stateText.slice(0,1800)
     };
