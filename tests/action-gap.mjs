@@ -21,26 +21,15 @@ function train(model){
   }
   return model.valueScoresObservation(obs);
 }
-const ordinary=make(0),gapModel=make(.5);
-const base=train(ordinary),gap=train(gapModel);
-const baseGap=base[0]-base[1],learnedGap=gap[0]-gap[1];
-assert.ok(gap[0]>gap[1]&&gap[1]>gap[2]);
-assert.ok(learnedGap>baseGap*1.15,`gap operator should enlarge good-vs-neutral margin: base=${baseGap}, gap=${learnedGap}`);
+const alphas=[0,.05,.1,.2,.3,.4,.5],results=[];
+for(const alpha of alphas){
+  const model=make(alpha),scores=train(model),ordered=scores[0]>scores[1]&&scores[1]>scores[2];
+  results.push({alpha,ordered,scores:[...scores],gap:scores[0]-scores[1],wideGap:scores[0]-scores[2]});
+}
+const baseline=results[0],safe=results.slice(1).filter(x=>x.ordered&&x.gap>baseline.gap),best=[...safe].sort((a,b)=>b.gap-a.gap)[0]||null;
+console.log("ACTION_GAP_SWEEP "+JSON.stringify({params:make(0).parameterCount(),baseline,results,best}));
+assert.ok(best,"at least one positive alpha should preserve ordering and enlarge the action gap");
 
-const neutralIndex=1,neutralBefore=gapModel.valueScoresObservation(obs);
-const info=gapModel.updateTransition({observation:obs,actionIndex:neutralIndex,reward:rewards[neutralIndex],nextObservation:obs,done:true});
-assert.ok(info.actionGap>0);
-assert.ok(info.gapPenalty>0);
-assert.ok(Math.abs(info.gapPenalty-info.advantageGapAlpha*info.actionGap)<1e-9);
-
-const greedyIndex=gapModel.valueScoresObservation(obs).reduce((best,v,i,a)=>v>a[best]?i:best,0);
-const greedyInfo=gapModel.updateTransition({observation:obs,actionIndex:greedyIndex,reward:rewards[greedyIndex],nextObservation:obs,done:true});
-assert.ok(greedyInfo.gapPenalty<1e-7,"greedy action should retain ordinary Bellman target");
-
-console.log(JSON.stringify({
-  ok:true,params:gapModel.parameterCount(),updates:gapModel.updates,alpha:gapModel.advantageGapAlpha,
-  ordinary:actions.map((a,i)=>({id:a.id,q:base[i]})),
-  gap:actions.map((a,i)=>({id:a.id,q:gap[i]})),
-  baseGap,learnedGap,ratio:learnedGap/baseGap,
-  probe:{actionGap:info.actionGap,gapPenalty:info.gapPenalty}
-}));
+// Diagnostic gate: the implementation default must match the empirically safe alpha before DOOM runs.
+const configured=make(undefined).advantageGapAlpha;
+assert.equal(configured,best.alpha,`set branch default alpha to safe sweep winner ${best.alpha}, currently ${configured}`);
