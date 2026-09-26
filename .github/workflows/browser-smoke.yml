@@ -15,6 +15,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: browser-smoke
+  cancel-in-progress: true
+
 jobs:
   chromium:
     runs-on: ubuntu-latest
