@@ -47,6 +47,10 @@ env:
 permissions:
   contents: read
 
+concurrency:
+  group: doom-learning-benchmark
+  cancel-in-progress: true
+
 jobs:
   chromium-learning:
     runs-on: ubuntu-latest
