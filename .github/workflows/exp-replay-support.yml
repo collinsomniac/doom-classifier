@@ -26,6 +26,8 @@ jobs:
         run: node tests/adaptive-teacher.mjs
       - name: Semantic anchor retention
         run: node tests/semantic-anchor-retention.mjs
+      - name: Semantic anchor rehearsal sweep
+        run: node tests/semantic-anchor-sweep.mjs
       - name: Prior value fusion invariants
         run: node tests/prior-value-fusion.mjs
       - name: Generic adapter invariant
