@@ -262,7 +262,7 @@ export class NeuralSetResidualQ{
     for(let i=0;i<scores.length;i++){
       const f=this.actionForward(state,i);scores[i]=f.score;semanticScores[i]=f.semanticScore;valueScores[i]=f.valueScore;memberScores[i]=f.memberScores;valueMemberScores[i]=f.valueMemberScores;
     }
-    return{scores,semanticScores,valueScores,memberScores,valueMemberScores};
+    return{scores,semanticScores,valueScores,memberScores,valueMemberScores,stateSignature:new Float32Array(state.context)};
   }
   scoresObservation(observation,{temporal=null}={}){return this.scoreStatsObservation(observation,{temporal}).scores}
   valueScoresObservation(observation,{temporal=null}={}){return this.scoreStatsObservation(observation,{temporal}).valueScores}
