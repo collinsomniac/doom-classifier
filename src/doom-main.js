@@ -294,12 +294,25 @@ async function importPortableCheckpoint(checkpoint,label="checkpoint"){
   }catch(error){ui.checkpointStatus.textContent="checkpoint load failed · "+String(error?.message||error);setRuntime("CHECKPOINT ERROR",true)}
   finally{setBusy(false)}
 }
+function starterCheckpointUsable(checkpoint){
+  const build=checkpoint?.build,selected=build?.candidates?.find?.(x=>Number(x.stage)===Number(build.selectedStage));
+  if(!selected)return false;
+  const reward=Number(selected.reward||0),damage=Number(selected.damage||0),kills=Number(selected.kills||0);
+  return reward>0&&(kills>=1||damage>=20);
+}
 async function fetchStarterCheckpoint(){
   const urls=[STARTER_MODEL_BASE+"/doom-starter.json","./models/doom-starter.json"];
   let last=null;
   for(const url of urls){
-    try{const response=await fetch(url,{cache:"no-cache"});if(response.ok)return{checkpoint:await response.json(),url};last=new Error("HTTP "+response.status+" from "+url)}
-    catch(error){last=error}
+    try{
+      const response=await fetch(url,{cache:"no-cache"});
+      if(response.ok){
+        const checkpoint=await response.json();
+        if(!starterCheckpointUsable(checkpoint))throw new Error("published starter failed minimum combat-quality gate");
+        return{checkpoint,url};
+      }
+      last=new Error("HTTP "+response.status+" from "+url);
+    }catch(error){last=error}
   }
   throw last||new Error("validated starter not published yet");
 }

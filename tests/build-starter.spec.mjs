@@ -23,7 +23,8 @@ async function frozenEval(page,steps=24){
   return page.evaluate(async steps=>{
     const {policy:p,controller:c}=window.__doomLab;
     c.pause();c.training=false;c.explore=false;c.memory=true;c.useResidual=true;p.setInferenceMode("neural");
-    await c.reset({learning:false});const teacherBefore=p.teacherCalls,actions={};let reward=0,damage=0,kills=0;
+    await p.awaitTeacher?.();
+    await c.reset({learning:false});p.resetEpisode();const teacherBefore=p.teacherCalls,actions={};let reward=0,damage=0,kills=0;
     for(let i=0;i<steps;i++){
       const ok=await c.tick();if(!ok&&c.state==="ERROR")throw new Error("controller error during frozen evaluation");
       const d=c.lastDecision;if(!d)continue;
@@ -71,8 +72,9 @@ test("build and round-trip a quality-gated teacher-free starter checkpoint",asyn
     console.log("STARTER_STAGE "+JSON.stringify({stage,training:{return:training.return,updates:training.updates,teacherCalls:training.teacherCalls},evaluation}));
   }
   const passes=e=>
-    e.kills>=before.kills&&e.reward>=before.reward*.70&&e.damage>=before.damage*.60&&
-    e.minReward>=Math.min(0,before.minReward)&&e.minDamage>=Math.min(10,before.minDamage);
+    e.reward>0&&(e.kills>=1||e.damage>=20)&&
+    e.kills>=before.kills&&e.reward>=Math.max(.05,before.reward*.70)&&e.damage>=Math.max(10,before.damage*.60)&&
+    e.minReward>=Math.min(0,before.minReward);
   const compare=(a,b)=>{
     const ae=a.evaluation,be=b.evaluation;
     if(ae.kills!==be.kills)return ae.kills-be.kills;
@@ -82,7 +84,9 @@ test("build and round-trip a quality-gated teacher-free starter checkpoint",asyn
     if(Math.abs(ae.minReward-be.minReward)>1e-9)return ae.minReward-be.minReward;
     return a.stage-b.stage;
   };
-  const eligible=candidates.filter(x=>passes(x.evaluation)).sort(compare),selected=eligible.at(-1)||candidates[0];
+  const eligible=candidates.filter(x=>passes(x.evaluation)).sort(compare);
+  if(!eligible.length)throw new Error("no staged checkpoint passed absolute combat-quality gate");
+  const selected=eligible.at(-1);
   await page.evaluate(cp=>window.__doomLab.policy.importCheckpoint(cp),selected.checkpoint);
   const after=await frozenEval(page,24);
   const checkpoint=await page.evaluate(({stage,before,candidates})=>{
