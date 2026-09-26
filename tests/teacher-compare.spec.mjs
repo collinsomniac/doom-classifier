@@ -27,7 +27,12 @@ test("compare browser NLI teachers on identical structured DOOM probes",async({p
         fire:marginal("fire"),strafe:marginal("strafe_left")+marginal("strafe_right"),turn:marginal("turn_left")+marginal("turn_right"),use:marginal("use")
       };
     }
-    return{teacher:policy.semantic.name,backend:policy.semantic.backend,cases:result};
+    const discrimination={
+      fireEnemyMinusQuiet:result.enemy_ahead.fire-result.quiet_room.fire,
+      strafeUnderFireMinusQuiet:result.under_fire_side.strafe-result.quiet_room.strafe,
+      useQuiet:result.quiet_room.use
+    };
+    return{teacher:policy.semantic.name,backend:policy.semantic.backend,cases:result,discrimination};
   });
 
   const mobile=await probe();
@@ -37,6 +42,13 @@ test("compare browser NLI teachers on identical structured DOOM probes",async({p
   const status=(await page.locator("#modelStatus").textContent())||"";
   if(status.includes("failed"))throw new Error(status);
   const distil=await probe();
-  console.log("DOOM_TEACHER_COMPARISON "+JSON.stringify({scoring:"independent-entailment-logodds",mobile,distil}));
-  expect(mobile.teacher).toContain("MobileBERT");expect(distil.teacher).toContain("DistilBERT");
+
+  await page.locator("#modelSelect").selectOption("deberta");await page.locator("#loadModelBtn").click();
+  await page.waitForFunction(()=>{const t=document.querySelector("#modelStatus")?.textContent||"";return t.includes("bootstrap")||t.includes("failed")},null,{timeout:300000});
+  const debertaStatus=(await page.locator("#modelStatus").textContent())||"";
+  if(debertaStatus.includes("failed"))throw new Error(debertaStatus);
+  const deberta=await probe();
+
+  console.log("DOOM_TEACHER_COMPARISON "+JSON.stringify({scoring:"independent-entailment-logodds",mobile,distil,deberta}));
+  expect(mobile.teacher).toContain("MobileBERT");expect(distil.teacher).toContain("DistilBERT");expect(deberta.teacher).toContain("DeBERTa");
 });
