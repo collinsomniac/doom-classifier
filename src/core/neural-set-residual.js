@@ -107,6 +107,17 @@ class Dense{
 }
 function zeroEntityGrads(n,dim){return Array.from({length:n},()=>new Float32Array(dim))}
 
+function solveRidgeSystem(matrix,vector,n){
+  const a=Array.from({length:n},(_,r)=>{const row=new Float64Array(n+1);for(let col=0;col<n;col++)row[col]=matrix[r*n+col];row[n]=vector[r];return row});
+  for(let col=0;col<n;col++){
+    let pivot=col,best=Math.abs(a[col][col]);for(let r=col+1;r<n;r++){const v=Math.abs(a[r][col]);if(v>best){best=v;pivot=r}}
+    if(best<1e-12)continue;if(pivot!==col){const tmp=a[col];a[col]=a[pivot];a[pivot]=tmp}
+    const scale=a[col][col];for(let j=col;j<=n;j++)a[col][j]/=scale;
+    for(let r=0;r<n;r++){if(r===col)continue;const factor=a[r][col];if(Math.abs(factor)<1e-15)continue;for(let j=col;j<=n;j++)a[r][j]-=factor*a[col][j]}
+  }
+  const out=new Float64Array(n);for(let i=0;i<n;i++)out[i]=Number.isFinite(a[i][n])?a[i][n]:0;return out;
+}
+
 export class NeuralSetResidualQ{
   constructor(schema,actions,{seed=2026,hashDim=48,globalDim=16,temporalDim=8,entityHidden=24,entityDim=16,actionDim=24,headDim=32,valueHeadDim=4,valueHidden=16,valueWeight=.5,ensembleSize=3,bootstrapProbability=.8,lr=.008,gamma=.96,l2=1e-6,useTargetNetwork=true,targetSyncInterval=24}={}){
     this.schema=schema;this.actions=actions;this.seed=seed;this.hashDim=hashDim;this.globalDim=globalDim;this.temporalDim=temporalDim;this.entityHidden=entityHidden;this.entityDim=entityDim;this.actionDim=actionDim;this.headDim=headDim;this.valueHeadDim=valueHeadDim;this.valueHidden=valueHidden;this.valueWeight=valueWeight;this.ensembleSize=ensembleSize;this.bootstrapProbability=bootstrapProbability;
@@ -238,6 +249,27 @@ export class NeuralSetResidualQ{
   inspectAttention(observation,actionIndex,{topK=8,temporal=null}={}){
     const state=this.encodeState(observation,{temporal}),forward=this.actionForward(state,actionIndex);
     return state.records.map((meta,i)=>({...meta,weight:forward.weights[i]||0})).sort((a,b)=>b.weight-a.weight).slice(0,topK);
+  }
+
+  fitSemanticHead(examples,{ridge=.02}={}){
+    if(!examples?.length)return null;
+    const n=this.headDim+1,matrix=new Float64Array(n*n),vector=new Float64Array(n);let rows=0;
+    for(const example of examples){
+      if(!example?.scores||example.scores.length!==this.actions.length)continue;
+      const state=this.encodeState(example.observation,{cache:false,temporal:example.temporal||null}),mean=example.scores.reduce((a,b)=>a+Number(b||0),0)/example.scores.length;
+      for(let ai=0;ai<this.actions.length;ai++){
+        const f=this.actionForward(state,ai),x=new Float64Array(n);for(let d=0;d<this.headDim;d++)x[d]=f.h.out[d];x[this.headDim]=1;
+        const y=Number(example.scores[ai]||0)-mean;
+        for(let i=0;i<n;i++){vector[i]+=x[i]*y;for(let j=0;j<n;j++)matrix[i*n+j]+=x[i]*x[j]}rows++;
+      }
+    }
+    if(!rows)return null;
+    for(let i=0;i<this.headDim;i++)matrix[i*n+i]+=ridge;
+    matrix[(n-1)*n+(n-1)]+=ridge*.1;
+    const solution=solveRidgeSystem(matrix,vector,n);
+    for(let i=0;i<this.headDim;i++)this.semanticLayer.w[i]=solution[i];
+    this.semanticLayer.b[0]=solution[this.headDim];this.semanticLayer.zeroGrad();
+    return{rows,ridge};
   }
 
   backwardSemantic(forward,gradScore,entityExtra){
