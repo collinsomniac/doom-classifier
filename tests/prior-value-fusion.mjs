@@ -109,6 +109,8 @@ assert.ok(guardedDecision.epistemicUtilization>.8,"uncertain critic should spend
 assert.ok(guardedDecision.priorKL<guardedDecision.priorKlBudget,"epistemic guard should become the active constraint before the permissive KL budget");
 assert.ok(guardedDecision.criticTopAgreement<.99,"split bootstrap heads should not look fully confident");
 assert.ok(guardedDecision.criticAuthority<.15,"split critic ranking must not materially expand KL authority");
+assert.ok(guardedDecision.criticKlGate<.25,"uncertain critic must shrink the available KL region toward the configured safety floor");
+assert.ok(guardedDecision.priorKlBudget<.2,"uncertain critic must not retain the full permissive base KL budget");
 
 const flatQ={...q,updates:100,scoreStatsObservation(){return{
   scores:[0,0,0],semanticScores:[.8,0,-.4],valueScores:[1,1,1],
@@ -119,4 +121,4 @@ const same=await invariant.decide(obs,{useResidual:true,memory:false,explore:fal
 assert.ok(same.probs.every((x,i)=>Math.abs(x-prior[i])<1e-8),"action-invariant value offsets must not alter semantic prior");
 assert.ok(same.priorKL<1e-10);
 
-console.log(JSON.stringify({ok:true,beta:d.valueBeta,priorKL:d.priorKL,authorityBudget:authorityDecision.priorKlBudget,authority:authorityDecision.criticAuthority,rankingConfidence:authorityDecision.criticRankingConfidence,adaptiveBeta:scaled.valueBeta,adaptiveKL:scaled.priorKL,adaptiveUtilization:scaled.klUtilization,guardedBeta:guardedDecision.valueBeta,guardedEpistemic:guardedDecision.valueEpistemic,guardedAuthority:guardedDecision.criticAuthority,guardedEpistemicUtilization:guardedDecision.epistemicUtilization,moved:moved.action.id,invariantKL:same.priorKL}));
+console.log(JSON.stringify({ok:true,beta:d.valueBeta,priorKL:d.priorKL,authorityBudget:authorityDecision.priorKlBudget,authority:authorityDecision.criticAuthority,rankingConfidence:authorityDecision.criticRankingConfidence,adaptiveBeta:scaled.valueBeta,adaptiveKL:scaled.priorKL,adaptiveUtilization:scaled.klUtilization,guardedBeta:guardedDecision.valueBeta,guardedEpistemic:guardedDecision.valueEpistemic,guardedAuthority:guardedDecision.criticAuthority,guardedKlGate:guardedDecision.criticKlGate,guardedBudget:guardedDecision.priorKlBudget,guardedEpistemicUtilization:guardedDecision.epistemicUtilization,moved:moved.action.id,invariantKL:same.priorKL}));
