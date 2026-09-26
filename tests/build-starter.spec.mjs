@@ -35,14 +35,29 @@ async function frozenEval(page,steps=24){
   },steps);
 }
 
+async function frozenEvalSuite(page,{steps=24,repeats=3}={}){
+  const runs=[];for(let i=0;i<repeats;i++)runs.push(await frozenEval(page,steps));
+  const sorted=key=>[...runs].sort((a,b)=>a[key]-b[key]);
+  const median=key=>sorted(key)[Math.floor(runs.length/2)][key],min=key=>sorted(key)[0][key],max=key=>sorted(key).at(-1)[key];
+  const dominantVotes={};for(const run of runs)dominantVotes[run.dominant[0]]=(dominantVotes[run.dominant[0]]||0)+1;
+  return{
+    runs,reward:median("reward"),damage:median("damage"),kills:median("kills"),
+    minReward:min("reward"),minDamage:min("damage"),minKills:min("kills"),
+    maxReward:max("reward"),maxDamage:max("damage"),maxKills:max("kills"),
+    dominant:Object.entries(dominantVotes).sort((a,b)=>b[1]-a[1])[0]||["none",0],
+    teacherCalls:runs.reduce((s,x)=>s+x.teacherCalls,0),params:runs[0]?.params||0,updates:runs[0]?.updates||0
+  };
+}
+
 test("build and round-trip a quality-gated teacher-free starter checkpoint",async({page,context})=>{
   await boot(page);
   await page.locator("#prepareBtn").click();
   await expect(page.locator("#policyChip")).toContainText("ready to play",{timeout:360000});
 
-  const before=await frozenEval(page,24);
+  const before=await frozenEvalSuite(page,{steps:24,repeats:3});
   const baselineCheckpoint=await page.evaluate(()=>window.__doomLab.policy.exportCheckpoint());
   const candidates=[{stage:0,training:null,evaluation:before,checkpoint:baselineCheckpoint}];
+  console.log("STARTER_STAGE "+JSON.stringify({stage:0,evaluation:before}));
   for(let stage=1;stage<=4;stage++){
     const training=await page.evaluate(async()=>{
       const {policy:p,controller:c}=window.__doomLab;
@@ -51,15 +66,20 @@ test("build and round-trip a quality-gated teacher-free starter checkpoint",asyn
       await p.awaitTeacher?.();
       return{...result,params:p.q.parameterCount(),updates:p.q.updates,teacherCalls:p.teacherCalls};
     });
-    const evaluation=await frozenEval(page,24),checkpoint=await page.evaluate(()=>window.__doomLab.policy.exportCheckpoint());
+    const evaluation=await frozenEvalSuite(page,{steps:24,repeats:3}),checkpoint=await page.evaluate(()=>window.__doomLab.policy.exportCheckpoint());
     candidates.push({stage,training,evaluation,checkpoint});
+    console.log("STARTER_STAGE "+JSON.stringify({stage,training:{return:training.return,updates:training.updates,teacherCalls:training.teacherCalls},evaluation}));
   }
-  const passes=e=>e.kills>=before.kills&&e.reward>=before.reward*.70&&e.damage>=before.damage*.60;
+  const passes=e=>
+    e.kills>=before.kills&&e.reward>=before.reward*.70&&e.damage>=before.damage*.60&&
+    e.minReward>=Math.min(0,before.minReward)&&e.minDamage>=Math.min(10,before.minDamage);
   const compare=(a,b)=>{
     const ae=a.evaluation,be=b.evaluation;
     if(ae.kills!==be.kills)return ae.kills-be.kills;
     if(Math.abs(ae.reward-be.reward)>1e-9)return ae.reward-be.reward;
     if(ae.damage!==be.damage)return ae.damage-be.damage;
+    if(ae.minKills!==be.minKills)return ae.minKills-be.minKills;
+    if(Math.abs(ae.minReward-be.minReward)>1e-9)return ae.minReward-be.minReward;
     return a.stage-b.stage;
   };
   const eligible=candidates.filter(x=>passes(x.evaluation)).sort(compare),selected=eligible.at(-1)||candidates[0];
@@ -71,8 +91,8 @@ test("build and round-trip a quality-gated teacher-free starter checkpoint",asyn
       selection:"quality-gated staged fine-tune",
       selectedStage:stage,
       trainingDecisions:stage*64,
-      baseline:{reward:before.reward,damage:before.damage,kills:before.kills},
-      candidates:candidates.map(x=>({stage:x.stage,reward:x.evaluation.reward,damage:x.evaluation.damage,kills:x.evaluation.kills,updates:x.training?.updates||0}))
+      baseline:{reward:before.reward,damage:before.damage,kills:before.kills,minReward:before.minReward,minDamage:before.minDamage,minKills:before.minKills},
+      candidates:candidates.map(x=>({stage:x.stage,reward:x.evaluation.reward,damage:x.evaluation.damage,kills:x.evaluation.kills,minReward:x.evaluation.minReward,minDamage:x.evaluation.minDamage,minKills:x.evaluation.minKills,updates:x.training?.updates||0}))
     };
     return cp;
   },{stage:selected.stage,before,candidates:candidates.map(x=>({stage:x.stage,evaluation:x.evaluation,training:x.training}))});
@@ -84,7 +104,7 @@ test("build and round-trip a quality-gated teacher-free starter checkpoint",asyn
   expect(after.teacherCalls,"candidate playback must be teacher-free").toBe(0);
   expect(trained.totalUpdates).toBeGreaterThan(0);
   expect(trained.completed).toBe(256);
-  expect(passes(selected.evaluation),"selected starter must pass the baseline quality gate").toBe(true);
+  expect(passes(selected.evaluation),"selected starter must pass the repeated-rollout baseline quality gate").toBe(true);
   // The selection run is the behavior-quality gate. Replays below verify model portability,
   // not bit-identical short-horizon outcome timing from the real DOOM engine.
   expect(Number.isFinite(after.reward)).toBe(true);
