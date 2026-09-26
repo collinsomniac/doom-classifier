@@ -171,3 +171,9 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
 .typed-meter{height:4px;border-radius:999px;background:#1a222b;overflow:hidden;padding:0!important}
 .typed-meter i{display:block;height:100%;border-radius:inherit;background:#7f8b98;transition:width .18s ease}
 .typed-branch.field-value .typed-meter i{background:#ffb35a}.typed-branch.field-fused .typed-meter i{background:var(--accent)}
+
+.typed-field-title{display:flex;justify-content:space-between;gap:8px;align-items:baseline;margin-bottom:6px}
+.typed-field-title strong{font-size:.68rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.typed-field-title em{font:9px ui-monospace,monospace;color:#ffb35a;font-style:normal;white-space:nowrap}
+.typed-branch.field-raw .typed-meter i{background:#8f78b8}
+.typed-branch.field-raw b{color:#c4b2e0}
