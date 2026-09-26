@@ -126,3 +126,12 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
   .model-controls select,.manual-row select{min-width:0}
   footer{flex-wrap:wrap}
 }
+
+
+@media(max-width:1050px){
+  .lab-grid>*{order:10}
+  .lab-grid>.arena-panel{order:1}
+  .lab-grid>.architecture-panel{order:2}
+  .lab-grid>.monitor-panel{order:3}
+  .lab-grid>.control-panel{order:4}
+}
