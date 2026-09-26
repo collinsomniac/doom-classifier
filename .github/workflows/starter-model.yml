@@ -5,6 +5,13 @@ on:
     branches: [main]
     paths:
       - "tests/build-starter.spec.mjs"
+      - "src/core/policy.js"
+      - "src/core/neural-set-residual.js"
+      - "src/core/controller.js"
+      - "src/model-adapters/transformers-nli.js"
+      - "src/model-adapters/schema-embedding-compiler.js"
+      - "src/env/doom-wasm.js"
+      - "src/doom-main.js"
       - ".github/workflows/starter-model.yml"
   workflow_dispatch:
 
@@ -50,7 +57,8 @@ jobs:
             "source_commit": "${GITHUB_SHA}",
             "workflow_run": "${GITHUB_RUN_ID}",
             "runtime_branch": "engine-runtime",
-            "quality_gate": "24-step fresh teacher-free replay; kills >= baseline; return >= 70% baseline; attributed damage >= 60% baseline"
+            "quality_gate": "24-step fresh teacher-free replay; kills >= baseline; return >= 70% baseline; attributed damage >= 60% baseline; exact policy-output round trip",
+            "teacher": "MobileBERT-MNLI with null-state label-bias calibration"
           }
           EOF
 

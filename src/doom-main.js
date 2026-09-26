@@ -221,13 +221,16 @@ async function loadTeacherOnly(selected){
     if(policy.semantic!==hashSemantic&&policy.semantic?.dispose)await policy.semantic.dispose();policy.setSemantic(hashSemantic);teacherReady=false;return null;
   }
   const preset=NLI_PRESETS[selected];ui.modelStatus.textContent="loading "+preset.label+" · "+preset.approx;
-  const candidate=new TransformersNLIAdapter({preset:selected,maxStateChars:3000,onProgress:info=>{
+  const labelBiasCalibration=selected==="mobilebert";
+  const candidate=new TransformersNLIAdapter({preset:selected,maxStateChars:3000,labelBiasCalibration,onProgress:info=>{
     if(Number.isFinite(info.normalizedProgress))ui.modelProgress.value=info.normalizedProgress;
     ui.modelStatus.textContent=(info.status||"loading")+(info.file?" · "+info.file:"");
   }});
   candidate.compile(policy.schema,policy.actions);await candidate.load();
   if(policy.semantic!==hashSemantic&&policy.semantic?.dispose)await policy.semantic.dispose();
-  policy.setSemantic(candidate);teacherReady=true;ui.modelProgress.value=100;return candidate;
+  policy.setSemantic(candidate);teacherReady=true;ui.modelProgress.value=100;
+  ui.modelStatus.textContent=preset.label+" · "+candidate.backend+(labelBiasCalibration?" · null-state label-bias calibrated":"");
+  return candidate;
 }
 async function boot(){
   setBusy(true);ui.boot.disabled=true;setRuntime("LOADING");ui.bootStatus.textContent=requestedRuntime!=="borrowed"?"Fetching project-owned Chocolate Doom runtime…":"Fetching borrowed pinned Chocolate Doom runtime…";
