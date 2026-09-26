@@ -26,14 +26,32 @@ function fieldColumns(schema){
 }
 function center(values){const mean=values.reduce((a,b)=>a+Number(b||0),0)/Math.max(1,values.length);return values.map(v=>Number(v||0)-mean)}
 
+export function compileActionFieldProjector(schema,actions,{ridge=.05,maxBlend=.7}={}){
+  const valid=Array.isArray(actions)&&actions.length>=2,columns=fieldColumns(schema),n=columns.length,rows=valid?actions.map(action=>columns.map(col=>Number(col.value(action)||0))):[];
+  const gram=new Float64Array(n*n);
+  for(const x of rows)for(let i=0;i<n;i++)for(let j=0;j<n;j++)gram[i*n+j]+=x[i]*x[j];
+  for(let i=0;i<n;i++)gram[i*n+i]+=i===0?ridge*.1:ridge;
+  const inverse=new Float64Array(n*n);
+  if(valid){
+    for(let col=0;col<n;col++){
+      const basis=new Float64Array(n);basis[col]=1;const solution=solveLinear(gram,basis,n);
+      for(let row=0;row<n;row++)inverse[row*n+col]=solution[row];
+    }
+  }
+  const project=(valueScores,{maxBlend:blend=maxBlend}={})=>{
+    if(!valid||!Array.isArray(valueScores)||valueScores.length!==actions.length)return{scores:valueScores?center(valueScores):[],projected:valueScores?center(valueScores):[],fitQuality:0,blendUsed:0,coefficients:[]};
+    const y=center(valueScores),rhs=new Float64Array(n);
+    for(let r=0;r<rows.length;r++){const x=rows[r],target=y[r];for(let i=0;i<n;i++)rhs[i]+=x[i]*target}
+    const weights=new Float64Array(n);
+    for(let i=0;i<n;i++)for(let j=0;j<n;j++)weights[i]+=inverse[i*n+j]*rhs[j];
+    const projected=center(rows.map(x=>x.reduce((sum,v,i)=>sum+v*weights[i],0)));
+    const sst=y.reduce((s,v)=>s+v*v,0),sse=y.reduce((s,v,i)=>s+(v-projected[i])**2,0),fitQuality=sst>1e-12?clamp(1-sse/sst,0,1):0,blendUsed=clamp(Number(blend)||0,0,1)*fitQuality;
+    const scores=y.map((v,i)=>(1-blendUsed)*v+blendUsed*projected[i]);
+    return{scores,projected,fitQuality,blendUsed,coefficients:columns.map((col,i)=>({id:col.id,label:col.label,weight:Number(weights[i])}))};
+  };
+  return{project,columns:columns.map(({id,label})=>({id,label})),actionCount:actions?.length||0,basisSize:n,ridge};
+}
+
 export function projectValueToActionFields(schema,actions,valueScores,{ridge=.05,maxBlend=.7}={}){
-  if(!Array.isArray(actions)||!Array.isArray(valueScores)||actions.length!==valueScores.length||actions.length<2)return{scores:valueScores?center(valueScores):[],projected:valueScores?center(valueScores):[],fitQuality:0,blendUsed:0,coefficients:[]};
-  const columns=fieldColumns(schema),n=columns.length,rows=actions.map(action=>columns.map(col=>Number(col.value(action)||0))),y=center(valueScores);
-  const matrix=new Float64Array(n*n),vector=new Float64Array(n);
-  for(let r=0;r<rows.length;r++){const x=rows[r],target=y[r];for(let i=0;i<n;i++){vector[i]+=x[i]*target;for(let j=0;j<n;j++)matrix[i*n+j]+=x[i]*x[j]}}
-  for(let i=0;i<n;i++)matrix[i*n+i]+=i===0?ridge*.1:ridge;
-  const weights=solveLinear(matrix,vector,n),projected=center(rows.map(x=>x.reduce((sum,v,i)=>sum+v*weights[i],0)));
-  const sst=y.reduce((s,v)=>s+v*v,0),sse=y.reduce((s,v,i)=>s+(v-projected[i])**2,0),fitQuality=sst>1e-12?clamp(1-sse/sst,0,1):0,blendUsed=clamp(Number(maxBlend)||0,0,1)*fitQuality;
-  const scores=y.map((v,i)=>(1-blendUsed)*v+blendUsed*projected[i]);
-  return{scores,projected,fitQuality,blendUsed,coefficients:columns.map((col,i)=>({id:col.id,label:col.label,weight:Number(weights[i])}))};
+  return compileActionFieldProjector(schema,actions,{ridge,maxBlend}).project(valueScores);
 }
