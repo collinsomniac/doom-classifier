@@ -161,3 +161,13 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
 .model-io-grid section{min-width:0;border:1px solid #202731;border-radius:10px;background:#090d12;padding:9px}
 .model-io-pre{margin:0;max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:9.5px;line-height:1.45;background:#05080b;color:#b7c2cd}
 @media(max-width:1050px){.model-io-grid{grid-template-columns:1fr}}
+
+.typed-field{transition:border-color .16s ease,box-shadow .16s ease}
+.typed-field.field-disagree{border-color:#6b4b32;box-shadow:inset 0 0 0 1px #ffb35a12}
+.typed-field.field-agree{border-color:#344431}
+.typed-field-values{grid-template-columns:1fr}
+.typed-branch{display:grid!important;grid-template-columns:42px minmax(0,1fr) 48px;align-items:center;gap:6px}
+.typed-branch>span{margin:0}.typed-branch>b{text-align:right;margin:0!important}
+.typed-meter{height:4px;border-radius:999px;background:#1a222b;overflow:hidden;padding:0!important}
+.typed-meter i{display:block;height:100%;border-radius:inherit;background:#7f8b98;transition:width .18s ease}
+.typed-branch.field-value .typed-meter i{background:#ffb35a}.typed-branch.field-fused .typed-meter i{background:var(--accent)}
