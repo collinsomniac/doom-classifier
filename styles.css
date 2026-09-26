@@ -190,3 +190,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
 .typed-trace-disagree .typed-stage-final{border-color:#665039}
 .typed-field-subhead{margin-top:10px;padding-top:10px}
 @media(max-width:900px){.typed-trace{grid-template-columns:1fr}.typed-stage-arrow{height:14px;transform:rotate(90deg)}}
+
+.fusion-node.authority-earned{border-color:#6b7940;box-shadow:0 0 0 1px #d9ff5a36,0 0 28px #d9ff5a18}
+.fusion-node.epistemic-limited{border-color:#795a40;box-shadow:0 0 0 1px #ffb35a36,0 0 28px #ffb35a18}
+.fusion-node.semantic-guard{border-color:#4a415e;box-shadow:0 0 0 1px #b58cff28}
