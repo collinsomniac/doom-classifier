@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import {SemanticResidualPolicy} from "../src/core/policy.js";
-import {HashSemanticScorer} from "../src/core/semantic.js";
+import {HashSemanticAdapter} from "../src/core/semantic.js";
 
-const schema={objective:"choose a controller input",fields:[{id:"x",label:"x",description:"state value",min:0,max:1}],collections:[],actionFields:[{id:"go",label:"go",description:"go control",min:0,max:1}]};
+const schema={objective:"choose a controller input",objectiveSemanticVector:new Float32Array([.1,.2,.3]),fields:[{id:"x",label:"x",description:"state value",min:0,max:1,semanticVector:new Float32Array([.4,.5])}],collections:[],actionFields:[{id:"go",label:"go",description:"go control",min:0,max:1}]};
 const actions=[{id:"go",label:"go",description:"apply go control",params:{go:1}},{id:"wait",label:"wait",description:"apply no control",params:{go:0}}];
 const semantic=new HashSemanticScorer();const source=new SemanticResidualPolicy({schema,actions,semantic,residual:"neural-set",seed:44,inferenceMode:"neural"});
 const obs={x:.75,_collections:{}};
