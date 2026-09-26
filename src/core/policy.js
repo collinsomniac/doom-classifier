@@ -201,16 +201,24 @@ export class SemanticResidualPolicy{
   }
   applyTeacherScores(obs,scores,steps=this.distillSteps,temporal=null,{maxSteps=steps,targetKL=null,strength=.5}={}){
     if(!this.q.distill)return null;
-    const replay=this.replayTeacherDistillation(),teacher=softmax(scores,1);let result=null,used=0,kl=Infinity;
-    const cap=Math.max(steps,Math.floor(maxSteps||steps));
-    for(let i=0;i<cap;i++){
-      result=this.q.distill(obs,scores,{strength,temporal});used=i+1;
-      if(result?.student){kl=klDivergence(teacher,result.student);if(used>=steps&&targetKL!=null&&kl<=targetKL)break}
-      if(used>=steps&&targetKL==null)break;
+    const replay=this.replayTeacherDistillation(),teacher=softmax(scores,1),current=this.snapshotTeacherExample(obs,scores,temporal);
+    const headFit=this.q.fitSemanticHead?.([...this.teacherReplay,current])||null;
+    let result=null,used=0,kl=Infinity;
+    if(headFit&&this.q.scoreStatsObservation){
+      const student=softmax(this.q.scoreStatsObservation(obs,{temporal}).semanticScores,1);
+      kl=klDivergence(teacher,student);result={teacher,student,loss:crossEntropy(teacher,student),headFit};
+    }
+    const cap=Math.max(steps,Math.floor(maxSteps||steps)),alreadyFit=targetKL!=null&&Number.isFinite(kl)&&kl<=targetKL;
+    if(!alreadyFit){
+      for(let i=0;i<cap;i++){
+        result=this.q.distill(obs,scores,{strength,temporal});used=i+1;
+        if(result?.student){kl=klDivergence(teacher,result.student);if(used>=steps&&targetKL!=null&&kl<=targetKL)break}
+        if(used>=steps&&targetKL==null)break;
+      }
     }
     this.rememberTeacherExample(obs,scores,temporal);
     this.q.syncTarget?.({value:false});
-    return result?{...result,stepsUsed:used,kl,teacherReplayUpdates:replay.updates,teacherReplayMeanLoss:replay.meanLoss,teacherReplaySize:this.teacherReplay.length}:null;
+    return result?{...result,headFit,stepsUsed:used,kl,teacherReplayUpdates:replay.updates,teacherReplayMeanLoss:replay.meanLoss,teacherReplaySize:this.teacherReplay.length}:null;
   }
   async primeTeacher(obs,{steps=Math.max(4,this.distillSteps),maxSteps=steps,targetKL=null,temporal=null}={}){
     const semantic=this.semantic,generation=this.teacherGeneration,requestedStep=this.decisionCount;
