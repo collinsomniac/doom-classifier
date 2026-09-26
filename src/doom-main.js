@@ -94,9 +94,11 @@ function normalizeFieldValue(field,raw){
 function fieldExpectation(field,dist){
   if(field?.enum){
     const bins=new Map();policy.actions.forEach((action,i)=>{const key=String(action.params?.[field.id]??"unset");bins.set(key,(bins.get(key)||0)+(dist[i]||0))});
-    const [key,p]=[...bins.entries()].sort((a,b)=>b[1]-a[1])[0]||["unset",0];return (field.enum?.[key]??key)+" "+(p*100).toFixed(0)+"%";
+    const [key,p]=[...bins.entries()].sort((a,b)=>b[1]-a[1])[0]||["unset",0];
+    return{label:(field.enum?.[key]??key)+" "+(p*100).toFixed(0)+"%",strength:Number(p||0)};
   }
-  let sum=0;policy.actions.forEach((action,i)=>{sum+=(dist[i]||0)*normalizeFieldValue(field,action.params?.[field.id]??0)});return sum.toFixed(2);
+  let sum=0;policy.actions.forEach((action,i)=>{sum+=(dist[i]||0)*normalizeFieldValue(field,action.params?.[field.id]??0)});
+  return{label:sum.toFixed(2),strength:Math.max(0,Math.min(1,sum))};
 }
 function renderTypedFields(d){
   if(!ui.typedFieldGrid||!policy)return;const fields=policy.schema.actionFields||[];
@@ -104,7 +106,12 @@ function renderTypedFields(d){
   const semantic=localSoftmax(d.semanticPriorScores||[],Math.max(.25,policy.temperature||1));
   const valueScores=d.valueScores||[],mean=valueScores.reduce((a,b)=>a+Number(b||0),0)/Math.max(1,valueScores.length),variance=valueScores.reduce((a,b)=>a+(Number(b||0)-mean)**2,0)/Math.max(1,valueScores.length),scale=Math.max(.02,Math.sqrt(variance));
   const value=localSoftmax(valueScores,scale),fused=d.probs||[];
-  ui.typedFieldGrid.innerHTML=fields.map(field=>'<div class="typed-field"><strong>'+escapeHtml(field.label||field.id)+'</strong><div class="typed-field-values"><div><span>prior</span><b>'+escapeHtml(fieldExpectation(field,semantic))+'</b></div><div class="field-value"><span>value</span><b>'+escapeHtml(fieldExpectation(field,value))+'</b></div><div class="field-fused"><span>fused</span><b>'+escapeHtml(fieldExpectation(field,fused))+'</b></div></div></div>').join("");
+  const branch=(name,item,cls="")=>'<div class="typed-branch '+cls+'"><span>'+name+'</span><div class="typed-meter"><i style="width:'+(item.strength*100).toFixed(1)+'%"></i></div><b>'+escapeHtml(item.label)+'</b></div>';
+  ui.typedFieldGrid.innerHTML=fields.map(field=>{
+    const prior=fieldExpectation(field,semantic),learned=fieldExpectation(field,value),final=fieldExpectation(field,fused),spread=Math.max(prior.strength,learned.strength,final.strength)-Math.min(prior.strength,learned.strength,final.strength);
+    const cls=spread>.25?"field-disagree":spread<.08?"field-agree":"";
+    return '<div class="typed-field '+cls+'" title="branch spread '+spread.toFixed(3)+'"><strong>'+escapeHtml(field.label||field.id)+'</strong><div class="typed-field-values">'+branch("prior",prior)+branch("value",learned,"field-value")+branch("fused",final,"field-fused")+'</div></div>';
+  }).join("");
 }
 function setArchNode(id,{active=false,hot=false,pending=false,learning=false,value=null}={}){
   const node=ui.architecture?.querySelector('[data-arch="'+id+'"]');if(!node)return;
