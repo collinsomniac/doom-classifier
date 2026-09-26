@@ -12,6 +12,9 @@ test("compare browser NLI teachers on identical structured DOOM probes",async({p
 
   const probe=()=>page.evaluate(async()=>{
     const {env,policy}=window.__doomLab,base=env.observe(),actions=policy.actions;
+    const teacherCanonical=await policy.semantic.score(base),studentCanonical=policy.q.scoreStatsObservation(base,{temporal:null}).semanticScores;
+    const softmax=s=>{const peak=Math.max(...s),e=s.map(v=>Math.exp(v-peak)),z=e.reduce((a,b)=>a+b,0)||1;return e.map(v=>v/z)};
+    const tp=softmax(teacherCanonical),sp=softmax(studentCanonical),studentKL=tp.reduce((sum,p,i)=>sum+(p>0?p*Math.log(p/Math.max(1e-9,sp[i])):0),0),bootstrap=policy.lastTeacherResult?.distillation||null;
     const entity=(overrides={})=>({engine_record_id:99,type:1,x:base.player_x+128,y:base.player_y,z:base.player_z,relative_x:128,relative_y:0,relative_z:0,velocity_x:0,velocity_y:0,radius:20,height:56,health:40,distance:128,relative_angle:0,visible:1,countkill:1,pickup:0,targeting_player:1,...overrides});
     const cases={
       enemy_ahead:{...base,health:100,recent_damage:0,under_fire:0,bullets:50,_collections:{entities:[entity()],geometry:[]}},
@@ -32,7 +35,7 @@ test("compare browser NLI teachers on identical structured DOOM probes",async({p
       strafeUnderFireMinusQuiet:result.under_fire_side.strafe-result.quiet_room.strafe,
       useQuiet:result.quiet_room.use
     };
-    return{teacher:policy.semantic.name,backend:policy.semantic.backend,cases:result,discrimination};
+    return{teacher:policy.semantic.name,backend:policy.semantic.backend,cases:result,discrimination,studentFit:{canonicalKL:studentKL,bootstrapKL:Number(bootstrap?.kl??NaN),steps:Number(bootstrap?.stepsUsed||0)}};
   });
 
   const mobile=await probe();
