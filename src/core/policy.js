@@ -125,6 +125,19 @@ export class SemanticResidualPolicy{
       const memberCount=valueMemberScores[0].length,projected=Array.from({length:memberCount},(_,member)=>projectValueToActionFields(this.schema,this.actions,valueMemberScores.map(row=>Number(row?.[member]||0)),{ridge:this.typedValueRidge,maxBlend:this.typedValueBlend}).scores);
       effectiveMembers=priorScores.map((_,a)=>projected.map(scores=>scores[a]));
     }
+    const criticRank=[...effectiveValue.keys()].sort((a,b)=>effectiveValue[b]-effectiveValue[a]),criticTop=criticRank[0]??0,criticRunner=criticRank[1]??criticTop,criticGap=Math.max(0,Number(effectiveValue[criticTop]||0)-Number(effectiveValue[criticRunner]||0));
+    let criticTopAgreement=0,criticMarginMean=criticGap,criticMarginStd=0,criticMarginSnr=0;
+    if(effectiveMembers?.[criticTop]?.length){
+      const members=effectiveMembers[criticTop].length,margins=[];let agree=0;
+      for(let member=0;member<members;member++){
+        let memberTop=0;for(let action=1;action<effectiveMembers.length;action++)if(Number(effectiveMembers[action]?.[member]||0)>Number(effectiveMembers[memberTop]?.[member]||0))memberTop=action;
+        if(memberTop===criticTop)agree++;
+        margins.push(Number(effectiveMembers[criticTop]?.[member]||0)-Number(effectiveMembers[criticRunner]?.[member]||0));
+      }
+      criticTopAgreement=agree/members;criticMarginMean=margins.reduce((a,b)=>a+b,0)/members;
+      criticMarginStd=Math.sqrt(margins.reduce((s,v)=>s+(v-criticMarginMean)**2,0)/members);
+      criticMarginSnr=Math.abs(criticMarginMean)/(criticMarginStd+1e-6);
+    }
     const evaluate=beta=>{
       const scores=priorScores.map((v,i)=>v+beta*centered[i]),probs=softmax(scores,temp),memberScores=hasMembers?priorScores.map((semantic,a)=>Array.from({length:valueMemberScores[0].length},(_,m)=>semantic+beta*Number(effectiveMembers[a]?.[m]||0))):null;
       const epistemic=memberScores?ensembleDisagreement(memberScores,temp):0;
@@ -150,7 +163,7 @@ export class SemanticResidualPolicy{
       }
     }
     const klUtilization=budget>0?clamp(chosen.kl/budget,0,1):0,epistemicUtilization=epistemicBudget>0?clamp(chosen.epistemic/epistemicBudget,0,1):0;
-    return{scores:chosen.scores,memberScores:chosen.memberScores,valueBeta:chosen.beta,priorKL:chosen.kl,valueTrust,priorKlBudget:budget,klUtilization,valueEpistemic:chosen.epistemic,valueEpistemicBudget:epistemicBudget,epistemicUtilization,valueBetaSaturated,priorProbs:prior,typedValueScores:effectiveValue,typedValueProjected:typed.projected,typedValueFit:typed.fitQuality,typedValueBlendUsed:typed.blendUsed,typedFieldCoefficients:typed.coefficients};
+    return{scores:chosen.scores,memberScores:chosen.memberScores,valueBeta:chosen.beta,priorKL:chosen.kl,valueTrust,priorKlBudget:budget,klUtilization,valueEpistemic:chosen.epistemic,valueEpistemicBudget:epistemicBudget,epistemicUtilization,valueBetaSaturated,priorProbs:prior,typedValueScores:effectiveValue,typedValueProjected:typed.projected,typedValueFit:typed.fitQuality,typedValueBlendUsed:typed.blendUsed,typedFieldCoefficients:typed.coefficients,criticTopIndex:criticTop,criticRunnerIndex:criticRunner,criticGap,criticTopAgreement,criticMarginMean,criticMarginStd,criticMarginSnr};
   }
   residualEvaluation(obs,features,temporal=null){
     if(this.q.scoreStatsObservation){
@@ -312,7 +325,7 @@ export class SemanticResidualPolicy{
     const stats=confidenceStats(probs);this.decisionCount++;
     return{
       actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:logits,semanticPriorScores:activeFusion.semanticScores||residualEval.semanticScores||null,valueScores:residualEval.valueScores||null,features:encoded.features,temporal:encoded.temporal,
-      valueBeta:Number(activeFusion.valueBeta||0),priorKL:Number(activeFusion.priorKL||0),valueTrust:Number(activeFusion.valueTrust||0),priorKlBudget:Number(activeFusion.priorKlBudget||0),klUtilization:Number(activeFusion.klUtilization||0),valueEpistemic:Number(activeFusion.valueEpistemic||0),valueEpistemicBudget:Number(activeFusion.valueEpistemicBudget??this.valueEpistemicBudget),epistemicUtilization:Number(activeFusion.epistemicUtilization||0),valueBetaSaturated:!!activeFusion.valueBetaSaturated,typedValueScores:activeFusion.typedValueScores||null,typedValueFit:Number(activeFusion.typedValueFit||0),typedValueBlendUsed:Number(activeFusion.typedValueBlendUsed||0),typedFieldCoefficients:activeFusion.typedFieldCoefficients||null,
+      valueBeta:Number(activeFusion.valueBeta||0),priorKL:Number(activeFusion.priorKL||0),valueTrust:Number(activeFusion.valueTrust||0),priorKlBudget:Number(activeFusion.priorKlBudget||0),klUtilization:Number(activeFusion.klUtilization||0),valueEpistemic:Number(activeFusion.valueEpistemic||0),valueEpistemicBudget:Number(activeFusion.valueEpistemicBudget??this.valueEpistemicBudget),epistemicUtilization:Number(activeFusion.epistemicUtilization||0),valueBetaSaturated:!!activeFusion.valueBetaSaturated,typedValueScores:activeFusion.typedValueScores||null,typedValueFit:Number(activeFusion.typedValueFit||0),typedValueBlendUsed:Number(activeFusion.typedValueBlendUsed||0),typedFieldCoefficients:activeFusion.typedFieldCoefficients||null,criticTopIndex:Number(activeFusion.criticTopIndex??-1),criticRunnerIndex:Number(activeFusion.criticRunnerIndex??-1),criticGap:Number(activeFusion.criticGap||0),criticTopAgreement:Number(activeFusion.criticTopAgreement||0),criticMarginMean:Number(activeFusion.criticMarginMean||0),criticMarginStd:Number(activeFusion.criticMarginStd||0),criticMarginSnr:Number(activeFusion.criticMarginSnr||0),
       uncertainty:{...stats,novelty,epistemic},latencyMs:performance.now()-t0,semanticLatencyMs:semanticMs,residualLatencyMs:residualMs,
       teacherUsed,teacherPending:!!this.teacherPromise,semanticUsed,inferenceMode:mode,explorationStrategy,teacherCalls:this.teacherCalls,teacherScheduled:this.teacherScheduled,lastTeacherLatencyMs:this.lastTeacherLatencyMs
     };
