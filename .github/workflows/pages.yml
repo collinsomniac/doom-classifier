@@ -49,6 +49,8 @@ jobs:
         run: node tests/target-network.mjs
       - name: Run semantic/value separation invariants
         run: node tests/semantic-value-separation.mjs
+      - name: Run portable policy checkpoint round-trip
+        run: node tests/checkpoint-roundtrip.mjs
       - name: Run prior/value fusion invariants
         run: node tests/prior-value-fusion.mjs
       - name: Run temperature calibration invariants
