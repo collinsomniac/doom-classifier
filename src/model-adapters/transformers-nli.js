@@ -85,13 +85,14 @@ export function summarizeCollection(collection,records,{maxFields=8,representati
 }
 
 export class TransformersNLIAdapter{
-  constructor({preset="mobilebert",onProgress=()=>{},maxStateChars=5000,maxPremiseTokens=384}={}){
+  constructor({preset="mobilebert",onProgress=()=>{},maxStateChars=5000,maxPremiseTokens=384,labelBiasCalibration=false,labelBiasStrength=1}={}){
     if(!NLI_PRESETS[preset])throw new Error("Unknown NLI preset: "+preset);
     this.presetKey=preset;this.preset=NLI_PRESETS[preset];this.name=this.preset.label;this.onProgress=onProgress;this.maxStateChars=maxStateChars;this.maxPremiseTokens=maxPremiseTokens;
-    this.schema=null;this.actions=null;this.labels=null;this.classifier=null;this.backend="unloaded";
+    this.labelBiasCalibration=!!labelBiasCalibration;this.labelBiasStrength=Math.max(0,Number(labelBiasStrength)||0);
+    this.schema=null;this.actions=null;this.labels=null;this.classifier=null;this.backend="unloaded";this.nullBiasLogits=null;this.nullBiasPromise=null;
   }
   compile(schema,actions){
-    this.schema=schema;this.actions=actions;
+    this.schema=schema;this.actions=actions;this.nullBiasLogits=null;this.nullBiasPromise=null;
     this.labels=actions.map(a=>{
       const active=Object.entries(a.params||{}).filter(([,v])=>Number(v)>0).map(([k])=>k.replaceAll("_"," "));
       return a.label+" — controller buttons: "+(active.length?active.join(", "):"none")+"; "+a.description;
@@ -163,14 +164,55 @@ export class TransformersNLIAdapter{
     }
     return text;
   }
-  async score(observation){
-    if(!this.classifier)await this.load();
-    const output=await this.classifier(this.boundedPremise(observation),this.labels,{multi_label:true,hypothesis_template:"Given only the observed game state and literal controller meanings, using {} for the next control interval is contextually appropriate."});
-    const independent=new Map(output.labels.map((label,i)=>[label,output.scores[i]])),eps=1e-6;
+  outputLogits(output){
+    const independent=new Map((output?.labels||[]).map((label,i)=>[label,output.scores[i]])),eps=1e-6;
     return this.labels.map(label=>{
       const p=Math.max(eps,Math.min(1-eps,Number(independent.get(label)??eps)));
       return Math.log(p/(1-p));
     });
+  }
+  async classifyPremise(premise){
+    if(!this.classifier)await this.load();
+    const output=await this.classifier(premise,this.labels,{multi_label:true,hypothesis_template:"Given only the observed game state and literal controller meanings, using {} for the next control interval is contextually appropriate."});
+    return this.outputLogits(output);
+  }
+  nullStateText(){
+    return JSON.stringify({
+      environment:this.schema?.environment||"structured interactive environment",
+      objective:this.schema?.objective||"choose a controller input from the observed state",
+      control_interval_ms:Number.isFinite(Number(this.schema?.controlHorizonMs))?Number(this.schema.controlHorizonMs):null,
+      observation:{status:"withheld for state-independent action-label calibration"},
+      calibration:{purpose:"estimate action-label preference that exists without current-state evidence"}
+    });
+  }
+  boundedText(text){
+    const tokenizer=this.classifier?.tokenizer;if(!tokenizer)return text;
+    try{
+      const encoded=tokenizer(text,{return_tensor:false,truncation:true,max_length:this.maxPremiseTokens});
+      let ids=encoded?.input_ids??encoded;if(Array.isArray(ids)&&Array.isArray(ids[0]))ids=ids[0];
+      if(Array.isArray(ids)&&typeof tokenizer.decode==="function")return tokenizer.decode(ids,{skip_special_tokens:true});
+    }catch{}
+    return text;
+  }
+  async scoreRaw(observation){return this.classifyPremise(this.boundedPremise(observation))}
+  async nullBias(){
+    if(this.nullBiasLogits)return this.nullBiasLogits;
+    if(!this.nullBiasPromise)this.nullBiasPromise=(async()=>this.classifyPremise(this.boundedText(this.nullStateText())))();
+    try{this.nullBiasLogits=await this.nullBiasPromise;return this.nullBiasLogits}
+    finally{this.nullBiasPromise=null}
+  }
+  calibrateScores(raw,bias,{strength=this.labelBiasStrength}={}){
+    if(!raw?.length||!bias?.length||raw.length!==bias.length)return raw?[...raw]:[];
+    const alpha=Math.max(0,Number(strength)||0),corrected=raw.map((v,i)=>Number(v||0)-alpha*Number(bias[i]||0));
+    const mean=corrected.reduce((x,y)=>x+y,0)/Math.max(1,corrected.length);
+    return corrected.map(v=>v-mean);
+  }
+  async scoreCalibrated(observation,{strength=this.labelBiasStrength}={}){
+    const [raw,bias]=await Promise.all([this.scoreRaw(observation),this.nullBias()]);
+    return this.calibrateScores(raw,bias,{strength});
+  }
+  async score(observation){
+    return this.labelBiasCalibration?this.scoreCalibrated(observation):this.scoreRaw(observation);
   }
   async dispose(){if(this.classifier?.dispose)await this.classifier.dispose();this.classifier=null;this.backend="disposed"}
 }
