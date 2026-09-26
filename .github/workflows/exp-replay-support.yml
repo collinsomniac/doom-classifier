@@ -1,0 +1,30 @@
+name: exp-replay-support-validate
+
+on:
+  push:
+    branches:
+      - "exp/replay-support-gate"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check experiment
+        run: |
+          node --check src/core/policy.js
+          node --check src/doom-main.js
+      - name: Semantic memory invariants
+        run: node tests/teacher-replay.mjs
+      - name: Adaptive teacher invariants
+        run: node tests/adaptive-teacher.mjs
+      - name: Prior value fusion invariants
+        run: node tests/prior-value-fusion.mjs
+      - name: Generic adapter invariant
+        run: node tests/task-adapter-contract.mjs
