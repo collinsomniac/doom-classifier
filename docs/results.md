@@ -435,6 +435,21 @@ The policy is trained on the first task, then reconfigured **in place** to the s
 
 This is an architecture-transfer invariant, not a performance benchmark. Its purpose is to prevent DOOM-specific assumptions from leaking into the reusable core while DOOM remains the primary behavioral demo.
 
+## Starter-checkpoint repeated-rollout gate
+
+A staged starter-model publisher now evaluates the semantic baseline and 64/128/192/256-decision fine-tune checkpoints across **three frozen teacher-free rollouts each** before publication.
+
+The latest run passed serialization and exact canonical policy-output round-trip checks, but the behavior result was negative:
+
+- semantic baseline: combat in only **1 / 3** frozen runs; median attributed damage **0**;
+- 64-decision checkpoint: median attributed damage **0**, dominant **forward**;
+- 128/192-decision checkpoints: median attributed damage **0**, dominant **turn left**;
+- 256-decision checkpoint: median attributed damage **0**, dominant **turn right**.
+
+Because no candidate was reliably combat-capable, the generated starter artifact was **withheld from browser auto-load** even though the checkpoint format itself was valid. The live demo therefore falls back to **Prepare Recommended** rather than presenting a weak trained policy as a validated starter.
+
+This is a useful separation of concerns: checkpoint portability is solved; reliable offline/online policy improvement is not.
+
 ## What remains unproven
 
 The strongest missing evidence is still:
