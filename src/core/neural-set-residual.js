@@ -194,6 +194,24 @@ export class NeuralSetResidualQ{
   }
   setActions(actions){this.actions=actions;this.actionEmbeddings=actions.map(a=>actionVector(a,this.actionDim,this.compiledActionFields));if(this.targetNet)this.targetNet.setActions(actions);return this}
   parameterCount(){return this.layers.reduce((n,l)=>n+l.count(),0)}
+  exportCheckpoint(){
+    return{
+      version:1,model:this.name,params:this.parameterCount(),updates:this.updates,distillUpdates:this.distillUpdates,targetSyncs:this.targetSyncs,
+      layers:this.layers.map(layer=>({w:Array.from(layer.w),b:Array.from(layer.b)}))
+    };
+  }
+  importCheckpoint(checkpoint,{syncTarget=true}={}){
+    if(!checkpoint||checkpoint.version!==1||!Array.isArray(checkpoint.layers))throw new Error("Unsupported neural checkpoint");
+    if(checkpoint.layers.length!==this.layers.length)throw new Error("Checkpoint layer count mismatch");
+    for(let i=0;i<this.layers.length;i++){
+      const source=checkpoint.layers[i],target=this.layers[i];
+      if(!Array.isArray(source?.w)||!Array.isArray(source?.b)||source.w.length!==target.w.length||source.b.length!==target.b.length)throw new Error("Checkpoint layer shape mismatch at "+i);
+      target.w.set(source.w);target.b.set(source.b);target.zeroGrad();
+    }
+    this.updates=Math.max(0,Number(checkpoint.updates||0));this.distillUpdates=Math.max(0,Number(checkpoint.distillUpdates||0));this.targetSyncs=Math.max(0,Number(checkpoint.targetSyncs||0));
+    if(syncTarget&&this.targetNet)this.syncTarget();
+    return this;
+  }
   zeroGrad(){for(const layer of this.layers)layer.zeroGrad()}
   applyLayers(layers,lr=this.lr){for(const layer of layers)layer.step(lr,this.l2)}
   apply(lr=this.lr){this.applyLayers(this.layers,lr)}

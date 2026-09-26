@@ -87,6 +87,26 @@ export class SemanticResidualPolicy{
     this.teacherGeneration++;this.teacherPromise=null;this.q.reset();this.novelty.reset();this.rng=mulberry32(this.seed);this.replayRng=mulberry32((this.seed^0x517cc1b7)>>>0);this.teacherReplayRng=mulberry32((this.seed^0xa341316c)>>>0);this.replay=[];this.teacherReplay=[];this.nStepBuffer=[];this.temperature=this.baseTemperature;
     this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];
   }
+  exportCheckpoint(){
+    if(!this.q?.exportCheckpoint)throw new Error("Residual model does not support checkpoints");
+    const clone=value=>globalThis.structuredClone?globalThis.structuredClone(value):JSON.parse(JSON.stringify(value));
+    return{
+      format:"doom-classifier-policy",version:1,createdAt:new Date().toISOString(),
+      schema:clone(this.schema),actions:clone(this.actions),temperature:this.temperature,baseTemperature:this.baseTemperature,
+      inferenceMode:"neural",q:this.q.exportCheckpoint()
+    };
+  }
+  importCheckpoint(checkpoint){
+    if(checkpoint?.format!=="doom-classifier-policy"||checkpoint.version!==1)throw new Error("Unsupported policy checkpoint");
+    if(!checkpoint.schema||!Array.isArray(checkpoint.actions))throw new Error("Checkpoint is missing schema/actions");
+    this.reconfigure({schema:checkpoint.schema,actions:checkpoint.actions});
+    if(!this.q?.importCheckpoint)throw new Error("Residual model does not support checkpoints");
+    this.q.importCheckpoint(checkpoint.q);
+    this.temperature=clamp(Number(checkpoint.temperature||this.baseTemperature),.05,2);
+    this.baseTemperature=clamp(Number(checkpoint.baseTemperature||this.temperature),.05,2);
+    this.inferenceMode="neural";this.teacherGeneration++;this.teacherPromise=null;this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];
+    return this;
+  }
   encode(obs,memoryEnabled=true,commit=true){
     const base=numericFeatures(this.schema,obs),temporal=commit?this.memory.update(base,memoryEnabled):this.memory.preview(base,memoryEnabled);
     const x=new Float32Array(this.featureSize);x.set(base,0);x.set(temporal,this.baseSize);return{base,temporal,features:x};
