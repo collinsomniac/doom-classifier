@@ -51,13 +51,13 @@ jobs:
         run: |
           set -euo pipefail
           test -s artifacts/doom-starter.json
-          node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync("artifacts/doom-starter.json","utf8"));if(x.format!=="doom-classifier-policy"||x.version!==1||!x.q?.params)process.exit(1);console.log({params:x.q.params,bytes:fs.statSync("artifacts/doom-starter.json").size})'
+          node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync("artifacts/doom-starter.json","utf8"));if(x.format!=="doom-classifier-policy"||x.version!==1||!x.q?.params||!x.build?.selection)process.exit(1);console.log({params:x.q.params,selectedStage:x.build.selectedStage,trainingDecisions:x.build.trainingDecisions,bytes:fs.statSync("artifacts/doom-starter.json").size})'
           cat > artifacts/metadata.json <<EOF
           {
             "source_commit": "${GITHUB_SHA}",
             "workflow_run": "${GITHUB_RUN_ID}",
             "runtime_branch": "engine-runtime",
-            "quality_gate": "24-step fresh teacher-free replay; kills >= baseline; return >= 70% baseline; attributed damage >= 60% baseline; exact policy-output round trip",
+            "quality_gate": "best staged checkpoint among semantic baseline + four 64-decision causal fine-tune stages; 24-step teacher-free gate requires kills >= baseline, return >= 70% baseline, attributed damage >= 60% baseline; exact policy-output round trip",
             "teacher": "MobileBERT-MNLI with null-state label-bias calibration"
           }
           EOF
