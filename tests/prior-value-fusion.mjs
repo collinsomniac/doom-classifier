@@ -20,7 +20,7 @@ const q={
 };
 const p=new SemanticResidualPolicy({
   schema,actions,semantic,residual:q,temperature:.5,seed:11,
-  priorKlBudget:.08,valueBetaMax:64,valueTrustUpdates:100,valueEpistemicBudget:1,inferenceMode:"neural"
+  priorKlBudget:.08,valueBetaMax:64,valueTrustUpdates:100,valueEpistemicBudget:1,criticKlExpansion:0,inferenceMode:"neural"
 });
 const obs={x:.5,_collections:{}};
 
@@ -44,7 +44,7 @@ assert.equal(d.uncertainty.epistemic>=0,true);
 
 const permissive=new SemanticResidualPolicy({
   schema,actions,semantic,residual:q,temperature:.5,seed:12,
-  priorKlBudget:.8,valueBetaMax:64,valueTrustUpdates:1,valueEpistemicBudget:1,inferenceMode:"neural"
+  priorKlBudget:.8,valueBetaMax:64,valueTrustUpdates:1,valueEpistemicBudget:1,criticKlExpansion:0,inferenceMode:"neural"
 });
 const moved=await permissive.decide(obs,{useResidual:true,memory:false,explore:false});
 assert.equal(moved.action.id,"value","larger KL budget must allow learned consequence value to override the prior");
@@ -56,7 +56,7 @@ const tinyQ={...q,updates:100,scoreStatsObservation(){return{
 }}};
 const adaptive=new SemanticResidualPolicy({
   schema,actions,semantic,residual:tinyQ,temperature:.5,seed:13,
-  priorKlBudget:.08,valueBetaMax:4096,valueTrustUpdates:100,valueEpistemicBudget:1,inferenceMode:"neural"
+  priorKlBudget:.08,valueBetaMax:4096,valueTrustUpdates:100,valueEpistemicBudget:1,criticKlExpansion:0,inferenceMode:"neural"
 });
 const scaled=await adaptive.decide(obs,{useResidual:true,memory:false,explore:false});
 assert.ok(scaled.valueBeta>64,"adaptive fusion must expand beyond the old arbitrary beta cap when value scores are small");
@@ -76,12 +76,23 @@ const typedQ={updates:100,scoreStatsObservation(){return{
   valueMemberScores:[[0,.01,-.01],[.48,.5,.52],[.98,1,1.02],[.53,.55,.57]],memberScores:[[0,0,0],[0,0,0],[0,0,0],[0,0,0]]
 }},reset(){},parameterCount(){return 0}};
 const typedSemantic={name:"stub",backend:"test",compile(){},async score(){return[0,0,0,0]}};
-const typedPolicy=new SemanticResidualPolicy({schema:typedSchema,actions:typedActions,semantic:typedSemantic,residual:typedQ,temperature:.7,priorKlBudget:.08,valueTrustUpdates:1,valueEpistemicBudget:1,typedValueBlend:1,inferenceMode:"neural"});
+const typedPolicy=new SemanticResidualPolicy({schema:typedSchema,actions:typedActions,semantic:typedSemantic,residual:typedQ,temperature:.7,priorKlBudget:.08,valueTrustUpdates:1,valueEpistemicBudget:1,typedValueBlend:1,criticKlExpansion:0,inferenceMode:"neural"});
 const typedDecision=await typedPolicy.decide({x:.5,_collections:{}},{useResidual:true,memory:false,explore:false});
 assert.ok(typedDecision.typedValueFit>.4,"policy fusion should expose meaningful typed-action value fit");
 assert.ok(typedDecision.typedValueBlendUsed>.4,"typed value smoothing should activate in proportion to fit quality");
 assert.equal(typedDecision.typedValueScores.length,typedActions.length);
 assert.ok(typedDecision.typedFieldCoefficients.some(x=>x.id==="fire"&&x.weight>0),"typed fusion should recover positive fire contribution");
+
+const confidentAuthority=new SemanticResidualPolicy({
+  schema,actions,semantic,residual:q,temperature:.5,seed:121,
+  priorKlBudget:.08,valueBetaMax:4096,valueTrustUpdates:100,valueEpistemicBudget:1,criticKlExpansion:1,inferenceMode:"neural"
+});
+const authorityDecision=await confidentAuthority.decide(obs,{useResidual:true,memory:false,explore:false});
+assert.ok(authorityDecision.criticTopAgreement>.99,"all bootstrap heads should agree in the confident fixture");
+assert.ok(authorityDecision.criticRankingConfidence>.8,"stable critic ranking should earn high state confidence");
+assert.ok(authorityDecision.criticAuthority>.8,"fully trained critic should convert confidence into authority");
+assert.ok(authorityDecision.priorKlBudget>.14&&authorityDecision.priorKlBudget<=.1605,"confident critic may expand the base KL budget toward 2x");
+assert.ok(authorityDecision.criticKlMultiplier>1.8&&authorityDecision.criticKlMultiplier<=2.001);
 
 const uncertainQ={...q,updates:100,scoreStatsObservation(){return{
   scores:[0,0,0],semanticScores:[.8,0,-.4],valueScores:[0,1,0],
@@ -89,13 +100,15 @@ const uncertainQ={...q,updates:100,scoreStatsObservation(){return{
 }}};
 const guarded=new SemanticResidualPolicy({
   schema,actions,semantic,residual:uncertainQ,temperature:.5,seed:14,
-  priorKlBudget:.8,valueBetaMax:4096,valueTrustUpdates:1,valueEpistemicBudget:.01,inferenceMode:"neural"
+  priorKlBudget:.8,valueBetaMax:4096,valueTrustUpdates:1,valueEpistemicBudget:.01,criticKlExpansion:1,inferenceMode:"neural"
 });
 const guardedDecision=await guarded.decide(obs,{useResidual:true,memory:false,explore:false});
 assert.ok(guardedDecision.valueBeta>0,"confident value influence should not be disabled outright");
 assert.ok(guardedDecision.valueEpistemic<=.0105,"value authority must stop at the epistemic disagreement budget");
 assert.ok(guardedDecision.epistemicUtilization>.8,"uncertain critic should spend the epistemic trust budget");
-assert.ok(guardedDecision.priorKL<.8,"epistemic guard should become the active constraint before the permissive KL budget");
+assert.ok(guardedDecision.priorKL<guardedDecision.priorKlBudget,"epistemic guard should become the active constraint before the permissive KL budget");
+assert.ok(guardedDecision.criticTopAgreement<.99,"split bootstrap heads should not look fully confident");
+assert.ok(guardedDecision.criticAuthority<.15,"split critic ranking must not materially expand KL authority");
 
 const flatQ={...q,updates:100,scoreStatsObservation(){return{
   scores:[0,0,0],semanticScores:[.8,0,-.4],valueScores:[1,1,1],
@@ -106,4 +119,4 @@ const same=await invariant.decide(obs,{useResidual:true,memory:false,explore:fal
 assert.ok(same.probs.every((x,i)=>Math.abs(x-prior[i])<1e-8),"action-invariant value offsets must not alter semantic prior");
 assert.ok(same.priorKL<1e-10);
 
-console.log(JSON.stringify({ok:true,beta:d.valueBeta,priorKL:d.priorKL,adaptiveBeta:scaled.valueBeta,adaptiveKL:scaled.priorKL,adaptiveUtilization:scaled.klUtilization,guardedBeta:guardedDecision.valueBeta,guardedEpistemic:guardedDecision.valueEpistemic,guardedEpistemicUtilization:guardedDecision.epistemicUtilization,moved:moved.action.id,invariantKL:same.priorKL}));
+console.log(JSON.stringify({ok:true,beta:d.valueBeta,priorKL:d.priorKL,authorityBudget:authorityDecision.priorKlBudget,authority:authorityDecision.criticAuthority,rankingConfidence:authorityDecision.criticRankingConfidence,adaptiveBeta:scaled.valueBeta,adaptiveKL:scaled.priorKL,adaptiveUtilization:scaled.klUtilization,guardedBeta:guardedDecision.valueBeta,guardedEpistemic:guardedDecision.valueEpistemic,guardedAuthority:guardedDecision.criticAuthority,guardedEpistemicUtilization:guardedDecision.epistemicUtilization,moved:moved.action.id,invariantKL:same.priorKL}));
