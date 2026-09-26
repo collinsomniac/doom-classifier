@@ -151,3 +151,5 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
 .typed-field-values .field-value b{color:#ffb35a}.typed-field-values .field-fused b{color:var(--accent)}
 @media(max-width:650px){.typed-field-head{display:grid}.typed-field-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:420px){.typed-field-grid{grid-template-columns:1fr}}
+
+.checkpoint-controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}.checkpoint-controls button{flex:1 1 150px}.checkpoint-controls+.model-status{margin-top:7px}
