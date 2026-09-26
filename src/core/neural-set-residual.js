@@ -108,7 +108,7 @@ class Dense{
 function zeroEntityGrads(n,dim){return Array.from({length:n},()=>new Float32Array(dim))}
 
 export class NeuralSetResidualQ{
-  constructor(schema,actions,{seed=2026,hashDim=48,globalDim=16,temporalDim=8,entityHidden=24,entityDim=16,actionDim=24,headDim=32,valueHeadDim=8,valueHidden=16,valueWeight=.5,ensembleSize=3,bootstrapProbability=.8,lr=.008,gamma=.96,l2=1e-6,useTargetNetwork=true,targetSyncInterval=24}={}){
+  constructor(schema,actions,{seed=2026,hashDim=48,globalDim=16,temporalDim=8,entityHidden=24,entityDim=16,actionDim=24,headDim=32,valueHeadDim=4,valueHidden=16,valueWeight=.5,ensembleSize=3,bootstrapProbability=.8,lr=.008,gamma=.96,l2=1e-6,useTargetNetwork=true,targetSyncInterval=24}={}){
     this.schema=schema;this.actions=actions;this.seed=seed;this.hashDim=hashDim;this.globalDim=globalDim;this.temporalDim=temporalDim;this.entityHidden=entityHidden;this.entityDim=entityDim;this.actionDim=actionDim;this.headDim=headDim;this.valueHeadDim=valueHeadDim;this.valueHidden=valueHidden;this.valueWeight=valueWeight;this.ensembleSize=ensembleSize;this.bootstrapProbability=bootstrapProbability;
     this.lr=lr;this.gamma=gamma;this.l2=l2;this.useTargetNetwork=useTargetNetwork;this.targetSyncInterval=Math.max(1,Math.floor(targetSyncInterval));this.name="SchemaSemanticValueSetNet";
     this.attentionStateDim=globalDim+temporalDim;this.queryInputDim=actionDim+this.attentionStateDim;this.contextDim=globalDim+temporalDim+entityDim*2+2;this.headInputDim=this.contextDim+entityDim+actionDim;
@@ -123,13 +123,17 @@ export class NeuralSetResidualQ{
     this.queryLayer=new Dense(this.queryInputDim,this.entityDim,rng,{activation:"tanh"});
     this.headLayer=new Dense(this.headInputDim,this.headDim,rng);
     this.semanticLayer=new Dense(this.headDim,1,rng,{activation:"linear"});
-    this.valueHeadLayer=new Dense(this.headInputDim,this.valueHeadDim,rng,{activation:"tanh"});
-    this.valueLayer=new Dense(this.valueHeadDim,this.valueHidden,rng,{activation:"tanh"});
+    // Preserve the original semantic-hidden -> value path, then add a tiny reward-only residual adapter.
+    // Creating valueLayer/valueOutLayers before the adapter retains the original critic initialization.
+    this.valueLayer=new Dense(this.headDim,this.valueHidden,rng,{activation:"tanh"});
     this.valueOutLayers=Array.from({length:this.ensembleSize},()=>new Dense(this.valueHidden,1,rng,{activation:"linear"}));
     for(const layer of this.valueOutLayers)for(let i=0;i<layer.w.length;i++)layer.w[i]*=.02;
+    this.valueHeadLayer=new Dense(this.headInputDim,this.valueHeadDim,rng,{activation:"tanh"});
+    this.valueAdapterUp=new Dense(this.valueHeadDim,this.headDim,rng,{activation:"linear"});
+    for(let i=0;i<this.valueAdapterUp.w.length;i++)this.valueAdapterUp.w[i]*=.05;
     this.bootstrapRng=mulberry32((this.seed^0x9e3779b9)>>>0);
     this.semanticLayers=[this.globalLayer,this.temporalLayer,this.entityLayer1,this.entityLayer2,this.queryLayer,this.headLayer,this.semanticLayer];
-    this.valueLayers=[this.valueHeadLayer,this.valueLayer,...this.valueOutLayers];
+    this.valueLayers=[this.valueHeadLayer,this.valueAdapterUp,this.valueLayer,...this.valueOutLayers];
     this.layers=[...this.semanticLayers,...this.valueLayers];
     this.updates=0;this.distillUpdates=0;this.targetSyncs=0;
     if(this.useTargetNetwork){
@@ -215,11 +219,12 @@ export class NeuralSetResidualQ{
   actionForward(state,actionIndex){
     const attn=this.attention(state,actionIndex),input=new Float32Array(this.headInputDim);
     input.set(state.context,0);input.set(attn.attended,this.contextDim);input.set(this.actionEmbeddings[actionIndex],this.contextDim+this.entityDim);
-    const h=this.headLayer.forward(input),semanticOut=this.semanticLayer.forward(h.out),valueHead=this.valueHeadLayer.forward(input),valueHidden=this.valueLayer.forward(valueHead.out);
-    const valueOuts=this.valueOutLayers.map(layer=>layer.forward(valueHidden.out)),valueMemberScores=valueOuts.map(o=>o.out[0]);
+    const h=this.headLayer.forward(input),semanticOut=this.semanticLayer.forward(h.out),valueHead=this.valueHeadLayer.forward(input),valueResidual=this.valueAdapterUp.forward(valueHead.out),valueInput=new Float32Array(this.headDim);
+    for(let d=0;d<this.headDim;d++)valueInput[d]=h.out[d]+valueResidual.out[d];
+    const valueHidden=this.valueLayer.forward(valueInput),valueOuts=this.valueOutLayers.map(layer=>layer.forward(valueHidden.out)),valueMemberScores=valueOuts.map(o=>o.out[0]);
     const semanticScore=semanticOut.out[0],valueScore=valueMemberScores.reduce((a,b)=>a+b,0)/valueMemberScores.length;
     const memberScores=valueMemberScores.map(value=>semanticScore+this.valueWeight*value),score=semanticScore+this.valueWeight*valueScore;
-    return{score,semanticScore,valueScore,memberScores,valueMemberScores,h,semanticOut,valueHead,valueHidden,valueOuts,state,actionIndex,...attn};
+    return{score,semanticScore,valueScore,memberScores,valueMemberScores,h,semanticOut,valueHead,valueResidual,valueHidden,valueOuts,state,actionIndex,...attn};
   }
   scoreStatsObservation(observation,{temporal=null}={}){
     const state=this.encodeState(observation,{temporal}),scores=new Array(this.actions.length),semanticScores=new Array(this.actions.length),valueScores=new Array(this.actions.length),memberScores=new Array(this.actions.length),valueMemberScores=new Array(this.actions.length);
@@ -262,7 +267,10 @@ export class NeuralSetResidualQ{
       const g=this.valueOutLayers[i].backward(forward.valueOuts[i],new Float32Array([share]));
       for(let d=0;d<gh.length;d++)gh[d]+=g[d];
     }
-    const gValueHead=this.valueLayer.backward(forward.valueHidden,gh);
+    const gValueInput=this.valueLayer.backward(forward.valueHidden,gh);
+    // Reward learning updates only the private low-rank residual + value layers.
+    // The gradient into the shared semantic hidden state is intentionally dropped.
+    const gValueHead=this.valueAdapterUp.backward(forward.valueResidual,gValueInput);
     this.valueHeadLayer.backward(forward.valueHead,gValueHead);
   }
   backwardState(state,gradContext,entityExtra){
