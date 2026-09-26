@@ -12,7 +12,7 @@ const ui={
   boot:$("bootBtn"),prepare:$("prepareBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),runtime:$("runtimeStatus"),runtimeTitle:$("runtimeTitle"),bootStatus:$("bootStatus"),
   iwad:$("iwadInput"),iwadStatus:$("iwadStatus"),engineChip:$("engineChip"),schemaChip:$("schemaChip"),teacherChip:$("teacherChip"),policyChip:$("policyChip"),prepareStatus:$("prepareStatus"),
   profile:$("profileSelect"),applyProfile:$("applyProfileBtn"),profileHint:$("profileHint"),teacherMode:$("teacherModeSelect"),useNeural:$("useNeuralToggle"),learn:$("learnToggle"),memory:$("memoryToggle"),explore:$("exploreToggle"),
-  tune:$("tuneBtn"),eval:$("evalBtn"),evalResults:$("evalResults"),tuneSteps:$("tuneSteps"),tuneProgress:$("tuneProgress"),tuneStatus:$("tuneStatus"),tuneBadge:$("tuneBadge"),
+  tune:$("tuneBtn"),eval:$("evalBtn"),evalResults:$("evalResults"),tuneSteps:$("tuneSteps"),tuneProgress:$("tuneProgress"),tuneStatus:$("tuneStatus"),tuneBadge:$("tuneBadge"),loadStarter:$("loadStarterBtn"),loadSaved:$("loadSavedBtn"),saveCheckpoint:$("saveCheckpointBtn"),exportCheckpoint:$("exportCheckpointBtn"),checkpointStatus:$("checkpointStatus"),
   actionMs:$("actionMs"),actionMsOut:$("actionMsOut"),manualAction:$("manualActionSelect"),manual:$("manualBtn"),manualStatus:$("manualStatus"),weaponState:$("weaponState"),
   bars:$("actionBars"),chosen:$("chosenAction"),chosenSemantic:$("chosenSemantic"),chosenValue:$("chosenValue"),chosenScore:$("chosenScore"),intentFire:$("intentFire"),intentStrafe:$("intentStrafe"),intentTurn:$("intentTurn"),intentForward:$("intentForward"),intentBack:$("intentBack"),intentUse:$("intentUse"),entropy:$("entropy"),margin:$("margin"),epistemic:$("epistemic"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),
   attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),decodeTemp:$("decodeTemp"),replaySize:$("replaySize"),teacherReplaySize:$("teacherReplaySize"),valueBeta:$("valueBeta"),priorKL:$("priorKL"),klUtilization:$("klUtilization"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),
@@ -21,7 +21,7 @@ const ui={
   log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot")
 };
 let env=null,policy=null,controller=null,hashSemantic=null;
-let engineReady=false,schemaCompiled=false,teacherReady=false,busy=false,prepared=false;
+let engineReady=false,schemaCompiled=false,teacherReady=false,checkpointReady=false,busy=false,prepared=false;
 
 const PROFILES={
   assisted:{label:"Adaptive assisted",teacher:"adaptive",neural:true,learning:false,memory:true,explore:false,hint:"Fast neural decisions every tick; MobileBERT is scheduled only when uncertainty/novelty warrants it."},
@@ -35,13 +35,16 @@ function setChip(element,state,text){
 }
 function isLearnedTeacher(){return teacherReady&&policy?.semantic&&policy.semantic!==hashSemantic}
 function updateReadiness(){
-  prepared=engineReady&&schemaCompiled&&isLearnedTeacher();
+  const teacherPrepared=schemaCompiled&&isLearnedTeacher();
+  prepared=engineReady&&(checkpointReady||teacherPrepared);
   setChip(ui.engineChip,engineReady?"ready":"off",engineReady?"engine ready":"engine");
-  setChip(ui.schemaChip,schemaCompiled?"ready":"off",schemaCompiled?"schema compiled":"schema semantics");
-  setChip(ui.teacherChip,isLearnedTeacher()?"ready":"off",isLearnedTeacher()?"teacher loaded":"teacher");
+  setChip(ui.schemaChip,(schemaCompiled||checkpointReady)?"ready":"off",checkpointReady?"checkpoint schema":schemaCompiled?"schema compiled":"schema semantics");
+  setChip(ui.teacherChip,isLearnedTeacher()?"ready":checkpointReady?"ready":"off",isLearnedTeacher()?"teacher loaded":checkpointReady?"teacher-free checkpoint":"teacher");
   setChip(ui.policyChip,prepared?"ready":"warn",prepared?"ready to play":"not prepared");
   const lock=busy||!engineReady;
   ui.prepare.disabled=lock;ui.loadModel.disabled=lock;ui.schemaCompile.disabled=lock;ui.manual.disabled=lock;ui.manualAction.disabled=lock;ui.reset.disabled=lock;ui.export.disabled=lock;
+  if(ui.loadStarter)ui.loadStarter.disabled=lock;if(ui.loadSaved)ui.loadSaved.disabled=lock||!localStorage.getItem("doom-classifier-checkpoint-v1");
+  if(ui.saveCheckpoint)ui.saveCheckpoint.disabled=busy||!prepared;if(ui.exportCheckpoint)ui.exportCheckpoint.disabled=busy||!prepared;
   for(const element of [ui.profile,ui.applyProfile,ui.teacherMode,ui.useNeural,ui.learn,ui.memory,ui.explore,ui.tune,ui.eval,ui.tuneSteps,ui.start,ui.step])element.disabled=busy||!prepared;
   if(controller?.state==="RUNNING")ui.start.disabled=false;
 }
@@ -235,13 +238,51 @@ async function boot(){
   }catch(error){ui.boot.disabled=false;setRuntime("BOOT FAILED",true);ui.bootStatus.textContent=String(error?.message||error);ui.log.textContent=String(error?.stack||error)}
   finally{setBusy(false)}
 }
+async function importPortableCheckpoint(checkpoint,label="checkpoint"){
+  if(!engineReady||!policy||!controller)return;
+  controller.pause();setBusy(true);
+  try{
+    if(policy.semantic&&policy.semantic!==hashSemantic&&policy.semantic?.dispose)await policy.semantic.dispose().catch(()=>{});
+    policy.setSemantic(hashSemantic);teacherReady=false;
+    policy.importCheckpoint(checkpoint);schemaCompiled=true;checkpointReady=true;
+    await controller.reset({learning:false});applyProfile("frozen");ui.profile.value="frozen";
+    ui.modelSelect.value="hash";ui.modelStatus.textContent="Teacher not required · loaded frozen checkpoint.";
+    ui.schemaStatus.textContent="Compiled semantic schema restored from checkpoint.";
+    ui.prepareStatus.textContent="READY TO PLAY · "+label+" · "+policy.q.parameterCount()+" params · teacher-free neural fast path";
+    ui.checkpointStatus.textContent=label+" loaded · "+policy.q.parameterCount()+" params · "+policy.q.updates+" consequence updates";
+    setRuntime("CHECKPOINT READY");render();
+  }catch(error){ui.checkpointStatus.textContent="checkpoint load failed · "+String(error?.message||error);setRuntime("CHECKPOINT ERROR",true)}
+  finally{setBusy(false)}
+}
+async function loadBundledCheckpoint(){
+  try{
+    ui.checkpointStatus.textContent="Fetching bundled starter…";
+    const response=await fetch("./models/doom-starter.json",{cache:"no-cache"});if(!response.ok)throw new Error("HTTP "+response.status+" (starter not published yet)");
+    await importPortableCheckpoint(await response.json(),"bundled starter");
+  }catch(error){ui.checkpointStatus.textContent="Bundled starter unavailable · "+String(error?.message||error)}
+}
+async function loadBrowserCheckpoint(){
+  try{const raw=localStorage.getItem("doom-classifier-checkpoint-v1");if(!raw)throw new Error("no browser-saved checkpoint");await importPortableCheckpoint(JSON.parse(raw),"browser-saved checkpoint")}
+  catch(error){ui.checkpointStatus.textContent="browser checkpoint load failed · "+String(error?.message||error)}
+}
+function saveBrowserCheckpoint(){
+  try{const checkpoint=policy.exportCheckpoint();localStorage.setItem("doom-classifier-checkpoint-v1",JSON.stringify(checkpoint));ui.checkpointStatus.textContent="Saved in this browser · "+checkpoint.q.params+" params";updateReadiness()}
+  catch(error){ui.checkpointStatus.textContent="checkpoint save failed · "+String(error?.message||error)}
+}
+function exportPortableCheckpoint(){
+  try{
+    const checkpoint=policy.exportCheckpoint(),blob=new Blob([JSON.stringify(checkpoint)],{type:"application/json"}),a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);a.download="doom-classifier-checkpoint-"+Date.now()+".json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    ui.checkpointStatus.textContent="Checkpoint exported · "+checkpoint.q.params+" params";
+  }catch(error){ui.checkpointStatus.textContent="checkpoint export failed · "+String(error?.message||error)}
+}
 async function prepareRecommended(){
   if(!engineReady)return;controller.pause();setBusy(true);ui.prepareStatus.textContent="Preparing semantic schema…";
   try{
     if(!schemaCompiled)await compileSchemaOnly();
     ui.prepareStatus.textContent="Loading MobileBERT semantic teacher…";ui.modelSelect.value="mobilebert";
     if(!isLearnedTeacher()||policy.semantic.presetKey!=="mobilebert")await loadTeacherOnly("mobilebert");
-    policy.resetLearning();await controller.reset({learning:false});const prime=await primeCurrentTeacher("MobileBERT",16,{converge:true});
+    checkpointReady=false;policy.resetLearning();await controller.reset({learning:false});const prime=await primeCurrentTeacher("MobileBERT",16,{converge:true});
     const fit=prime.distillation?" · fit "+prime.distillation.stepsUsed+" steps · KL "+prime.distillation.kl.toFixed(3):"";
     applyProfile("assisted");ui.prepareStatus.textContent="READY TO PLAY · schema compiled · MobileBERT "+prime.ms.toFixed(0)+" ms"+fit+" · fast path is neural";
     ui.tuneStatus.textContent="Optional: run a short real-Doom training burst, then evaluate teacher-off.";setRuntime("READY TO PLAY");render();
@@ -321,7 +362,7 @@ async function manualPrimitive(){
 }
 
 ui.iwad.addEventListener("change",()=>{const file=ui.iwad.files?.[0];ui.iwadStatus.textContent=file?"Selected local IWAD: "+file.name+" · "+(file.size/1048576).toFixed(1)+" MB":"Default: Freedoom 0.13.0"});
-ui.boot.addEventListener("click",boot);ui.prepare.addEventListener("click",prepareRecommended);ui.tune.addEventListener("click",tuneAgent);ui.eval.addEventListener("click",evaluateFrozen);ui.manual.addEventListener("click",manualPrimitive);
+ui.boot.addEventListener("click",boot);ui.prepare.addEventListener("click",prepareRecommended);ui.tune.addEventListener("click",tuneAgent);ui.eval.addEventListener("click",evaluateFrozen);ui.manual.addEventListener("click",manualPrimitive);ui.loadStarter.addEventListener("click",loadBundledCheckpoint);ui.loadSaved.addEventListener("click",loadBrowserCheckpoint);ui.saveCheckpoint.addEventListener("click",saveBrowserCheckpoint);ui.exportCheckpoint.addEventListener("click",exportPortableCheckpoint);
 ui.start.addEventListener("click",()=>{if(!controller)return;if(controller.state==="RUNNING")controller.pause();else{syncRuntimeConfig();controller.start()}});
 ui.step.addEventListener("click",async()=>{if(!controller||!prepared)return;if(controller.state==="RUNNING")controller.pause();syncRuntimeConfig();await controller.tick()});
 ui.reset.addEventListener("click",async()=>{if(controller){await controller.reset({learning:false});render()}});
