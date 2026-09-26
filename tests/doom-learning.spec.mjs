@@ -5,7 +5,7 @@ test.setTimeout(600000);
 test("prepared real-Doom policy reports pre/post short fine-tune behavior",async({page})=>{
   const runtimeMode=process.env.DOOM_RUNTIME_MODE||"borrowed",trainSteps=Math.max(1,Number(process.env.DOOM_TRAIN_STEPS||64)),rolloutHorizon=Math.max(0,Number(process.env.DOOM_ROLLOUT_HORIZON||0));
   const errors=[];page.on("pageerror",e=>errors.push("pageerror: "+String(e)));page.on("console",m=>{if(m.type()==="error")errors.push("console: "+m.text())});
-  await page.goto("http://127.0.0.1:8000/doom.html"+(runtimeMode==="owned"?"?runtime=owned":""),{waitUntil:"domcontentloaded"});
+  await page.goto("http://127.0.0.1:8000/doom.html?starter=off"+(runtimeMode==="owned"?"&runtime=owned":""),{waitUntil:"domcontentloaded"});
   await page.locator("#bootBtn").click();
   await page.waitForFunction(()=>document.querySelector("#runtimeStatus")?.textContent==="ENGINE READY",null,{timeout:90000});
   await page.locator("#prepareBtn").click();
