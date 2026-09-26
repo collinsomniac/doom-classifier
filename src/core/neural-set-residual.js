@@ -119,9 +119,9 @@ function solveRidgeSystem(matrix,vector,n){
 }
 
 export class NeuralSetResidualQ{
-  constructor(schema,actions,{seed=2026,hashDim=48,globalDim=16,temporalDim=8,entityHidden=24,entityDim=16,actionDim=24,headDim=32,valueHeadDim=4,valueHidden=16,valueWeight=.5,ensembleSize=3,bootstrapProbability=.8,lr=.008,gamma=.96,l2=1e-6,useTargetNetwork=true,targetSyncInterval=24}={}){
+  constructor(schema,actions,{seed=2026,hashDim=48,globalDim=16,temporalDim=8,entityHidden=24,entityDim=16,actionDim=24,headDim=32,valueHeadDim=4,valueHidden=16,valueWeight=.5,ensembleSize=3,bootstrapProbability=.8,lr=.008,gamma=.96,l2=1e-6,useTargetNetwork=true,targetSyncInterval=24,advantageGapAlpha=.5}={}){
     this.schema=schema;this.actions=actions;this.seed=seed;this.hashDim=hashDim;this.globalDim=globalDim;this.temporalDim=temporalDim;this.entityHidden=entityHidden;this.entityDim=entityDim;this.actionDim=actionDim;this.headDim=headDim;this.valueHeadDim=valueHeadDim;this.valueHidden=valueHidden;this.valueWeight=valueWeight;this.ensembleSize=ensembleSize;this.bootstrapProbability=bootstrapProbability;
-    this.lr=lr;this.gamma=gamma;this.l2=l2;this.useTargetNetwork=useTargetNetwork;this.targetSyncInterval=Math.max(1,Math.floor(targetSyncInterval));this.name="SchemaSemanticValueSetNet";
+    this.lr=lr;this.gamma=gamma;this.l2=l2;this.useTargetNetwork=useTargetNetwork;this.targetSyncInterval=Math.max(1,Math.floor(targetSyncInterval));this.advantageGapAlpha=clamp(Number(advantageGapAlpha)||0,0,.95);this.name="SchemaSemanticValueSetNet";
     this.attentionStateDim=globalDim+temporalDim;this.queryInputDim=actionDim+this.attentionStateDim;this.contextDim=globalDim+temporalDim+entityDim*2+2;this.headInputDim=this.contextDim+entityDim+actionDim;
     this.setSchema(schema);this.setActions(actions);this.initialize();
   }
@@ -153,7 +153,7 @@ export class NeuralSetResidualQ{
       if(!this.targetNet){
         this.targetNet=new NeuralSetResidualQ(this.schema,this.actions,{
           seed:this.seed,hashDim:this.hashDim,globalDim:this.globalDim,temporalDim:this.temporalDim,entityHidden:this.entityHidden,entityDim:this.entityDim,actionDim:this.actionDim,headDim:this.headDim,valueHeadDim:this.valueHeadDim,valueHidden:this.valueHidden,valueWeight:this.valueWeight,
-          ensembleSize:this.ensembleSize,bootstrapProbability:this.bootstrapProbability,lr:this.lr,gamma:this.gamma,l2:this.l2,useTargetNetwork:false,targetSyncInterval:this.targetSyncInterval
+          ensembleSize:this.ensembleSize,bootstrapProbability:this.bootstrapProbability,lr:this.lr,gamma:this.gamma,l2:this.l2,useTargetNetwork:false,targetSyncInterval:this.targetSyncInterval,advantageGapAlpha:this.advantageGapAlpha
         });
       }else{
         this.targetNet.setSchema(this.schema);this.targetNet.setActions(this.actions);
@@ -338,7 +338,8 @@ export class NeuralSetResidualQ{
     }
   }
   updateTransition({observation,temporal=null,actionIndex,reward,nextObservation,nextTemporal=null,done=false,bootstrapDiscount=null}){
-    const current=this.encodeState(observation,{cache:false,temporal}),chosen=this.actionForward(current,actionIndex);
+    const current=this.encodeState(observation,{cache:false,temporal}),chosen=this.actionForward(current,actionIndex),currentValues=this.valueScoresObservation(observation,{temporal});
+    const greedyValue=currentValues.length?Math.max(...currentValues):chosen.valueScore,actionGap=Math.max(0,Number(greedyValue)-Number(chosen.valueScore));
     const bootstrapModel=this.targetNet||this,discount=bootstrapDiscount==null?this.gamma:Number(bootstrapDiscount);
     let bootstrapActionIndex=-1,bootstrapValue=0;
     if(!done){
@@ -347,10 +348,10 @@ export class NeuralSetResidualQ{
       const targetNext=bootstrapModel.valueScoresObservation(nextObservation,{temporal:nextTemporal});
       bootstrapValue=Number(targetNext[bootstrapActionIndex]||0);
     }
-    const target=reward+(done?0:discount*bootstrapValue),td=clamp(target-chosen.valueScore,-4,4);
+    const bellmanTarget=reward+(done?0:discount*bootstrapValue),gapPenalty=this.advantageGapAlpha*actionGap,target=bellmanTarget-gapPenalty,td=clamp(target-chosen.valueScore,-4,4);
     this.zeroGrad();this.backwardValue(chosen,-td,{bootstrap:true});this.applyLayers(this.valueLayers);this.updates++;
     if(this.targetNet&&this.updates%this.targetSyncInterval===0)this.syncTarget();
-    return{td,target,q:chosen.valueScore,combined:chosen.score,semantic:chosen.semanticScore,targetNetwork:!!this.targetNet,targetSyncs:this.targetSyncs,bootstrapActionIndex,bootstrapValue,doubleDqn:!!this.targetNet};
+    return{td,target,bellmanTarget,gapPenalty,actionGap,advantageGapAlpha:this.advantageGapAlpha,q:chosen.valueScore,combined:chosen.score,semantic:chosen.semanticScore,targetNetwork:!!this.targetNet,targetSyncs:this.targetSyncs,bootstrapActionIndex,bootstrapValue,doubleDqn:!!this.targetNet};
   }
   distill(observation,teacherScores,{strength=.35,temporal=null}={}){
     if(!teacherScores||teacherScores.length!==this.actions.length)return null;
