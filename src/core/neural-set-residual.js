@@ -119,9 +119,9 @@ function solveRidgeSystem(matrix,vector,n){
 }
 
 export class NeuralSetResidualQ{
-  constructor(schema,actions,{seed=2026,hashDim=48,globalDim=16,temporalDim=8,entityHidden=24,entityDim=16,actionDim=24,headDim=32,valueHeadDim=4,valueHidden=16,valueWeight=.5,ensembleSize=3,bootstrapProbability=.8,lr=.008,gamma=.96,l2=1e-6,useTargetNetwork=true,targetSyncInterval=24}={}){
-    this.schema=schema;this.actions=actions;this.seed=seed;this.hashDim=hashDim;this.globalDim=globalDim;this.temporalDim=temporalDim;this.entityHidden=entityHidden;this.entityDim=entityDim;this.actionDim=actionDim;this.headDim=headDim;this.valueHeadDim=valueHeadDim;this.valueHidden=valueHidden;this.valueWeight=valueWeight;this.ensembleSize=ensembleSize;this.bootstrapProbability=bootstrapProbability;
-    this.lr=lr;this.gamma=gamma;this.l2=l2;this.useTargetNetwork=useTargetNetwork;this.targetSyncInterval=Math.max(1,Math.floor(targetSyncInterval));this.name="SchemaSemanticValueSetNet";
+  constructor(schema,actions,{seed=2026,hashDim=48,globalDim=16,temporalDim=8,entityHidden=24,entityDim=16,actionDim=24,headDim=32,valueHeadDim=4,valueHidden=16,stateValueHidden=8,valueWeight=.5,ensembleSize=3,bootstrapProbability=.8,lr=.008,gamma=.96,l2=1e-6,useTargetNetwork=true,targetSyncInterval=24,duelingValue=true}={}){
+    this.schema=schema;this.actions=actions;this.seed=seed;this.hashDim=hashDim;this.globalDim=globalDim;this.temporalDim=temporalDim;this.entityHidden=entityHidden;this.entityDim=entityDim;this.actionDim=actionDim;this.headDim=headDim;this.valueHeadDim=valueHeadDim;this.valueHidden=valueHidden;this.stateValueHidden=stateValueHidden;this.valueWeight=valueWeight;this.ensembleSize=ensembleSize;this.bootstrapProbability=bootstrapProbability;this.duelingValue=!!duelingValue;
+    this.lr=lr;this.gamma=gamma;this.l2=l2;this.useTargetNetwork=useTargetNetwork;this.targetSyncInterval=Math.max(1,Math.floor(targetSyncInterval));this.name=this.duelingValue?"SchemaSemanticDuelingValueSetNet":"SchemaSemanticValueSetNet";
     this.attentionStateDim=globalDim+temporalDim;this.queryInputDim=actionDim+this.attentionStateDim;this.contextDim=globalDim+temporalDim+entityDim*2+2;this.headInputDim=this.contextDim+entityDim+actionDim;
     this.setSchema(schema);this.setActions(actions);this.initialize();
   }
@@ -144,16 +144,21 @@ export class NeuralSetResidualQ{
     this.valueHeadLayer=new Dense(this.headInputDim,this.valueHeadDim,rng,{activation:"tanh"});
     this.valueAdapterUp=new Dense(this.valueHeadDim,this.headDim,rng,{activation:"linear"});
     for(let i=0;i<this.valueAdapterUp.w.length;i++)this.valueAdapterUp.w[i]*=.05;
+    if(this.duelingValue){
+      this.stateValueLayer=new Dense(this.contextDim,this.stateValueHidden,rng,{activation:"tanh"});
+      this.stateValueOutLayers=Array.from({length:this.ensembleSize},()=>new Dense(this.stateValueHidden,1,rng,{activation:"linear"}));
+      for(const layer of this.stateValueOutLayers)for(let i=0;i<layer.w.length;i++)layer.w[i]*=.02;
+    }else{this.stateValueLayer=null;this.stateValueOutLayers=[]}
     this.bootstrapRng=mulberry32((this.seed^0x9e3779b9)>>>0);
     this.semanticLayers=[this.globalLayer,this.temporalLayer,this.entityLayer1,this.entityLayer2,this.queryLayer,this.headLayer,this.semanticLayer,this.semanticAdapterLayer];
-    this.valueLayers=[this.valueHeadLayer,this.valueAdapterUp,this.valueLayer,...this.valueOutLayers];
+    this.valueLayers=[this.valueHeadLayer,this.valueAdapterUp,this.valueLayer,...this.valueOutLayers,...(this.duelingValue?[this.stateValueLayer,...this.stateValueOutLayers]:[])];
     this.layers=[...this.semanticLayers,...this.valueLayers];
     this.updates=0;this.distillUpdates=0;this.targetSyncs=0;
     if(this.useTargetNetwork){
       if(!this.targetNet){
         this.targetNet=new NeuralSetResidualQ(this.schema,this.actions,{
-          seed:this.seed,hashDim:this.hashDim,globalDim:this.globalDim,temporalDim:this.temporalDim,entityHidden:this.entityHidden,entityDim:this.entityDim,actionDim:this.actionDim,headDim:this.headDim,valueHeadDim:this.valueHeadDim,valueHidden:this.valueHidden,valueWeight:this.valueWeight,
-          ensembleSize:this.ensembleSize,bootstrapProbability:this.bootstrapProbability,lr:this.lr,gamma:this.gamma,l2:this.l2,useTargetNetwork:false,targetSyncInterval:this.targetSyncInterval
+          seed:this.seed,hashDim:this.hashDim,globalDim:this.globalDim,temporalDim:this.temporalDim,entityHidden:this.entityHidden,entityDim:this.entityDim,actionDim:this.actionDim,headDim:this.headDim,valueHeadDim:this.valueHeadDim,valueHidden:this.valueHidden,stateValueHidden:this.stateValueHidden,valueWeight:this.valueWeight,
+          ensembleSize:this.ensembleSize,bootstrapProbability:this.bootstrapProbability,lr:this.lr,gamma:this.gamma,l2:this.l2,useTargetNetwork:false,targetSyncInterval:this.targetSyncInterval,duelingValue:this.duelingValue
         });
       }else{
         this.targetNet.setSchema(this.schema);this.targetNet.setActions(this.actions);
@@ -257,12 +262,28 @@ export class NeuralSetResidualQ{
     const memberScores=valueMemberScores.map(value=>semanticScore+this.valueWeight*value),score=semanticScore+this.valueWeight*valueScore;
     return{score,semanticScore,valueScore,memberScores,valueMemberScores,input,h,semanticOut,semanticAdapterOut,valueHead,valueResidual,valueHidden,valueOuts,state,actionIndex,...attn};
   }
-  scoreStatsObservation(observation,{temporal=null}={}){
-    const state=this.encodeState(observation,{temporal}),scores=new Array(this.actions.length),semanticScores=new Array(this.actions.length),valueScores=new Array(this.actions.length),memberScores=new Array(this.actions.length),valueMemberScores=new Array(this.actions.length);
-    for(let i=0;i<scores.length;i++){
-      const f=this.actionForward(state,i);scores[i]=f.score;semanticScores[i]=f.semanticScore;valueScores[i]=f.valueScore;memberScores[i]=f.memberScores;valueMemberScores[i]=f.valueMemberScores;
+  scoreStatsObservation(observation,{temporal=null,returnForwards=false}={}){
+    const state=this.encodeState(observation,{temporal}),forwards=this.actions.map((_,i)=>this.actionForward(state,i)),scores=new Array(this.actions.length),semanticScores=new Array(this.actions.length),valueScores=new Array(this.actions.length),memberScores=new Array(this.actions.length),valueMemberScores=new Array(this.actions.length);
+    let stateValueForward=null,advantageMeans=null;
+    if(this.duelingValue){
+      const hidden=this.stateValueLayer.forward(state.context),outs=this.stateValueOutLayers.map(layer=>layer.forward(hidden.out)),members=outs.map(o=>o.out[0]);
+      stateValueForward={hidden,outs,members};
+      advantageMeans=new Float32Array(this.ensembleSize);
+      for(const f of forwards)for(let m=0;m<this.ensembleSize;m++)advantageMeans[m]+=Number(f.valueMemberScores[m]||0)/forwards.length;
     }
-    return{scores,semanticScores,valueScores,memberScores,valueMemberScores};
+    for(let i=0;i<scores.length;i++){
+      const f=forwards[i],semantic=f.semanticScore;
+      const values=this.duelingValue
+        ? f.valueMemberScores.map((adv,m)=>Number(stateValueForward.members[m]||0)+Number(adv||0)-Number(advantageMeans[m]||0))
+        : [...f.valueMemberScores];
+      const value=values.reduce((a,b)=>a+b,0)/values.length;
+      valueMemberScores[i]=values;valueScores[i]=value;semanticScores[i]=semantic;
+      memberScores[i]=values.map(v=>semantic+this.valueWeight*v);scores[i]=semantic+this.valueWeight*value;
+    }
+    const result={scores,semanticScores,valueScores,memberScores,valueMemberScores};
+    if(this.duelingValue){result.advantageMemberScores=forwards.map(f=>[...f.valueMemberScores]);result.stateValueMemberScores=[...stateValueForward.members];result.advantageMeans=[...advantageMeans];}
+    if(returnForwards){result._forwards=forwards;result._state=state;result._stateValueForward=stateValueForward;}
+    return result;
   }
   scoresObservation(observation,{temporal=null}={}){return this.scoreStatsObservation(observation,{temporal}).scores}
   valueScoresObservation(observation,{temporal=null}={}){return this.scoreStatsObservation(observation,{temporal}).valueScores}
@@ -313,12 +334,11 @@ export class NeuralSetResidualQ{
     }
     return gradContext;
   }
-  backwardValue(forward,gradValue,{bootstrap=false}={}){
-    let active=Array.from({length:this.ensembleSize},(_,i)=>i);
-    if(bootstrap){active=active.filter(()=>this.bootstrapRng()<this.bootstrapProbability);if(!active.length)active=[Math.floor(this.bootstrapRng()*this.ensembleSize)]}
-    const gh=new Float32Array(this.valueHidden),share=gradValue/active.length;
-    for(const i of active){
-      const g=this.valueOutLayers[i].backward(forward.valueOuts[i],new Float32Array([share]));
+  backwardAdvantageMembers(forward,memberGrads){
+    const gh=new Float32Array(this.valueHidden);
+    for(let i=0;i<this.ensembleSize;i++){
+      const grad=Number(memberGrads[i]||0);if(grad===0)continue;
+      const g=this.valueOutLayers[i].backward(forward.valueOuts[i],new Float32Array([grad]));
       for(let d=0;d<gh.length;d++)gh[d]+=g[d];
     }
     const gValueInput=this.valueLayer.backward(forward.valueHidden,gh);
@@ -326,6 +346,28 @@ export class NeuralSetResidualQ{
     // The gradient into the shared semantic hidden state is intentionally dropped.
     const gValueHead=this.valueAdapterUp.backward(forward.valueResidual,gValueInput);
     this.valueHeadLayer.backward(forward.valueHead,gValueHead);
+  }
+  backwardValue(forward,gradValue,{bootstrap=false}={}){
+    let active=Array.from({length:this.ensembleSize},(_,i)=>i);
+    if(bootstrap){active=active.filter(()=>this.bootstrapRng()<this.bootstrapProbability);if(!active.length)active=[Math.floor(this.bootstrapRng()*this.ensembleSize)]}
+    const grads=new Float32Array(this.ensembleSize),share=gradValue/active.length;for(const i of active)grads[i]=share;
+    this.backwardAdvantageMembers(forward,grads);
+  }
+  backwardDueling(stats,actionIndex,gradValue,{bootstrap=false}={}){
+    let active=Array.from({length:this.ensembleSize},(_,i)=>i);
+    if(bootstrap){active=active.filter(()=>this.bootstrapRng()<this.bootstrapProbability);if(!active.length)active=[Math.floor(this.bootstrapRng()*this.ensembleSize)]}
+    const n=Math.max(1,stats._forwards.length),share=gradValue/active.length;
+    for(let ai=0;ai<n;ai++){
+      const grads=new Float32Array(this.ensembleSize),coefficient=(ai===actionIndex?1:0)-1/n;
+      for(const member of active)grads[member]=share*coefficient;
+      this.backwardAdvantageMembers(stats._forwards[ai],grads);
+    }
+    const stateForward=stats._stateValueForward,gh=new Float32Array(this.stateValueHidden);
+    for(const member of active){
+      const g=this.stateValueOutLayers[member].backward(stateForward.outs[member],new Float32Array([share]));
+      for(let d=0;d<gh.length;d++)gh[d]+=g[d];
+    }
+    this.stateValueLayer.backward(stateForward.hidden,gh);
   }
   backwardState(state,gradContext,entityExtra){
     const cache=state.cache;this.globalLayer.backward(cache.globalCache,gradContext.slice(0,this.globalDim));
@@ -338,7 +380,7 @@ export class NeuralSetResidualQ{
     }
   }
   updateTransition({observation,temporal=null,actionIndex,reward,nextObservation,nextTemporal=null,done=false,bootstrapDiscount=null}){
-    const current=this.encodeState(observation,{cache:false,temporal}),chosen=this.actionForward(current,actionIndex);
+    const currentStats=this.scoreStatsObservation(observation,{temporal,returnForwards:true}),chosenValue=Number(currentStats.valueScores[actionIndex]||0),chosenSemantic=Number(currentStats.semanticScores[actionIndex]||0),chosenCombined=Number(currentStats.scores[actionIndex]||0);
     const bootstrapModel=this.targetNet||this,discount=bootstrapDiscount==null?this.gamma:Number(bootstrapDiscount);
     let bootstrapActionIndex=-1,bootstrapValue=0;
     if(!done){
@@ -347,10 +389,13 @@ export class NeuralSetResidualQ{
       const targetNext=bootstrapModel.valueScoresObservation(nextObservation,{temporal:nextTemporal});
       bootstrapValue=Number(targetNext[bootstrapActionIndex]||0);
     }
-    const target=reward+(done?0:discount*bootstrapValue),td=clamp(target-chosen.valueScore,-4,4);
-    this.zeroGrad();this.backwardValue(chosen,-td,{bootstrap:true});this.applyLayers(this.valueLayers);this.updates++;
+    const target=reward+(done?0:discount*bootstrapValue),td=clamp(target-chosenValue,-4,4);
+    this.zeroGrad();
+    if(this.duelingValue)this.backwardDueling(currentStats,actionIndex,-td,{bootstrap:true});
+    else this.backwardValue(currentStats._forwards?.[actionIndex]||this.actionForward(this.encodeState(observation,{temporal}),actionIndex),-td,{bootstrap:true});
+    this.applyLayers(this.valueLayers);this.updates++;
     if(this.targetNet&&this.updates%this.targetSyncInterval===0)this.syncTarget();
-    return{td,target,q:chosen.valueScore,combined:chosen.score,semantic:chosen.semanticScore,targetNetwork:!!this.targetNet,targetSyncs:this.targetSyncs,bootstrapActionIndex,bootstrapValue,doubleDqn:!!this.targetNet};
+    return{td,target,q:chosenValue,combined:chosenCombined,semantic:chosenSemantic,targetNetwork:!!this.targetNet,targetSyncs:this.targetSyncs,bootstrapActionIndex,bootstrapValue,doubleDqn:!!this.targetNet,dueling:!!this.duelingValue};
   }
   distill(observation,teacherScores,{strength=.35,temporal=null}={}){
     if(!teacherScores||teacherScores.length!==this.actions.length)return null;
