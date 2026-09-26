@@ -162,6 +162,16 @@ Reward-only TD updates do **not** backpropagate through the semantic/shared bran
 
 Teacher distillation may update the semantic/shared branch, but it synchronizes only the target network's semantic representation. Target value weights remain delayed until their normal TD sync interval.
 
+### State-dependent semantic authority
+
+The base semantic trust region remains a KL budget of 0.08. The critic may expand that budget toward 0.16 only when three scale-free signals agree:
+
+- bootstrap heads substantially agree on the same top typed action;
+- the top-vs-runner margin is stable across bootstrap heads (margin SNR);
+- the gap is meaningful relative to the critic's own action-value spread.
+
+Those gates form a critic-ranking confidence. It is multiplied by experience trust (value-update count) to produce per-state critic authority. Epistemic disagreement remains a separate hard ceiling, so confidence-gated KL expansion cannot bypass the ensemble uncertainty guard.
+
 ## Online value learning
 
 The default learner uses a short four-step return. For a prefix beginning at action `a_t`:

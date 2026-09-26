@@ -393,6 +393,37 @@ The raw critic preferred **strafe right + fire**. At the first flip (~0.16 KL), 
 
 The next trust experiment should therefore be **state-dependent**, not a global KL increase. Candidate signals now exposed by the policy include bootstrap-head top-action agreement, top-vs-runner-up critic gap, and bootstrap margin signal-to-noise ratio.
 
+## Confidence-gated semantic authority
+
+A later 256-decision / four-rollout run kept the same 0.08 base semantic KL budget but allowed per-state expansion only when the bootstrap critic agreed on its ranking and the margin was stable relative to the critic's own value spread.
+
+Compared with the immediately preceding fixed-budget run:
+
+| frozen post-training | fixed 0.08 KL | confidence-gated KL |
+|---|---:|---:|
+| return | +0.676 | **+2.026** |
+| attributed damage | 35 | **40** |
+| player kills | 0 | **1** |
+| teacher calls | 0 | **0** |
+
+The confidence gate did not create broad action diversity—the dominant frozen action remained `fire`—but it recovered combat behavior without globally increasing semantic authority. The bootstrap/epistemic guard remains independent of the KL expansion.
+
+The associated deterministic invariant gives a fully agreeing critic up to a 2x KL ceiling (0.08 -> 0.16), while a deliberately split bootstrap ensemble receives zero extra authority.
+
+## Null-state NLI label-bias calibration
+
+Generic MNLI teachers have strong action-label priors even when game evidence is withheld. A null-state calibration subtracts each action's logit on a state-withheld premise before centering the result.
+
+For MobileBERT:
+
+| metric | raw | null calibrated |
+|---|---:|---:|
+| aggregate FIRE, enemy ahead | 0.768 | 0.484 |
+| aggregate FIRE, quiet room | 0.730 | 0.399 |
+| enemy-minus-quiet FIRE separation | 0.038 | **0.085** |
+
+The correction materially reduces MobileBERT's generic FIRE bias and improves state discrimination. DistilBERT did not benefit reliably, so the live path enables this calibration only for the default MobileBERT teacher rather than treating it as a universal NLI correction.
+
 ## What remains unproven
 
 The strongest missing evidence is still:
