@@ -113,13 +113,15 @@ export class TransformersNLIAdapter{
   }
   stateText(observation){
     const objective=this.schema?.objective||"choose the action that best advances the environment objective";
+    const environment=this.schema?.environment||"structured interactive environment";
+    const horizon=Number(this.schema?.controlHorizonMs);
     const scalar=(this.schema.fields||[]).map(field=>{
       const value=Number(observation[field.id]??0),label=field.label||field.id;
-      let relative="";
-      if(!field.enum&&Number.isFinite(field.min)&&Number.isFinite(field.max)&&field.max!==field.min)relative=" ["+Math.round(((value-field.min)/(field.max-field.min))*100)+"%]";
-      return label+"="+fieldValueText(field,value)+relative;
+      return label+"="+fieldValueText(field,value);
     });
-    const lines=["Objective: "+objective,"Current scalar state: "+scalar.join("; ")];
+    const lines=["Environment: "+environment,"Objective: "+objective];
+    if(Number.isFinite(horizon))lines.push("Control interval: "+horizon+" ms per selected controller input.");
+    lines.push("Current scalar state: "+scalar.join("; "));
     const collections=(this.schema.collections||[]).map(collection=>{
       const records=observation?._collections?.[collection.id]||[];
       return{records,text:"Collection: "+summarizeCollection(collection,records)};
@@ -146,7 +148,7 @@ export class TransformersNLIAdapter{
   }
   async score(observation){
     if(!this.classifier)await this.load();
-    const output=await this.classifier(this.boundedPremise(observation),this.labels,{multi_label:true,hypothesis_template:"Given only the stated current state and objective, without assuming unobserved facts, choosing {} is useful, feasible, and justified now."});
+    const output=await this.classifier(this.boundedPremise(observation),this.labels,{multi_label:true,hypothesis_template:"Given only the stated environment, current state, objective, and literal controller meaning, selecting {} is an appropriate next controller input now."});
     const independent=new Map(output.labels.map((label,i)=>[label,output.scores[i]])),eps=1e-6;
     return this.labels.map(label=>{
       const p=Math.max(eps,Math.min(1-eps,Number(independent.get(label)??eps)));

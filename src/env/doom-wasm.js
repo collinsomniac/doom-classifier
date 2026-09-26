@@ -75,7 +75,7 @@ export class DoomWasmArena{
     this.actions=ACTION_SPECS.map(({mask,...action})=>action);
     this.actionMasks=Object.fromEntries(ACTION_SPECS.map(action=>[action.id,action.mask]));
     this.schema={
-      objective:"Stay alive, neutralize hostile threats, conserve useful resources, and make progress through the level.",
+      environment:"DOOM-compatible first-person shooter using standard movement, turning, weapon-fire, and use controls.",\n      objective:"Continue normal gameplay successfully and make progress toward level completion from the current observable state.",
       actionFields:[
         {id:"forward",label:"forward control",description:"whether this candidate holds forward movement",min:0,max:1},
         {id:"back",label:"backward control",description:"whether this candidate holds backward movement",min:0,max:1},
@@ -157,7 +157,7 @@ export class DoomWasmArena{
         }
       ]
     };
-    this.lastRaw=null;this.lastObservation=null;this.lastHostileHpLoss=0;this.lastNativeEvents={available:false,playerDamageDealt:0,playerKills:0,playerPickups:0,levelCompletions:0,secretExits:0};this.lastOutcome=null;this.visitedCells=new Map();this.lastExploration={visitedCells:0,cellVisits:0,novelty:1,newCell:false};
+    this.schema.controlHorizonMs=this.actionMs;\n    this.lastRaw=null;this.lastObservation=null;this.lastHostileHpLoss=0;this.lastNativeEvents={available:false,playerDamageDealt:0,playerKills:0,playerPickups:0,levelCompletions:0,secretExits:0};this.lastOutcome=null;this.visitedCells=new Map();this.lastExploration={visitedCells:0,cellVisits:0,novelty:1,newCell:false};
   }
 
   static async boot({canvas,onProgress=()=>{},actionMs=110,iwadFile=null,contentName=null,runtimeBase=RAW_BASE,runtimeInfo=null}={}){
@@ -193,7 +193,7 @@ export class DoomWasmArena{
     await arena.waitUntilReady();await arena.reset();onProgress("ready");return arena;
   }
 
-  setActionMs(ms){this.actionMs=clamp(Number(ms)||110,35,1000)}
+  setActionMs(ms){this.actionMs=clamp(Number(ms)||110,35,1000);this.schema.controlHorizonMs=this.actionMs}
   readRaw(){
     const json=this.module.ccall("PromptFPS_Observation","string",[],[]);
     const raw=JSON.parse(String(json));if(!raw.ready)throw new Error("Doom telemetry bridge is not ready");return raw;
