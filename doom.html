@@ -55,7 +55,7 @@
 
 <article class="panel architecture-panel">
   <div class="panel-head"><div><p class="kicker">LIVE ARCHITECTURE</p><h2>Generic decision pipeline</h2></div><div id="archMode" class="choice">waiting for engine</div></div>
-  <p class="caption arch-caption">The lit path is the computation used now. DOOM lives only at the environment boundary; the encoder, semantic prior, consequence learner, fusion, and typed action interface are reusable across structured tasks.</p>
+  <p class="caption arch-caption">The lit path is the computation used now. DOOM lives only at the environment boundary; typed value structure shares evidence across compatible actions, while KL and critic disagreement bound how far learned consequences may move the semantic prior.</p>
   <div id="architectureFlow" class="architecture-flow" aria-label="live model architecture">
     <div class="arch-node" data-arch="environment"><span class="arch-tag">ENVIRONMENT ADAPTER</span><strong>Task / simulator</strong><small class="arch-value">not mounted</small></div>
     <div class="arch-arrow">→</div>
@@ -76,7 +76,7 @@
       </div>
     </div>
     <div class="arch-arrow merge-arrow">⇒</div>
-    <div class="arch-node fusion-node" data-arch="fusion"><span class="arch-tag">TRUST BOUNDARY</span><strong>KL-constrained fusion</strong><small class="arch-value">β 0 · KL 0%</small></div>
+    <div class="arch-node fusion-node" data-arch="fusion"><span class="arch-tag">DUAL TRUST BOUNDARY</span><strong>Typed value + KL / epistemic fusion</strong><small class="arch-value">β 0 · KL 0% · EPI 0%</small></div>
     <div class="arch-arrow">→</div>
     <div class="arch-node" data-arch="actions"><span class="arch-tag">OUTPUT</span><strong>Typed action distribution</strong><small class="arch-value">waiting</small></div>
     <div class="arch-arrow">→</div>
