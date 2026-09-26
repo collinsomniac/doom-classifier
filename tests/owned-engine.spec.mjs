@@ -7,7 +7,7 @@ test("owned Chocolate Doom runtime exposes causal event counters",async({page})=
   page.on("console",msg=>{if(msg.type()==="error")consoleErrors.push(msg.text())});
   page.on("pageerror",err=>consoleErrors.push(String(err)));
 
-  await page.goto("http://127.0.0.1:8000/doom.html",{waitUntil:"domcontentloaded"});
+  await page.goto("http://127.0.0.1:8000/doom.html?starter=off",{waitUntil:"domcontentloaded"});
 
   const result=await page.evaluate(async()=>{
     const {DoomWasmArena}=await import("/src/env/doom-wasm.js");
