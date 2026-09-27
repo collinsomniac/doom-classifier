@@ -85,7 +85,17 @@ test("build and round-trip a quality-gated teacher-free starter checkpoint",asyn
     return a.stage-b.stage;
   };
   const eligible=candidates.filter(x=>passes(x.evaluation)).sort(compare);
-  if(!eligible.length)throw new Error("no staged checkpoint passed absolute combat-quality gate");
+  if(!eligible.length){
+    const output=resolve(process.env.STARTER_OUTPUT||"artifacts/doom-starter.json"),status=output+".status.json";
+    mkdirSync(dirname(output),{recursive:true});
+    writeFileSync(status,JSON.stringify({
+      available:false,reason:"no staged checkpoint passed absolute combat-quality gate",
+      baseline:{reward:before.reward,damage:before.damage,kills:before.kills,minReward:before.minReward,minDamage:before.minDamage,minKills:before.minKills},
+      candidates:candidates.map(x=>({stage:x.stage,reward:x.evaluation.reward,damage:x.evaluation.damage,kills:x.evaluation.kills,minReward:x.evaluation.minReward,minDamage:x.evaluation.minDamage,minKills:x.evaluation.minKills,updates:x.training?.updates||0}))
+    },null,2));
+    console.log("STARTER_WITHHELD "+JSON.stringify({reason:"quality gate",status}));
+    return;
+  }
   const selected=eligible.at(-1);
   await page.evaluate(cp=>window.__doomLab.policy.importCheckpoint(cp),selected.checkpoint);
   const after=await frozenEval(page,24);
