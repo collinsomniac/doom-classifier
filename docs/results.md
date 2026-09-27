@@ -410,9 +410,9 @@ The confidence gate did not create broad action diversity—the dominant frozen 
 
 The associated deterministic invariant gives a fully agreeing critic up to a 2x KL ceiling (0.08 -> 0.16), while a deliberately split bootstrap ensemble receives zero extra authority.
 
-## Null-state NLI label-bias calibration
+## Null-state NLI label-bias correction
 
-Generic MNLI teachers have strong action-label priors even when game evidence is withheld. A null-state calibration subtracts each action's logit on a state-withheld premise before centering the result.
+Generic MNLI teachers have strong action-label priors even when game evidence is withheld. A null-state label-bias correction subtracts each action's logit on a state-withheld premise before centering the result. This improves state discrimination, but it is **not** empirical probability calibration: it does not establish that a reported 0.7 corresponds to 70% correctness.
 
 For MobileBERT:
 
