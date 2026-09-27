@@ -450,6 +450,23 @@ Because no candidate was reliably combat-capable, the generated starter artifact
 
 This is a useful separation of concerns: checkpoint portability is solved; reliable offline/online policy improvement is not.
 
+
+## Held-out typed-decision probability calibration
+
+A deterministic stochastic workload-routing benchmark now tests probability quality separately from ranking quality. The synthetic task exposes structured queue, energy and deadline state with three typed routing actions. Its ground-truth action distribution is known, labels are sampled from that distribution, and the model logits are deliberately overconfident without changing their ordering.
+
+A held-out temperature calibrator produced:
+
+| held-out metric | before | after |
+|---|---:|---:|
+| top-1 accuracy | 54.85% | 54.85% |
+| mean confidence | 78.02% | 55.72% |
+| ECE | 0.232 | **0.028** |
+| multiclass Brier | 0.639 | **0.552** |
+| NLL | 1.211 | **0.925** |
+
+The fitted temperature was **2.95**. This benchmark is intentionally non-DOOM and demonstrates that calibrated probability quality is a distinct property from top-1 accuracy. The live DOOM distribution remains marked **unverified** until an evaluation provides valid labelled or counterfactual decision outcomes.
+
 ## What remains unproven
 
 The strongest missing evidence is still:
