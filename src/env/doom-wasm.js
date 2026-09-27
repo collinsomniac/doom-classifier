@@ -201,6 +201,33 @@ export class DoomWasmArena{
     const json=this.module.ccall("PromptFPS_Observation","string",[],[]);
     const raw=JSON.parse(String(json));if(!raw.ready)throw new Error("Doom telemetry bridge is not ready");return raw;
   }
+  supportsSnapshots(){
+    return typeof this.module?._PromptFPS_SaveSnapshot==="function"&&typeof this.module?._PromptFPS_RestoreSnapshot==="function";
+  }
+  saveSnapshot(){
+    if(!this.supportsSnapshots())throw new Error("DOOM runtime does not support counterfactual snapshots");
+    const ok=this.module.ccall("PromptFPS_SaveSnapshot","number",[],[]);
+    if(!ok)throw new Error("Native DOOM snapshot failed");
+    const clone=value=>value==null?value:JSON.parse(JSON.stringify(value));
+    return{
+      visitedCells:[...this.visitedCells.entries()],
+      lastExploration:clone(this.lastExploration),
+      lastHostileHpLoss:Number(this.lastHostileHpLoss||0),
+      lastNativeEvents:clone(this.lastNativeEvents),
+      lastOutcome:clone(this.lastOutcome)
+    };
+  }
+  restoreSnapshot(snapshot){
+    if(!this.supportsSnapshots())throw new Error("DOOM runtime does not support counterfactual snapshots");
+    const ok=this.module.ccall("PromptFPS_RestoreSnapshot","number",[],[]);
+    if(!ok)throw new Error("No native DOOM snapshot is available");
+    this.visitedCells=new Map(snapshot?.visitedCells||[]);
+    this.lastExploration=snapshot?.lastExploration?{...snapshot.lastExploration}:{visitedCells:this.visitedCells.size,cellVisits:1,novelty:1,newCell:false};
+    this.lastHostileHpLoss=Number(snapshot?.lastHostileHpLoss||0);
+    this.lastNativeEvents=snapshot?.lastNativeEvents?{...snapshot.lastNativeEvents}:{available:false,playerDamageDealt:0,playerKills:0,playerPickups:0,levelCompletions:0,secretExits:0};
+    this.lastOutcome=snapshot?.lastOutcome?{...snapshot.lastOutcome}:null;
+    const raw=this.readRaw();this.lastRaw=raw;this.lastObservation=this.flatten(raw);return this.lastObservation;
+  }
   async waitUntilReady(timeoutMs=8000){
     const started=performance.now();
     while(performance.now()-started<timeoutMs){try{const raw=this.readRaw();if(raw.ready)return raw}catch{}await sleep(80)}
