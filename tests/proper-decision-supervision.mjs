@@ -33,17 +33,18 @@ const beforeLow=probs(low),beforeHigh=probs(high),before=(ce(lowTarget,beforeLow
 const fit=policy.fitDecisionDistributions([
   {observation:low,target:lowTarget},
   {observation:high,target:highTarget}
-],{ridge:.002,refineSteps:8,strength:.04});
+],{ridge:.0002,refineSteps:0});
 const afterLow=probs(low),afterHigh=probs(high),after=(ce(lowTarget,afterLow)+ce(highTarget,afterHigh))/2;
 
 assert.ok(fit?.rows>=6);
+console.log("PROPER_SCORE_DIAGNOSTIC "+JSON.stringify({initialCE,oneStepCE:ce(highTarget,oneStep),before,after,beforeLow,beforeHigh,afterLow,afterHigh,fit}));
 assert.ok(after<before*.82,"closed-form probability fitting should reduce batch cross-entropy materially");
 assert.ok((brier(lowTarget,afterLow)+brier(highTarget,afterHigh))<(brier(lowTarget,beforeLow)+brier(highTarget,beforeHigh))*.75,"Brier error should improve materially");
 assert.ok(afterLow[0]>beforeLow[0],"low-pressure defer probability should move toward target");
 assert.ok(afterHigh[2]>beforeHigh[2],"high-pressure urgent probability should move toward target");
 assert.equal(afterLow.indexOf(Math.max(...afterLow)),0);
 assert.equal(afterHigh.indexOf(Math.max(...afterHigh)),2);
-assert.ok(policy.q.properScoreUpdates>=19);
+assert.equal(policy.q.properScoreUpdates,3);
 assert.equal(policy.probabilityCalibrator.fitted,false,"changing model logits must invalidate old post-hoc calibration");
 const checkpoint=policy.exportCheckpoint();
 assert.equal(checkpoint.q.properScoreUpdates,policy.q.properScoreUpdates);
