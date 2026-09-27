@@ -57,6 +57,8 @@ jobs:
         run: node tests/temperature-calibration.mjs
       - name: Run held-out decision probability calibration benchmark
         run: node tests/decision-calibration.mjs
+      - name: Run direct proper-scoring decision supervision
+        run: node tests/proper-decision-supervision.mjs
       - name: Run semantic collection summary
         run: node tests/nli-state-summary.mjs
       - name: Run independent NLI score invariants
