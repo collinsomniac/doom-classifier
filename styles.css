@@ -240,3 +240,9 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
   .architecture-flow.tick-pulse>.arch-arrow,
   .architecture-flow.tick-pulse .arch-mini-arrow{animation:none}
 }
+
+.probability-status{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center;margin:0 0 10px;padding:9px 10px;border:1px solid #2a333d;border-radius:10px;background:#0a0e13}
+.probability-status span{font:800 9px ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#8f9aa7}
+.probability-status strong{font:700 11px ui-monospace,monospace;color:#d8e0e8;text-align:right}
+.probability-status small{grid-column:1/-1;color:var(--muted);font-size:.66rem;line-height:1.45}
+.arch-node.calibration-node.hot{box-shadow:0 0 0 1px #7ee0c355,0 0 28px #7ee0c322}
