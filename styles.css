@@ -246,3 +246,5 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
 .probability-status strong{font:700 11px ui-monospace,monospace;color:#d8e0e8;text-align:right}
 .probability-status small{grid-column:1/-1;color:var(--muted);font-size:.66rem;line-height:1.45}
 .arch-node.calibration-node.hot{box-shadow:0 0 0 1px #7ee0c355,0 0 28px #7ee0c322}
+
+.legend-dot.calibration{background:#7ee0c3;box-shadow:0 0 12px #7ee0c366}
