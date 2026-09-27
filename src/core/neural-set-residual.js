@@ -148,7 +148,7 @@ export class NeuralSetResidualQ{
     this.semanticLayers=[this.globalLayer,this.temporalLayer,this.entityLayer1,this.entityLayer2,this.queryLayer,this.headLayer,this.semanticLayer,this.semanticAdapterLayer];
     this.valueLayers=[this.valueHeadLayer,this.valueAdapterUp,this.valueLayer,...this.valueOutLayers];
     this.layers=[...this.semanticLayers,...this.valueLayers];
-    this.updates=0;this.distillUpdates=0;this.targetSyncs=0;
+    this.updates=0;this.distillUpdates=0;this.properScoreUpdates=0;this.targetSyncs=0;
     if(this.useTargetNetwork){
       if(!this.targetNet){
         this.targetNet=new NeuralSetResidualQ(this.schema,this.actions,{
@@ -196,7 +196,7 @@ export class NeuralSetResidualQ{
   parameterCount(){return this.layers.reduce((n,l)=>n+l.count(),0)}
   exportCheckpoint(){
     return{
-      version:1,model:this.name,params:this.parameterCount(),updates:this.updates,distillUpdates:this.distillUpdates,targetSyncs:this.targetSyncs,
+      version:1,model:this.name,params:this.parameterCount(),updates:this.updates,distillUpdates:this.distillUpdates,properScoreUpdates:this.properScoreUpdates,targetSyncs:this.targetSyncs,
       layers:this.layers.map(layer=>({w:Array.from(layer.w),b:Array.from(layer.b)}))
     };
   }
@@ -208,7 +208,7 @@ export class NeuralSetResidualQ{
       if(!Array.isArray(source?.w)||!Array.isArray(source?.b)||source.w.length!==target.w.length||source.b.length!==target.b.length)throw new Error("Checkpoint layer shape mismatch at "+i);
       target.w.set(source.w);target.b.set(source.b);target.zeroGrad();
     }
-    this.updates=Math.max(0,Number(checkpoint.updates||0));this.distillUpdates=Math.max(0,Number(checkpoint.distillUpdates||0));this.targetSyncs=Math.max(0,Number(checkpoint.targetSyncs||0));
+    this.updates=Math.max(0,Number(checkpoint.updates||0));this.distillUpdates=Math.max(0,Number(checkpoint.distillUpdates||0));this.properScoreUpdates=Math.max(0,Number(checkpoint.properScoreUpdates||0));this.targetSyncs=Math.max(0,Number(checkpoint.targetSyncs||0));
     if(syncTarget&&this.targetNet)this.syncTarget();
     return this;
   }
@@ -361,5 +361,18 @@ export class NeuralSetResidualQ{
       const grad=this.backwardSemantic(forwards[i],student[i]-teacher[i],entityExtra);for(let j=0;j<this.contextDim;j++)gradContext[j]+=grad[j];
     }
     this.backwardState(state,gradContext,entityExtra);this.applyLayers(this.semanticLayers,this.lr*strength);this.distillUpdates++;return{loss,student,teacher};
+  }
+  superviseDistribution(observation,targetDistribution,{strength=.35,temporal=null}={}){
+    if(!targetDistribution||targetDistribution.length!==this.actions.length)return null;
+    const raw=Array.from(targetDistribution,v=>Math.max(0,Number(v)||0)),sum=raw.reduce((a,b)=>a+b,0);
+    if(sum<=0)return null;
+    const target=raw.map(v=>v/sum),state=this.encodeState(observation,{cache:true,temporal}),forwards=this.actions.map((_,i)=>this.actionForward(state,i)),student=softmax(forwards.map(x=>x.semanticScore),1);
+    const gradContext=new Float32Array(this.contextDim),entityExtra=zeroEntityGrads(state.latents.length,this.entityDim);this.zeroGrad();let loss=0,brier=0;
+    for(let i=0;i<this.actions.length;i++){
+      loss-=target[i]*Math.log(Math.max(1e-8,student[i]));brier+=(student[i]-target[i])**2;
+      const grad=this.backwardSemantic(forwards[i],student[i]-target[i],entityExtra);for(let j=0;j<this.contextDim;j++)gradContext[j]+=grad[j];
+    }
+    this.backwardState(state,gradContext,entityExtra);this.applyLayers(this.semanticLayers,this.lr*strength);this.properScoreUpdates++;
+    return{loss,brier,student,target};
   }
 }
