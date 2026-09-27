@@ -46,6 +46,12 @@ static unsigned int promptfps_player_kills;
 static unsigned int promptfps_player_pickups;
 static unsigned int promptfps_level_completions;
 static unsigned int promptfps_secret_exits;
+static int promptfps_snapshot_ready;
+static unsigned int promptfps_snapshot_player_damage_dealt;
+static unsigned int promptfps_snapshot_player_kills;
+static unsigned int promptfps_snapshot_player_pickups;
+static unsigned int promptfps_snapshot_level_completions;
+static unsigned int promptfps_snapshot_secret_exits;
 
 void PromptFPS_RecordPlayerDamage(int damage)
 {
@@ -77,6 +83,7 @@ static void PromptFPS_ResetEvents(void)
     promptfps_player_pickups = 0;
     promptfps_level_completions = 0;
     promptfps_secret_exits = 0;
+    promptfps_snapshot_ready = 0;
 }
 """,
         "bridge event state",
@@ -99,6 +106,56 @@ static void PromptFPS_ResetEvents(void)
         '        promptfps_secret_exits);',
         "observation event arguments",
     )
+    replace_once(
+        bridge,
+        """EMSCRIPTEN_KEEPALIVE void PromptFPS_SetPaused(int should_pause)
+{
+    paused = should_pause != 0;
+}
+""",
+        """EMSCRIPTEN_KEEPALIVE void PromptFPS_SetPaused(int should_pause)
+{
+    paused = should_pause != 0;
+}
+
+extern void G_PromptFPSSaveSnapshot(void);
+extern void G_PromptFPSLoadSnapshot(void);
+
+EMSCRIPTEN_KEEPALIVE int PromptFPS_SaveSnapshot(void)
+{
+    PromptFPS_SetControls(0);
+    G_PromptFPSSaveSnapshot();
+    promptfps_snapshot_player_damage_dealt = promptfps_player_damage_dealt;
+    promptfps_snapshot_player_kills = promptfps_player_kills;
+    promptfps_snapshot_player_pickups = promptfps_player_pickups;
+    promptfps_snapshot_level_completions = promptfps_level_completions;
+    promptfps_snapshot_secret_exits = promptfps_secret_exits;
+    promptfps_snapshot_ready = 1;
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int PromptFPS_RestoreSnapshot(void)
+{
+    if (!promptfps_snapshot_ready)
+        return 0;
+    PromptFPS_SetControls(0);
+    G_PromptFPSLoadSnapshot();
+    promptfps_player_damage_dealt = promptfps_snapshot_player_damage_dealt;
+    promptfps_player_kills = promptfps_snapshot_player_kills;
+    promptfps_player_pickups = promptfps_snapshot_player_pickups;
+    promptfps_level_completions = promptfps_snapshot_level_completions;
+    promptfps_secret_exits = promptfps_snapshot_secret_exits;
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int PromptFPS_HasSnapshot(void)
+{
+    return promptfps_snapshot_ready;
+}
+""",
+        "snapshot bridge exports",
+    )
+
     replace_once(
         bridge,
         "    unsigned int i;\n    G_InitNew(sk_baby, 1, 1);\n",
@@ -170,6 +227,52 @@ static void PromptFPS_ResetEvents(void)
         '#endif\n\n'
         '#define SAVEGAMESIZE',
         "level recorder declaration",
+    )
+
+    replace_once(
+        g_game,
+        """//
+// G_InitNew
+// Can be called by the startup code or the menu task,
+""",
+        """#if defined(__EMSCRIPTEN__)
+static int promptfps_snapshot_rndindex;
+static int promptfps_snapshot_prndindex;
+static int promptfps_snapshot_turnheld;
+static int promptfps_snapshot_next_weapon;
+
+void G_PromptFPSSaveSnapshot(void)
+{
+    promptfps_snapshot_rndindex = rndindex;
+    promptfps_snapshot_prndindex = prndindex;
+    promptfps_snapshot_turnheld = turnheld;
+    promptfps_snapshot_next_weapon = next_weapon;
+    savegameslot = 7;
+    M_StringCopy(savedescription, "PromptFPS snapshot", sizeof(savedescription));
+    sendsave = false;
+    G_DoSaveGame();
+}
+
+void G_PromptFPSLoadSnapshot(void)
+{
+    G_LoadGame(P_SaveGameFile(7));
+    G_DoLoadGame();
+    rndindex = promptfps_snapshot_rndindex;
+    prndindex = promptfps_snapshot_prndindex;
+    turnheld = promptfps_snapshot_turnheld;
+    next_weapon = promptfps_snapshot_next_weapon;
+    memset(gamekeydown, 0, sizeof(gamekeydown));
+    joyxmove = joyymove = joystrafemove = 0;
+    mousex = mousey = 0;
+    sendpause = sendsave = false;
+}
+#endif
+
+//
+// G_InitNew
+// Can be called by the startup code or the menu task,
+""",
+        "counterfactual snapshot engine hooks",
     )
 
     replace_once(
