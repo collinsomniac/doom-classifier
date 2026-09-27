@@ -189,7 +189,7 @@ function renderTeacherTranscript(){
   ui.teacherTranscript.innerHTML=history.slice(-6).reverse().map((item,index)=>{
     const actions=(item.top||[]).slice(0,5).map(a=>'<span class="teacher-action">'+escapeHtml(a.label||a.id)+' <strong>'+(Number(a.probability||0)*100).toFixed(1)+'%</strong></span>').join("");
     const fit=item.distillation?('<span>distill '+Number(item.distillation.stepsUsed||0)+' steps · KL '+Number(item.distillation.kl||0).toFixed(3)+'</span>'):"";
-    const calibration=item.calibration?('<span>T '+Number(item.calibration.temperature||0).toFixed(3)+'</span>'):"";
+    const calibration=item.calibration?('<span>student-fit T '+Number(item.calibration.temperature||0).toFixed(3)+'</span>'):"";
     return '<article class="teacher-item '+(index===0?"latest":"")+'"><div class="teacher-item-head"><strong>'+escapeHtml(item.model)+' · '+escapeHtml(item.kind)+'</strong><span>s'+String(item.step).padStart(4,"0")+' · '+Number(item.ms||0).toFixed(0)+' ms</span></div><div class="teacher-reason">'+escapeHtml(item.reason)+'</div><div class="teacher-actions">'+actions+'</div><div class="teacher-meta">'+fit+calibration+'</div><details><summary>state sent to teacher</summary><pre class="teacher-state">'+escapeHtml(item.stateText||"state serializer unavailable")+'</pre></details></article>';
   }).join("");
 }
