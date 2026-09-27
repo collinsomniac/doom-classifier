@@ -271,6 +271,20 @@ export class NeuralSetResidualQ{
     return state.records.map((meta,i)=>({...meta,weight:forward.weights[i]||0})).sort((a,b)=>b.weight-a.weight).slice(0,topK);
   }
 
+  fitDecisionDistributions(examples,{ridge=.02}={}){
+    if(!examples?.length)return null;
+    const prepared=[];
+    for(const example of examples){
+      const raw=Array.from(example?.target||example?.distribution||[],v=>Math.max(0,Number(v)||0)),sum=raw.reduce((a,b)=>a+b,0);
+      if(raw.length!==this.actions.length||sum<=0)continue;
+      const target=raw.map(v=>v/sum),scores=target.map(v=>Math.log(Math.max(1e-8,v)));
+      prepared.push({observation:example.observation,scores,temporal:example.temporal||null});
+    }
+    if(!prepared.length)return null;
+    const result=this.fitSemanticHead(prepared,{ridge});if(result)this.properScoreUpdates+=prepared.length;
+    return result?{...result,examples:prepared.length}:null;
+  }
+
   fitSemanticHead(examples,{ridge=.02}={}){
     if(!examples?.length)return null;
     const n=this.headDim+1,matrix=new Float64Array(n*n),vector=new Float64Array(n);let rows=0;
