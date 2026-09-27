@@ -71,7 +71,7 @@ export class SemanticResidualPolicy{
     this.setSemantic(semantic);
   }
   setSemantic(semantic){
-    this.teacherGeneration++;this.teacherPromise=null;this.semantic=semantic;semantic.compile(this.schema,this.actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];this.teacherReplay=[];
+    this.teacherGeneration++;this.teacherPromise=null;this.semantic=semantic;semantic.compile(this.schema,this.actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];this.teacherReplay=[];this.clearProbabilityCalibration?.();
   }
   setInferenceMode(mode){
     if(!["hybrid","adaptive","neural"].includes(mode))throw new Error("Unknown inference mode: "+mode);
@@ -288,6 +288,7 @@ export class SemanticResidualPolicy{
     }
     this.rememberTeacherExample(obs,scores,temporal);
     this.q.syncTarget?.({value:false});
+    if(result||headFit||replay.updates)this.clearProbabilityCalibration();
     return result?{...result,headFit,headFitKL,stepsUsed:used,kl,teacherReplayUpdates:replay.updates,teacherReplayMeanLoss:replay.meanLoss,teacherReplaySize:this.teacherReplay.length}:null;
   }
   async primeTeacher(obs,{steps=Math.max(4,this.distillSteps),maxSteps=steps,targetKL=null,temporal=null}={}){
@@ -395,11 +396,14 @@ export class SemanticResidualPolicy{
     }
     return last?{...last,primaryUpdates,replayUpdates,replayMeanAbsTd:replayUpdates?replayAbsTd/replayUpdates:0,nStepBufferSize:this.nStepBuffer.length,nStep:this.nStep}:{primaryUpdates:0,replayUpdates:0,replayMeanAbsTd:0,replaySize:this.replay.length,nStepBufferSize:this.nStepBuffer.length,nStep:this.nStep,pending:true};
   }
-  flushLearning(){return this.q.updateTransition?this.drainNStep({flush:true}):null}
+  flushLearning(){
+    if(!this.q.updateTransition)return null;
+    const result=this.drainNStep({flush:true});if(Number(result?.primaryUpdates||0)>0)this.clearProbabilityCalibration();return result;
+  }
   learn(transition){
-    if(!this.q.updateTransition)return this.q.update(transition.features,transition.actionIndex,transition.reward,transition.nextFeatures,transition.done);
+    if(!this.q.updateTransition){const result=this.q.update(transition.features,transition.actionIndex,transition.reward,transition.nextFeatures,transition.done);this.clearProbabilityCalibration();return result}
     this.nStepBuffer.push(transition);
-    return this.drainNStep({flush:!!transition.done});
+    const result=this.drainNStep({flush:!!transition.done});if(Number(result?.primaryUpdates||0)>0)this.clearProbabilityCalibration();return result;
   }
   distill(observation,teacherScores,options){return this.q.distill?.(observation,teacherScores,options)||null}
 }
