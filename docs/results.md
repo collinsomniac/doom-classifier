@@ -467,6 +467,22 @@ A held-out temperature calibrator produced:
 
 The fitted temperature was **2.95**. This benchmark is intentionally non-DOOM and demonstrates that calibrated probability quality is a distinct property from top-1 accuracy. The live DOOM distribution remains marked **unverified** until an evaluation provides valid labelled or counterfactual decision outcomes.
 
+## Direct proper-scoring decision supervision
+
+The same small typed-decision core can now learn directly from target probability distributions when a task supplies them, without routing those labels through an NLI teacher. The semantic decision head accepts a normalized target distribution and supports both a differentiable cross-entropy update and a fast closed-form ridge fit in log-probability space.
+
+A two-state / three-action structured routing invariant produced:
+
+| target-fit diagnostic | before | after |
+|---|---:|---:|
+| mean target cross-entropy | 1.123 | **0.857** |
+| low-pressure P(defer) | 0.297 | **0.516** |
+| high-pressure P(urgent) | 0.342 | **0.437** |
+
+A separate single small gradient step also reduced target CE from **1.07027 → 1.07013**, verifying the differentiable proper-score path moves in the expected local direction. The closed-form batch fit is the preferred fast fine-tuning primitive for small labelled decision sets.
+
+This gives the core four distinct evidence paths: semantic teacher distillation, causal reward/value learning, direct proper-distribution supervision, and optional held-out post-hoc probability calibration.
+
 ## What remains unproven
 
 The strongest missing evidence is still:
