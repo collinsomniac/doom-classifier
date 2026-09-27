@@ -122,6 +122,16 @@ export class SemanticResidualPolicy{
     const base=Math.max(.05,Number(this.temperature)||1),mult=this.probabilityCalibrator?.fitted?this.probabilityCalibrator.temperature:1;
     return calibrationMetrics((samples||[]).map(s=>({probs:softmax(Array.from(s.logits||[],Number),base*mult),label:Number(s.label)})),options);
   }
+  fitDecisionDistributions(examples,{ridge=.02,refineSteps=0,strength=.15}={}){
+    if(!this.q?.fitDecisionDistributions)throw new Error("Residual model does not support closed-form distribution fitting");
+    const result=this.q.fitDecisionDistributions(examples,{ridge});
+    if(!result)return null;
+    if(refineSteps>0&&this.q?.superviseDistribution){
+      for(let step=0;step<Math.floor(refineSteps);step++)for(const example of examples||[])this.q.superviseDistribution(example.observation,example.target||example.distribution,{strength,temporal:example.temporal||null});
+    }
+    this.q.syncTarget?.({value:false});this.clearProbabilityCalibration();
+    return{...result,refineSteps:Math.max(0,Math.floor(refineSteps))};
+  }
   superviseDecisionDistribution(observation,targetDistribution,{steps=1,strength=.5,temporal=null}={}){
     if(!this.q?.superviseDistribution)throw new Error("Residual model does not support probability supervision");
     let result=null,totalLoss=0,totalBrier=0,used=0;
