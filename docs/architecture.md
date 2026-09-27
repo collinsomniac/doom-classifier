@@ -172,6 +172,28 @@ The base semantic trust region remains a KL budget of 0.08. The critic may expan
 
 Those gates form a critic-ranking confidence. It is multiplied by experience trust (value-update count) to produce per-state critic authority. Epistemic disagreement remains a separate hard ceiling, so confidence-gated KL expansion cannot bypass the ensemble uncertainty guard.
 
+
+### Probability calibration layer
+
+The final typed action distribution has a separate optional post-fusion temperature calibrator. This is intentionally downstream of semantic/value fusion: fitting it can change confidence sharpness but cannot change the ranking of actions.
+
+It is fitted only from labelled held-out decisions using a proper scoring objective. The core calibration module reports:
+
+- multiclass negative log-likelihood;
+- multiclass Brier score;
+- expected calibration error (ECE) and reliability bins;
+- maximum calibration error;
+- top-1 accuracy and mean stated confidence.
+
+The calibrator is checkpointed with the policy. If no valid labelled calibration set has been supplied for the current task, it remains an identity transform and the browser reports **unverified** rather than calling normalized softmax scores calibrated probabilities.
+
+This is distinct from two other temperature/bias operations:
+
+- **null-state label-bias correction** removes state-independent NLI action-label preference from the semantic teacher;
+- **student temperature fitting** adjusts the distilled semantic head to better match a teacher distribution.
+
+Neither of those establishes empirical probability calibration.
+
 ## Online value learning
 
 The default learner uses a short four-step return. For a prefix beginning at action `a_t`:
