@@ -122,6 +122,17 @@ export class SemanticResidualPolicy{
     const base=Math.max(.05,Number(this.temperature)||1),mult=this.probabilityCalibrator?.fitted?this.probabilityCalibrator.temperature:1;
     return calibrationMetrics((samples||[]).map(s=>({probs:softmax(Array.from(s.logits||[],Number),base*mult),label:Number(s.label)})),options);
   }
+  superviseDecisionDistribution(observation,targetDistribution,{steps=1,strength=.5,temporal=null}={}){
+    if(!this.q?.superviseDistribution)throw new Error("Residual model does not support probability supervision");
+    let result=null,totalLoss=0,totalBrier=0,used=0;
+    const count=Math.max(1,Math.floor(steps));
+    for(let i=0;i<count;i++){
+      result=this.q.superviseDistribution(observation,targetDistribution,{strength,temporal});
+      if(!result)break;used++;totalLoss+=Number(result.loss||0);totalBrier+=Number(result.brier||0);
+    }
+    if(used){this.q.syncTarget?.({value:false});this.clearProbabilityCalibration()}
+    return result?{...result,stepsUsed:used,meanLoss:totalLoss/used,meanBrier:totalBrier/used}:null;
+  }
   encode(obs,memoryEnabled=true,commit=true){
     const base=numericFeatures(this.schema,obs),temporal=commit?this.memory.update(base,memoryEnabled):this.memory.preview(base,memoryEnabled);
     const x=new Float32Array(this.featureSize);x.set(base,0);x.set(temporal,this.baseSize);return{base,temporal,features:x};
