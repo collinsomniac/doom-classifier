@@ -256,7 +256,7 @@ async function loadTeacherOnly(selected){
   candidate.compile(policy.schema,policy.actions);await candidate.load();
   if(policy.semantic!==hashSemantic&&policy.semantic?.dispose)await policy.semantic.dispose();
   policy.setSemantic(candidate);teacherReady=true;ui.modelProgress.value=100;
-  ui.modelStatus.textContent=preset.label+" · "+candidate.backend+(labelBiasCalibration?" · null-state label-bias calibrated":"");
+  ui.modelStatus.textContent=preset.label+" · "+candidate.backend+(labelBiasCalibration?" · null-state label-bias corrected":"");
   return candidate;
 }
 async function boot(){
