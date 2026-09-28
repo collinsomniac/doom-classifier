@@ -8,7 +8,7 @@ const controls=(mask)=>Object.freeze({
   strafe_left:(mask&BITS.STRAFE_LEFT)?1:0,strafe_right:(mask&BITS.STRAFE_RIGHT)?1:0,fire:(mask&BITS.FIRE)?1:0,use:(mask&BITS.USE)?1:0
 });
 const action=(id,label,description,mask)=>Object.freeze({id,label,description,mask,params:controls(mask)});
-const ACTION_SPECS=Object.freeze([
+const BASE_ACTION_SPECS=[
   action("forward","forward","hold forward movement",BITS.FORWARD),
   action("back","back","hold backward movement",BITS.BACK),
   action("turn_left","turn left","turn the view left",BITS.TURN_LEFT),
@@ -24,7 +24,29 @@ const ACTION_SPECS=Object.freeze([
   action("turn_right_fire","turn right + fire","turn right and fire the equipped weapon at the same time",BITS.TURN_RIGHT|BITS.FIRE),
   action("use","interact / open","press the use key to open doors, activate switches, lifts, or other usable map elements directly ahead",BITS.USE),
   action("wait","wait","apply no movement, turning, firing, or use input for this decision interval",0)
-]);
+];
+const TRANSLATION_AXES=[
+  ["forward","forward movement",BITS.FORWARD],
+  ["back","backward movement",BITS.BACK],
+  ["strafe_left","left strafe",BITS.STRAFE_LEFT],
+  ["strafe_right","right strafe",BITS.STRAFE_RIGHT]
+];
+const VIEW_AXES=[
+  ["turn_left","turn left",BITS.TURN_LEFT],
+  ["turn_right","turn right",BITS.TURN_RIGHT]
+];
+const COMPOUND_ACTION_SPECS=[];
+for(const [moveId,moveLabel,moveMask] of TRANSLATION_AXES){
+  for(const [viewId,viewLabel,viewMask] of VIEW_AXES){
+    for(const firing of [false,true]){
+      const id=moveId+"_"+viewId+(firing?"_fire":"");
+      const label=moveLabel+" + "+viewLabel+(firing?" + fire":"");
+      const description="simultaneously hold "+moveLabel+", "+viewLabel+(firing?", and weapon fire":"")+" for one control interval";
+      COMPOUND_ACTION_SPECS.push(action(id,label,description,moveMask|viewMask|(firing?BITS.FIRE:0)));
+    }
+  }
+}
+const ACTION_SPECS=Object.freeze([...BASE_ACTION_SPECS,...COMPOUND_ACTION_SPECS]);
 const ENTITY_TYPES=Object.freeze({
   0:"player",1:"zombie man",2:"shotgun guy",3:"arch-vile",4:"arch-vile fire",5:"revenant",6:"revenant tracer missile",7:"smoke",8:"mancubus",9:"mancubus fireball",
   10:"chaingunner",11:"imp",12:"demon",13:"spectre",14:"cacodemon",15:"baron of hell",16:"baron fireball",17:"hell knight",18:"lost soul",19:"spider mastermind",
@@ -77,7 +99,7 @@ export class DoomWasmArena{
     this.schema={
       environment:"DOOM-compatible first-person shooter using standard movement, turning, weapon-fire, and use controls.",
       objective:"Play the current DOOM episode using only the observed game state and available controller inputs.",
-      actionSpace:{kind:"controller_buttons",simultaneous:true,representation:"joint-action baseline",description:"Each candidate is a literal controller-button packet held for one decision interval; no candidate encodes a tactical macro."},
+      actionSpace:{kind:"controller_buttons",simultaneous:true,representation:"factorized literal-control lattice",axes:["translation","view","trigger","interaction"],description:"Each candidate is a literal controller-button packet held for one decision interval. Movement, view direction and fire may compose simultaneously; no candidate encodes a tactical macro."},
       actionFields:[
         {id:"forward",label:"forward control",description:"whether this candidate holds forward movement",min:0,max:1},
         {id:"back",label:"backward control",description:"whether this candidate holds backward movement",min:0,max:1},
@@ -136,7 +158,7 @@ export class DoomWasmArena{
             {id:"height",label:"entity height",description:"physical collision height",scale:128},
             {id:"health",label:"entity health",description:"remaining actor health when applicable",scale:256},
             {id:"distance",label:"distance",description:"distance from player to entity",scale:1024},
-            {id:"relative_angle",label:"relative angle",description:"signed angular displacement from the player's view",min:-1,max:1},
+            {id:"relative_angle",label:"relative angle",description:"signed angular displacement from the player\'s current view: zero is directly ahead, positive values are to the left / counterclockwise, and negative values are to the right / clockwise",min:-1,max:1},
             {id:"visible",label:"line of sight",description:"whether the engine reports direct line of sight",min:0,max:1},
             {id:"countkill",label:"hostile actor flag",description:"whether this actor counts toward the level hostile kill total",min:0,max:1},
             {id:"pickup",label:"collectible flag",description:"whether this engine object is collectible or special",min:0,max:1},
