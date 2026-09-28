@@ -115,7 +115,7 @@ function setCircuitHot(name,hot){
 function renderDecisionCircuit(obs,d){
   if(!ui.circuit||!policy||!env)return;
   const entities=obs?._collections?.entities?.length||0,geometry=obs?._collections?.geometry?.length||0;
-  ui.circuitState.textContent=(policy.schema?.fields?.length||0)+"F · "+entities+"E · "+geometry+"G";
+  ui.circuitState.textContent=(policy.schema?.fields?.length||0)+"F · "+entities+"E · "+geometry+"G · h"+Number(d?.history?.length||0);
   const fastBackend=policy.q?.backend||"local-js",teacherBackend=isLearnedTeacher()?(policy.semantic?.backend||"loaded"):"off";
   ui.circuitBackend.textContent="engine WASM · fast "+fastBackend+" · teacher "+teacherBackend;
   const rate=measuredDecisionRate(),lat=Number(d?.latencyMs||controller?.latencySummary?.().last||0);
