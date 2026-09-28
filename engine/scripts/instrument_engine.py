@@ -224,6 +224,7 @@ EMSCRIPTEN_KEEPALIVE int PromptFPS_HasSnapshot(void)
         '#include "g_game.h"\n\n'
         '#if defined(__EMSCRIPTEN__)\n'
         'extern void PromptFPS_RecordLevelComplete(int secret_exit);\n'
+        'extern int prndindex;\n'
         '#endif\n\n'
         '#define SAVEGAMESIZE',
         "level recorder declaration",
