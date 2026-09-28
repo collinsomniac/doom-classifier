@@ -132,9 +132,6 @@ export class NeuralSetResidualQ{
     this.entityLayer1=new Dense(this.hashDim,this.entityHidden,rng);
     this.entityLayer2=new Dense(this.entityHidden,this.entityDim,rng);
     this.queryLayer=new Dense(this.queryInputDim,this.entityDim,rng,{activation:"tanh"});
-    // Consequence learning gets its own action-conditioned record selector.
-    // This lets reward change "what matters" without overwriting the semantic encoder.
-    this.valueQueryLayer=new Dense(this.queryInputDim,this.entityDim,rng,{activation:"tanh"});
     this.headLayer=new Dense(this.headInputDim,this.headDim,rng);
     this.semanticLayer=new Dense(this.headDim,1,rng,{activation:"linear"});
     this.semanticAdapterLayer=new Dense(this.headInputDim,1,rng,{activation:"linear"});
@@ -147,6 +144,11 @@ export class NeuralSetResidualQ{
     this.valueHeadLayer=new Dense(this.headInputDim,this.valueHeadDim,rng,{activation:"tanh"});
     this.valueAdapterUp=new Dense(this.valueHeadDim,this.headDim,rng,{activation:"linear"});
     for(let i=0;i<this.valueAdapterUp.w.length;i++)this.valueAdapterUp.w[i]*=.05;
+    // Create the private critic selector only after all v1 layers so adding it does
+    // not perturb the established initialization. Start from the semantic selector,
+    // then allow reward/measured outcomes to specialize it independently.
+    this.valueQueryLayer=new Dense(this.queryInputDim,this.entityDim,rng,{activation:"tanh"});
+    this.valueQueryLayer.w.set(this.queryLayer.w);this.valueQueryLayer.b.set(this.queryLayer.b);
     this.bootstrapRng=mulberry32((this.seed^0x9e3779b9)>>>0);
     this.semanticLayers=[this.globalLayer,this.temporalLayer,this.entityLayer1,this.entityLayer2,this.queryLayer,this.headLayer,this.semanticLayer,this.semanticAdapterLayer];
     this.valueLayers=[this.valueQueryLayer,this.valueHeadLayer,this.valueAdapterUp,this.valueLayer,...this.valueOutLayers];
