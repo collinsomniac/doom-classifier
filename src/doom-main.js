@@ -23,12 +23,29 @@ const ui={
   attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),decodeTemp:$("decodeTemp"),replaySize:$("replaySize"),teacherReplaySize:$("teacherReplaySize"),valueBeta:$("valueBeta"),priorKL:$("priorKL"),klUtilization:$("klUtilization"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),
   schemaCompile:$("schemaCompileBtn"),schemaStatus:$("schemaStatus"),state:$("stateTable"),objective:$("objectiveText"),steps:$("steps"),episodes:$("episodes"),ret:$("return"),updates:$("updates"),lastReward:$("lastReward"),damageDealt:$("damageDealt"),hostileHpLoss:$("hostileHpLoss"),damageReceived:$("damageReceived"),combatAttribution:$("combatAttribution"),
   architecture:$("architectureFlow"),archMode:$("archMode"),archFeedback:$("archFeedback"),typedTrace:$("typedTrace"),typedRawTop:$("typedRawTop"),typedRawMeta:$("typedRawMeta"),typedProjector:$("typedProjector"),typedProjectorMeta:$("typedProjectorMeta"),typedStrongField:$("typedStrongField"),typedStrongFieldMeta:$("typedStrongFieldMeta"),typedTrust:$("typedTrust"),typedTrustMeta:$("typedTrustMeta"),typedFused:$("typedFused"),typedFusedMeta:$("typedFusedMeta"),typedFieldGrid:$("typedFieldGrid"),trainingModeBadge:$("trainingModeBadge"),trainingOutput:$("trainingOutput"),teacherTranscript:$("teacherTranscript"),
-  log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot")
+  log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot"),
+  playTabBtn:$("playTabBtn"),inspectTabBtn:$("inspectTabBtn"),playTab:$("playTab"),inspectTab:$("inspectTab")
 };
 let env=null,policy=null,controller=null,hashSemantic=null;
 let engineReady=false,schemaCompiled=false,teacherReady=false,checkpointReady=false,busy=false,prepared=false,checkpointInfo=null;
 let lastArchPulseDecision=-1;
 let lastCounterfactualProbe=null,counterfactualExamples=[],counterfactualBusy=false,lastCounterfactualFit=null;
+
+function setLabTab(name,{updateHash=true}={}){
+  const active=name==="inspect"?"inspect":"play";
+  for(const [key,button,panel] of [["play",ui.playTabBtn,ui.playTab],["inspect",ui.inspectTabBtn,ui.inspectTab]]){
+    const on=key===active;
+    button?.classList.toggle("active",on);button?.setAttribute("aria-selected",String(on));
+    panel?.classList.toggle("active",on);if(panel)panel.hidden=!on;
+  }
+  if(updateHash){
+    const url=new URL(location.href);url.hash=active==="inspect"?"inspect":"play";
+    history.replaceState(null,"",url);
+  }
+}
+ui.playTabBtn?.addEventListener("click",()=>setLabTab("play"));
+ui.inspectTabBtn?.addEventListener("click",()=>setLabTab("inspect"));
+setLabTab(location.hash==="#inspect"?"inspect":"play",{updateHash:false});
 
 const PROFILES={
   assisted:{label:"Adaptive assisted",teacher:"adaptive",neural:true,learning:false,memory:true,explore:false,hint:"Fast neural decisions every tick; MobileBERT is scheduled only when uncertainty/novelty warrants it."},
