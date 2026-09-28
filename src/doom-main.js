@@ -4,7 +4,7 @@ import {SemanticResidualPolicy} from "./core/policy.js";
 import {ExperimentController} from "./core/controller.js";
 import {TransformersNLIAdapter,NLI_PRESETS} from "./model-adapters/transformers-nli.js";
 import {MiniLMSchemaCompiler,SCHEMA_EMBEDDING_PRESET} from "./model-adapters/schema-embedding-compiler.js";
-import {probeCounterfactualActions} from "./core/counterfactual.js";
+import {semanticPriorAtState,measureCounterfactualValues,trainWithMeasuredForks} from "./core/measured-fork-training.js";
 import {softmax} from "./core/math.js";
 
 const OWNED_RUNTIME_BASE="https://raw.githubusercontent.com/collinsomniac/doom-classifier/engine-runtime";
@@ -277,10 +277,6 @@ function renderTeacherTranscript(){
     return '<article class="teacher-item '+(index===0?"latest":"")+'"><div class="teacher-item-head"><strong>'+escapeHtml(item.model)+' · '+escapeHtml(item.kind)+'</strong><span>s'+String(item.step).padStart(4,"0")+' · '+Number(item.ms||0).toFixed(0)+' ms</span></div><div class="teacher-reason">'+escapeHtml(item.reason)+'</div><div class="teacher-actions">'+actions+'</div><div class="teacher-meta">'+fit+calibration+'</div><details><summary>state sent to teacher</summary><pre class="teacher-state">'+escapeHtml(item.stateText||"state serializer unavailable")+'</pre></details></article>';
   }).join("");
 }
-function semanticPriorAtState(observation){
-  const stats=policy.q.scoreStatsObservation(observation,{temporal:null});
-  return softmax(stats.semanticScores,Math.max(.05,Number(policy.temperature)||1));
-}
 function renderCounterfactual(){
   if(!ui.cfResults)return;
   const count=counterfactualExamples.length;ui.cfExamples.textContent=String(count);
@@ -298,26 +294,13 @@ function renderCounterfactual(){
   }).join("");
 }
 async function measuredValueProbe({tics=24,fallbackTics=null,collect=true,fit=false,fitSteps=6,fitStrength=.08}={}){
-  const observation=env.lastObservation||env.observe(),prior=semanticPriorAtState(observation),started=performance.now();
-  const run=async horizon=>probeCounterfactualActions({
-    environment:env,actions:policy.actions,prior,horizon:1,temperature:.45,priorStrength:1,
-    stepper:id=>env.stepTics(id,horizon)
-  });
-  let usedTics=Math.max(1,Number(tics)||24),probe=await run(usedTics);
-  if(Number(probe.spread||0)<=1e-9&&fallbackTics&&Number(fallbackTics)>usedTics){
-    usedTics=Number(fallbackTics);probe=await run(usedTics);
+  const measured=await measureCounterfactualValues({environment:env,policy,tics,fallbackTics,fit,fitSteps,fitStrength});
+  lastCounterfactualProbe=measured.probe;
+  if(collect&&measured.example){
+    counterfactualExamples.push(measured.example);
+    if(counterfactualExamples.length>12)counterfactualExamples.shift();
   }
-  lastCounterfactualProbe={...probe,prior,tics:usedTics,ms:performance.now()-started,t:Date.now()};
-  let example=null,fitResult=null;
-  if(Number(probe.spread||0)>1e-9){
-    example={observation:probe.observation,target:probe.target,temporal:null,meta:{tics:usedTics,spread:probe.spread}};
-    if(collect){
-      counterfactualExamples.push(example);
-      if(counterfactualExamples.length>12)counterfactualExamples.shift();
-    }
-    if(fit)fitResult=policy.fitCounterfactualValueDistributions([example],{steps:fitSteps,strength:fitStrength});
-  }
-  return{probe:lastCounterfactualProbe,example,fitResult};
+  return measured;
 }
 async function probeSameState(){
   if(!prepared||!env?.supportsSnapshots?.()||!env?.supportsExactTics?.())return;
@@ -545,31 +528,23 @@ async function switchTeacher(){
 }
 async function tuneAgent(){
   if(!prepared)return;controller.pause();setBusy(true);applyProfile("learning");ui.tuneProgress.value=0;ui.tuneBadge.textContent="training + measured forks";
-  const steps=Number(ui.tuneSteps.value)||128,startUpdates=policy.q.updates,startTeacher=policy.teacherCalls,stageSize=32,counts={};
-  let completed=0,reward=0,measuredFits=0,measuredProbes=0,spreadSum=0,rolloutRestarts=0;
+  const steps=Number(ui.tuneSteps.value)||128,startUpdates=policy.q.updates,startTeacher=policy.teacherCalls;
   try{
-    while(completed<steps){
-      const stageSteps=Math.min(stageSize,steps-completed),base=completed;
-      const result=await controller.trainBurst({steps:stageSteps,epsilon:.16,rolloutHorizon:0,onProgress:p=>{
-        ui.tuneProgress.value=((base+p.completed)/steps)*100;
-        ui.tuneStatus.textContent="training "+(base+p.completed)+"/"+steps+" · TD updates "+(policy.q.updates-startUpdates)+" · measured fits "+measuredFits;
-      }});
-      completed+=result.completed;reward+=Number(result.return||0);
-      for(const [id,n] of Object.entries(result.actionCounts||{}))counts[id]=(counts[id]||0)+Number(n||0);
-      if(env?.supportsSnapshots?.()&&env?.supportsExactTics?.()){
-        ui.tuneStatus.textContent="measuring exact same-state consequences after "+completed+"/"+steps+" decisions…";
-        const measured=await measuredValueProbe({tics:24,fallbackTics:35,collect:true,fit:true,fitSteps:6,fitStrength:.08});
-        measuredProbes++;
-        if(measured.example){measuredFits++;spreadSum+=Number(measured.probe?.spread||0)}
+    const result=await trainWithMeasuredForks({
+      controller,policy,environment:env,steps,stageSize:32,epsilon:.16,tics:24,fallbackTics:35,fitSteps:6,fitStrength:.08,resetEvery:64,bootstrapProbe:true,
+      onProgress:p=>{
+        ui.tuneProgress.value=p.ratio*100;
+        ui.tuneStatus.textContent=(p.phase==="td"?"training ":"stage ")+p.completed+"/"+p.total+" · critic updates "+(policy.q.updates-startUpdates)+" · measured fits "+p.measuredFits;
+      },
+      onProbe:async measured=>{
+        lastCounterfactualProbe=measured.probe;
+        if(measured.example){counterfactualExamples.push(measured.example);if(counterfactualExamples.length>12)counterfactualExamples.shift()}
+        ui.tuneStatus.textContent="measured "+measured.phase+" fork · "+measured.probe.trials.length+" branches × "+measured.probe.tics+" tics · ΔR "+Number(measured.probe.spread||0).toFixed(3);
+        renderCounterfactual();await Promise.resolve();
       }
-      if(completed<steps&&completed%64===0){
-        await controller.reset({learning:false});policy.resetEpisode();rolloutRestarts++;
-      }
-      await Promise.resolve();
-    }
-    policy.flushLearning?.();await policy.awaitTeacher?.();
+    });
     applyProfile("frozen");ui.profile.value="frozen";ui.tuneBadge.textContent="frozen neural";
-    ui.tuneStatus.textContent="TRAINING COMPLETE · "+completed+" decisions · "+Object.keys(counts).length+" actions explored · "+(policy.q.updates-startUpdates)+" critic updates · "+measuredFits+"/"+measuredProbes+" informative same-state fits · mean ΔR "+(measuredFits?spreadSum/measuredFits:0).toFixed(3)+" · "+(policy.teacherCalls-startTeacher)+" teacher refreshes · ready for teacher-off playback";
+    ui.tuneStatus.textContent="TRAINING COMPLETE · "+result.completed+" decisions · "+result.actionDiversity+" actions explored · "+(policy.q.updates-startUpdates)+" critic updates · "+result.measuredFits+"/"+result.measuredProbes+" informative same-state fits · mean ΔR "+Number(result.meanMeasuredSpread||0).toFixed(3)+" · "+(policy.teacherCalls-startTeacher)+" teacher refreshes · ready for teacher-off playback";
     setRuntime("TRAINED + MEASURED · FROZEN");render();
   }catch(error){ui.tuneStatus.textContent="training failed · "+String(error?.message||error);setRuntime("TRAINING ERROR",true)}
   finally{setBusy(false)}
