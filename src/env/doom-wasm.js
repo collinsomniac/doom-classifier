@@ -25,28 +25,39 @@ const BASE_ACTION_SPECS=[
   action("use","interact / open","press the use key to open doors, activate switches, lifts, or other usable map elements directly ahead",BITS.USE),
   action("wait","wait","apply no movement, turning, firing, or use input for this decision interval",0)
 ];
-const TRANSLATION_AXES=[
-  ["forward","forward movement",BITS.FORWARD],
-  ["back","backward movement",BITS.BACK],
-  ["strafe_left","left strafe",BITS.STRAFE_LEFT],
-  ["strafe_right","right strafe",BITS.STRAFE_RIGHT]
+const TRANSLATION_OPTIONS=[
+  ["","no translation",0],
+  ["forward","forward",BITS.FORWARD],
+  ["back","back",BITS.BACK],
+  ["strafe_left","strafe left",BITS.STRAFE_LEFT],
+  ["strafe_right","strafe right",BITS.STRAFE_RIGHT]
 ];
-const VIEW_AXES=[
+const VIEW_OPTIONS=[
+  ["","keep view",0],
   ["turn_left","turn left",BITS.TURN_LEFT],
   ["turn_right","turn right",BITS.TURN_RIGHT]
 ];
-const COMPOUND_ACTION_SPECS=[];
-for(const [moveId,moveLabel,moveMask] of TRANSLATION_AXES){
-  for(const [viewId,viewLabel,viewMask] of VIEW_AXES){
+const baseByMask=new Map(BASE_ACTION_SPECS.map(spec=>[spec.mask,spec])),cartesianByMask=new Map();
+for(const [moveId,moveLabel,moveMask] of TRANSLATION_OPTIONS){
+  for(const [viewId,viewLabel,viewMask] of VIEW_OPTIONS){
     for(const firing of [false,true]){
-      const id=moveId+"_"+viewId+(firing?"_fire":"");
-      const label=moveLabel+" + "+viewLabel+(firing?" + fire":"");
-      const description="simultaneously hold "+moveLabel+", "+viewLabel+(firing?", and weapon fire":"")+" for one control interval";
-      COMPOUND_ACTION_SPECS.push(action(id,label,description,moveMask|viewMask|(firing?BITS.FIRE:0)));
+      for(const using of [false,true]){
+        const mask=moveMask|viewMask|(firing?BITS.FIRE:0)|(using?BITS.USE:0);
+        if(cartesianByMask.has(mask))continue;
+        const legacy=baseByMask.get(mask);
+        if(legacy){cartesianByMask.set(mask,legacy);continue}
+        const ids=[moveId,viewId,firing?"fire":"",using?"use":""].filter(Boolean);
+        const labels=[moveMask?moveLabel:"",viewMask?viewLabel:"",firing?"fire":"",using?"use":""].filter(Boolean);
+        const id=ids.join("_")||"wait",label=labels.join(" + ")||"wait";
+        const description=labels.length
+          ? "simultaneously hold "+labels.join(", ")+" for one control interval"
+          : "apply no movement, turning, firing, or use input for this decision interval";
+        cartesianByMask.set(mask,action(id,label,description,mask));
+      }
     }
   }
 }
-const ACTION_SPECS=Object.freeze([...BASE_ACTION_SPECS,...COMPOUND_ACTION_SPECS]);
+const ACTION_SPECS=Object.freeze([...cartesianByMask.values()].sort((a,b)=>a.mask-b.mask));
 const ENTITY_TYPES=Object.freeze({
   0:"player",1:"zombie man",2:"shotgun guy",3:"arch-vile",4:"arch-vile fire",5:"revenant",6:"revenant tracer missile",7:"smoke",8:"mancubus",9:"mancubus fireball",
   10:"chaingunner",11:"imp",12:"demon",13:"spectre",14:"cacodemon",15:"baron of hell",16:"baron fireball",17:"hell knight",18:"lost soul",19:"spider mastermind",
@@ -99,16 +110,16 @@ export class DoomWasmArena{
     this.schema={
       environment:"DOOM-compatible first-person shooter using standard movement, turning, weapon-fire, and use controls.",
       objective:"Play the current DOOM episode using only the observed game state and available controller inputs.",
-      actionSpace:{kind:"controller_buttons",simultaneous:true,representation:"factorized literal-control lattice",axes:["translation","view","trigger","interaction"],description:"Each candidate is a literal controller-button packet held for one decision interval. Movement, view direction and fire may compose simultaneously; no candidate encodes a tactical macro."},
+      actionSpace:{kind:"controller_buttons",simultaneous:true,representation:"complete factorized literal-control lattice",axes:["translation","view","trigger","interaction"],description:"All valid combinations of one translation choice, one view choice, trigger on/off, and interaction on/off are represented as literal controller packets. No candidate encodes a tactical macro."},
       actionFields:[
-        {id:"forward",label:"forward control",description:"whether this candidate holds forward movement",min:0,max:1},
-        {id:"back",label:"backward control",description:"whether this candidate holds backward movement",min:0,max:1},
-        {id:"turn_left",label:"turn left control",description:"whether this candidate turns the view left",min:0,max:1},
-        {id:"turn_right",label:"turn right control",description:"whether this candidate turns the view right",min:0,max:1},
-        {id:"strafe_left",label:"strafe left control",description:"whether this candidate moves sideways left",min:0,max:1},
-        {id:"strafe_right",label:"strafe right control",description:"whether this candidate moves sideways right",min:0,max:1},
-        {id:"fire",label:"weapon fire control",description:"whether this candidate fires the equipped weapon",min:0,max:1},
-        {id:"use",label:"use interaction control",description:"whether this candidate activates or uses the environment",min:0,max:1}
+        {id:"forward",label:"forward control",description:"move forward along the current view direction",axis:"translation",axisLabel:"translation",neutralLabel:"no translation",min:0,max:1},
+        {id:"back",label:"backward control",description:"move backward opposite the current view direction",axis:"translation",axisLabel:"translation",neutralLabel:"no translation",min:0,max:1},
+        {id:"turn_left",label:"turn left control",description:"rotate the view left / counterclockwise",axis:"view",axisLabel:"view direction",neutralLabel:"keep view direction",min:0,max:1},
+        {id:"turn_right",label:"turn right control",description:"rotate the view right / clockwise",axis:"view",axisLabel:"view direction",neutralLabel:"keep view direction",min:0,max:1},
+        {id:"strafe_left",label:"strafe left control",description:"move sideways left without changing view direction",axis:"translation",axisLabel:"translation",neutralLabel:"no translation",min:0,max:1},
+        {id:"strafe_right",label:"strafe right control",description:"move sideways right without changing view direction",axis:"translation",axisLabel:"translation",neutralLabel:"no translation",min:0,max:1},
+        {id:"fire",label:"weapon fire control",description:"fire the currently equipped weapon",axis:"trigger",axisLabel:"weapon trigger",neutralLabel:"do not fire",min:0,max:1},
+        {id:"use",label:"use interaction control",description:"activate or use the environment directly ahead",axis:"interaction",axisLabel:"interaction",neutralLabel:"do not use",min:0,max:1}
       ],
       fields:[
         {id:"health",label:"health",description:"remaining player vitality",min:0,max:200},
