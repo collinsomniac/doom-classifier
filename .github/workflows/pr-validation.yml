@@ -29,6 +29,7 @@ jobs:
           node tests/action-attention.mjs
           node tests/semantic-value-separation.mjs
           node tests/counterfactual-value-supervision.mjs
+          node tests/measured-fork-training.mjs
           node tests/checkpoint-roundtrip.mjs
           node tests/proper-decision-supervision.mjs
           node tests/nli-independent-scores.mjs
