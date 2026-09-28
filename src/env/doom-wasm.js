@@ -4,8 +4,15 @@ const RAW_BASE="https://raw.githubusercontent.com/"+RUNTIME_REPOSITORY+"/"+RUNTI
 
 const BITS=Object.freeze({FORWARD:1,BACK:2,TURN_LEFT:4,TURN_RIGHT:8,STRAFE_LEFT:16,STRAFE_RIGHT:32,FIRE:64,USE:128});
 const controls=(mask)=>Object.freeze({
+  // Literal button facts remain available to the actuator/UI.
   forward:(mask&BITS.FORWARD)?1:0,back:(mask&BITS.BACK)?1:0,turn_left:(mask&BITS.TURN_LEFT)?1:0,turn_right:(mask&BITS.TURN_RIGHT)?1:0,
-  strafe_left:(mask&BITS.STRAFE_LEFT)?1:0,strafe_right:(mask&BITS.STRAFE_RIGHT)?1:0,fire:(mask&BITS.FIRE)?1:0,use:(mask&BITS.USE)?1:0
+  strafe_left:(mask&BITS.STRAFE_LEFT)?1:0,strafe_right:(mask&BITS.STRAFE_RIGHT)?1:0,fire:(mask&BITS.FIRE)?1:0,use:(mask&BITS.USE)?1:0,
+  // These four orthogonal axes are the semantic decision interface. They are
+  // compositional: knowledge about firing transfers across every movement+fire packet.
+  movement:(mask&BITS.FORWARD)?1:(mask&BITS.BACK)?2:(mask&BITS.STRAFE_LEFT)?3:(mask&BITS.STRAFE_RIGHT)?4:0,
+  view:(mask&BITS.TURN_LEFT)?1:(mask&BITS.TURN_RIGHT)?2:0,
+  trigger:(mask&BITS.FIRE)?1:0,
+  interaction:(mask&BITS.USE)?1:0
 });
 const action=(id,label,description,mask)=>Object.freeze({id,label,description,mask,params:controls(mask)});
 const ACTION_SPECS=Object.freeze([
@@ -77,16 +84,12 @@ export class DoomWasmArena{
     this.schema={
       environment:"DOOM-compatible first-person shooter using standard movement, turning, weapon-fire, and use controls.",
       objective:"Play the current DOOM episode using only the observed game state and available controller inputs.",
-      actionSpace:{kind:"controller_buttons",simultaneous:true,representation:"joint-action baseline",description:"Each candidate is a literal controller-button packet held for one decision interval; no candidate encodes a tactical macro."},
+      actionSpace:{kind:"controller_buttons",simultaneous:true,representation:"factorized typed axes -> literal packet",description:"The policy reasons over orthogonal movement, view, trigger, and interaction axes; each candidate still resolves to a literal controller-button packet and never encodes a tactical macro."},
       actionFields:[
-        {id:"forward",label:"forward control",description:"whether this candidate holds forward movement",min:0,max:1},
-        {id:"back",label:"backward control",description:"whether this candidate holds backward movement",min:0,max:1},
-        {id:"turn_left",label:"turn left control",description:"whether this candidate turns the view left",min:0,max:1},
-        {id:"turn_right",label:"turn right control",description:"whether this candidate turns the view right",min:0,max:1},
-        {id:"strafe_left",label:"strafe left control",description:"whether this candidate moves sideways left",min:0,max:1},
-        {id:"strafe_right",label:"strafe right control",description:"whether this candidate moves sideways right",min:0,max:1},
-        {id:"fire",label:"weapon fire control",description:"whether this candidate fires the equipped weapon",min:0,max:1},
-        {id:"use",label:"use interaction control",description:"whether this candidate activates or uses the environment",min:0,max:1}
+        {id:"movement",label:"movement",description:"translation choice for this control interval",enum:{0:"hold position",1:"forward",2:"backward",3:"strafe left",4:"strafe right"}},
+        {id:"view",label:"view change",description:"view rotation choice for this control interval",enum:{0:"keep heading",1:"turn left",2:"turn right"}},
+        {id:"trigger",label:"weapon trigger",description:"whether to fire the equipped weapon this interval",enum:{0:"hold fire",1:"fire"}},
+        {id:"interaction",label:"environment interaction",description:"whether to activate a usable line or object this interval",enum:{0:"no use",1:"use"}}
       ],
       fields:[
         {id:"health",label:"health",description:"remaining player vitality",min:0,max:200},
