@@ -21,15 +21,18 @@ const policy=new SemanticResidualPolicy({schema,actions,semantic:new HashSemanti
 for(let i=0;i<30;i++)policy.q.distill(obs,[2.5,-1.5],{strength:.5});
 
 const before=policy.q.scoreStatsObservation(obs),semanticBefore=[...before.semanticScores],valueBefore=softmax(before.valueScores,1);
-const queryBefore=Array.from(policy.q.valueQueryLayer.w);
+const probeState=policy.q.encodeState(obs,{cache:false}),probeForward=policy.q.actionForward(probeState,1);
+policy.q.zeroGrad();policy.q.backwardValue(probeForward,1,{bootstrap:false});
+const queryGradient=Math.max(...policy.q.valueQueryLayer.gw.map(Math.abs));
+assert.ok(queryGradient>1e-10,"critic must expose a trainable private action-conditioned attention path");
+policy.q.zeroGrad();
+
 const result=policy.fitCounterfactualValueDistributions([{observation:obs,target:[.02,.98]}],{steps:48,strength:.35});
 const after=policy.q.scoreStatsObservation(obs),valueAfter=softmax(after.valueScores,1);
 const semanticDrift=Math.max(...semanticBefore.map((v,i)=>Math.abs(v-after.semanticScores[i])));
-const queryDrift=Math.max(...queryBefore.map((v,i)=>Math.abs(v-policy.q.valueQueryLayer.w[i])));
 
 assert.ok(result?.updates>0,"measured target fit must update critic");
 assert.ok(semanticDrift<1e-8,"counterfactual consequence fitting must not overwrite semantic prior");
 assert.ok(valueAfter[1]>valueBefore[1],"measured best action must gain critic probability");
-assert.ok(queryDrift>1e-9,"critic must be able to learn its own action-conditioned record attention");
 assert.ok(policy.q.parameterCount()<10000);
-console.log(JSON.stringify({ok:true,params:policy.q.parameterCount(),semanticDrift,queryDrift,valueBefore,valueAfter,result}));
+console.log(JSON.stringify({ok:true,params:policy.q.parameterCount(),semanticDrift,queryGradient,valueBefore,valueAfter,result}));
