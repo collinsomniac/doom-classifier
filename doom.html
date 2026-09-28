@@ -31,7 +31,13 @@
   </article>
 </section>
 
-<section class="grid lab-grid">
+<nav class="lab-tabs" aria-label="lab views">
+  <button id="playTabBtn" class="lab-tab active" type="button" aria-selected="true" aria-controls="playTab">Play</button>
+  <button id="inspectTabBtn" class="lab-tab" type="button" aria-selected="false" aria-controls="inspectTab">Inspect / Train</button>
+</nav>
+
+<section id="playTab" class="tab-panel active" aria-labelledby="playTabBtn">
+<section class="grid play-grid">
 <article class="panel arena-panel">
   <div class="panel-head"><div><p class="kicker">REAL ENGINE</p><h2 id="runtimeTitle">Chocolate Doom</h2></div><div id="weaponState" class="choice">weapon —</div></div>
   <div id="decisionCircuit" class="decision-circuit-shell" aria-label="live decision circuit">
@@ -53,6 +59,14 @@
     <div class="circuit-footer"><span id="circuitBackend">engine WASM · fast core local-js</span><span id="circuitAgreement">prior / critic / fused waiting</span></div>
   </div>
   <canvas id="doomCanvas" tabindex="0" width="640" height="400"></canvas>
+</article>
+</section>
+</section>
+
+<section id="inspectTab" class="tab-panel" aria-labelledby="inspectTabBtn" hidden>
+<section class="grid lab-grid">
+<article class="panel engine-controls-panel">
+  <div class="panel-head"><div><p class="kicker">ENGINE CONTROLS</p><h2>Runtime + primitive test</h2></div><div class="choice">Play tab stays clean</div></div>
   <div class="model-status" id="bootStatus">Engine has not been loaded.</div>
   <label class="range-row">primitive hold interval <input id="actionMs" type="range" min="60" max="250" value="110" /><output id="actionMsOut">110 ms</output></label>
   <div class="manual-row"><select id="manualActionSelect" disabled></select><button id="manualBtn" class="secondary" disabled>Test primitive</button><span id="manualStatus" class="model-status">Use this to verify FIRE/movement without involving the model.</span></div>
@@ -195,5 +209,6 @@
 </details>
 
 <section class="panel log-panel"><div class="panel-head"><div><p class="kicker">TRACE</p><h2>Recent decisions</h2></div><button id="exportBtn" class="secondary" disabled>Export trace</button></div><pre id="eventLog">Boot the engine to begin.</pre></section>
+</section>
 <footer><span>environment adapter → structured state → semantic prior + learned value → KL fusion → typed action</span><span><a href="./docs/results.md">results</a> · <a href="./docs/architecture.md">architecture</a> · <a href="./synthetic.html">legacy synthetic benchmark</a></span></footer>
 </main><script type="module" src="./src/doom-main.js"></script></body></html>
