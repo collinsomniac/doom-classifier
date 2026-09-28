@@ -109,7 +109,7 @@
       <div class="arch-branch">
         <div class="arch-node search-node" data-arch="counterfactual"><span class="arch-tag">OPTIONAL SEARCH</span><strong>Same-state simulator fork</strong><small class="arch-value">available after boot</small></div>
         <div class="arch-mini-arrow">→</div>
-        <div class="arch-node fit-node" data-arch="properfit"><span class="arch-tag">MEASURED SUPERVISION</span><strong>Proper target fit</strong><small class="arch-value">no probe examples</small></div>
+        <div class="arch-node fit-node" data-arch="properfit"><span class="arch-tag">MEASURED CONSEQUENCES</span><strong>Counterfactual value fit</strong><small class="arch-value">no probe examples</small></div>
       </div>
     </div>
     <div class="arch-arrow merge-arrow">⇒</div>
@@ -165,7 +165,7 @@
 
 <article class="panel counterfactual-panel">
   <div class="panel-head"><div><p class="kicker">SAME-STATE POLICY IMPROVEMENT</p><h2>Counterfactual simulator probe</h2></div><div id="counterfactualBadge" class="choice">idle</div></div>
-  <p class="help">Training-only search: snapshot the exact environment state, try every typed action for the same number of deterministic engine tics, restore the state, and compare measured causal returns. Probing never changes model weights. Fitting is a separate explicit step and uses a conservative prior-regularized target.</p>
+  <p class="help">Training-only search: snapshot the exact environment state, try every typed action for the same number of deterministic engine tics, restore the state, and compare measured causal returns. Probing never changes model weights. Fitting is a separate explicit step: the conservative prior-regularized target trains the consequence/value branch while the semantic prior remains protected.</p>
   <div class="counterfactual-controls">
     <label><span>probe horizon</span><select id="counterfactualTics" disabled><option value="6">6 tics · 0.17 s</option><option value="12">12 tics · 0.34 s</option><option value="24" selected>24 tics · 0.69 s</option><option value="35">35 tics · 1.00 s</option></select></label>
     <button id="counterfactualProbeBtn" disabled>Probe all actions</button>
