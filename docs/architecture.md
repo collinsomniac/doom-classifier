@@ -362,7 +362,7 @@ Disallowed responsibility:
 
 Latest CI CPU stress sample:
 
-- 7,316 trainable parameters;
+- 7,971 trainable parameters;
 - 768 variable records;
 - p50 ~7.45 ms;
 - p95 ~9.82 ms.
