@@ -297,23 +297,35 @@ function renderCounterfactual(){
     return '<div class="counterfactual-row '+(rank===0?"top-measured":"")+'"><strong>'+(rank+1)+'. '+escapeHtml(row.trial.label||row.trial.id)+'</strong><div class="counterfactual-cell"><span>prior</span><b>'+(row.prior*100).toFixed(1)+'%</b></div><div class="counterfactual-cell"><span>return</span><b>'+Number(row.ret||0).toFixed(3)+'</b></div><div class="counterfactual-cell"><span>target</span><b>'+(row.target*100).toFixed(1)+'%</b></div><div class="counterfactual-outcome">'+(bits.join(" · ")||"no causal event")+'</div></div>';
   }).join("");
 }
+async function measuredValueProbe({tics=24,fallbackTics=null,collect=true,fit=false,fitSteps=6,fitStrength=.08}={}){
+  const observation=env.lastObservation||env.observe(),prior=semanticPriorAtState(observation),started=performance.now();
+  const run=async horizon=>probeCounterfactualActions({
+    environment:env,actions:policy.actions,prior,horizon:1,temperature:.45,priorStrength:1,
+    stepper:id=>env.stepTics(id,horizon)
+  });
+  let usedTics=Math.max(1,Number(tics)||24),probe=await run(usedTics);
+  if(Number(probe.spread||0)<=1e-9&&fallbackTics&&Number(fallbackTics)>usedTics){
+    usedTics=Number(fallbackTics);probe=await run(usedTics);
+  }
+  lastCounterfactualProbe={...probe,prior,tics:usedTics,ms:performance.now()-started,t:Date.now()};
+  let example=null,fitResult=null;
+  if(Number(probe.spread||0)>1e-9){
+    example={observation:probe.observation,target:probe.target,temporal:null,meta:{tics:usedTics,spread:probe.spread}};
+    if(collect){
+      counterfactualExamples.push(example);
+      if(counterfactualExamples.length>12)counterfactualExamples.shift();
+    }
+    if(fit)fitResult=policy.fitCounterfactualValueDistributions([example],{steps:fitSteps,strength:fitStrength});
+  }
+  return{probe:lastCounterfactualProbe,example,fitResult};
+}
 async function probeSameState(){
   if(!prepared||!env?.supportsSnapshots?.()||!env?.supportsExactTics?.())return;
   controller.pause();counterfactualBusy=true;setBusy(true);ui.cfStatus.textContent="Forking one exact state across all typed actions…";renderCounterfactual();renderArchitecture(env.lastObservation||env.observe(),controller.lastDecision,env.lastOutcome);await Promise.resolve();
-  const started=performance.now();
   try{
-    const observation=env.lastObservation||env.observe(),prior=semanticPriorAtState(observation),tics=Math.max(1,Number(ui.cfTics.value)||24);
-    const probe=await probeCounterfactualActions({
-      environment:env,actions:policy.actions,prior,horizon:1,temperature:.45,priorStrength:1,
-      stepper:id=>env.stepTics(id,tics)
-    });
-    lastCounterfactualProbe={...probe,prior,tics,ms:performance.now()-started,t:Date.now()};
-    if(Number(probe.spread||0)>1e-9){
-      counterfactualExamples.push({observation:probe.observation,target:probe.target,temporal:null,meta:{tics,spread:probe.spread}});
-      if(counterfactualExamples.length>12)counterfactualExamples.shift();
-    }
+    const {probe}=await measuredValueProbe({tics:Math.max(1,Number(ui.cfTics.value)||24),collect:true,fit:false});
     const best=probe.returns.reduce((bi,v,i,a)=>v>a[bi]?i:bi,0);
-    ui.cfStatus.textContent="PROBE COMPLETE · "+probe.trials.length+" exact branches × "+tics+" tics · "+(performance.now()-started).toFixed(1)+" ms · best "+policy.actions[best].id+" · state restored"+(probe.spread<=1e-9?" · no return separation, not collected":"");
+    ui.cfStatus.textContent="PROBE COMPLETE · "+probe.trials.length+" exact branches × "+probe.tics+" tics · "+Number(probe.ms||0).toFixed(1)+" ms · best "+policy.actions[best].id+" · state restored"+(probe.spread<=1e-9?" · no return separation, not collected":"");
   }catch(error){ui.cfStatus.textContent="probe failed · "+String(error?.message||error)}
   finally{counterfactualBusy=false;setBusy(false);render()}
 }
@@ -530,13 +542,33 @@ async function switchTeacher(){
   finally{setBusy(false)}
 }
 async function tuneAgent(){
-  if(!prepared)return;controller.pause();setBusy(true);applyProfile("learning");ui.tuneProgress.value=0;ui.tuneBadge.textContent="training";
-  const steps=Number(ui.tuneSteps.value)||128,startUpdates=policy.q.updates,startTeacher=policy.teacherCalls;
+  if(!prepared)return;controller.pause();setBusy(true);applyProfile("learning");ui.tuneProgress.value=0;ui.tuneBadge.textContent="training + measured forks";
+  const steps=Number(ui.tuneSteps.value)||128,startUpdates=policy.q.updates,startTeacher=policy.teacherCalls,stageSize=32,counts={};
+  let completed=0,reward=0,measuredFits=0,measuredProbes=0,spreadSum=0,rolloutRestarts=0;
   try{
-    const result=await controller.trainBurst({steps,epsilon:.16,rolloutHorizon:64,onProgress:p=>{ui.tuneProgress.value=p.ratio*100;ui.tuneStatus.textContent="training "+p.completed+"/"+p.total+" · updates "+(p.updates-startUpdates)+" · rollout restarts "+p.rolloutRestarts}});
+    while(completed<steps){
+      const stageSteps=Math.min(stageSize,steps-completed),base=completed;
+      const result=await controller.trainBurst({steps:stageSteps,epsilon:.16,rolloutHorizon:0,onProgress:p=>{
+        ui.tuneProgress.value=((base+p.completed)/steps)*100;
+        ui.tuneStatus.textContent="training "+(base+p.completed)+"/"+steps+" · TD updates "+(policy.q.updates-startUpdates)+" · measured fits "+measuredFits;
+      }});
+      completed+=result.completed;reward+=Number(result.return||0);
+      for(const [id,n] of Object.entries(result.actionCounts||{}))counts[id]=(counts[id]||0)+Number(n||0);
+      if(env?.supportsSnapshots?.()&&env?.supportsExactTics?.()){
+        ui.tuneStatus.textContent="measuring exact same-state consequences after "+completed+"/"+steps+" decisions…";
+        const measured=await measuredValueProbe({tics:24,fallbackTics:35,collect:true,fit:true,fitSteps:6,fitStrength:.08});
+        measuredProbes++;
+        if(measured.example){measuredFits++;spreadSum+=Number(measured.probe?.spread||0)}
+      }
+      if(completed<steps&&completed%64===0){
+        await controller.reset({learning:false});policy.resetEpisode();rolloutRestarts++;
+      }
+      await Promise.resolve();
+    }
+    policy.flushLearning?.();await policy.awaitTeacher?.();
     applyProfile("frozen");ui.profile.value="frozen";ui.tuneBadge.textContent="frozen neural";
-    ui.tuneStatus.textContent="TRAINING COMPLETE · "+result.completed+" decisions across "+(result.rolloutRestarts+1)+" rollouts · "+result.actionDiversity+" actions explored · "+result.updates+" reward updates · "+(policy.teacherCalls-startTeacher)+" teacher refreshes · ready for teacher-off playback";
-    setRuntime("TRAINED · FROZEN");render();
+    ui.tuneStatus.textContent="TRAINING COMPLETE · "+completed+" decisions · "+Object.keys(counts).length+" actions explored · "+(policy.q.updates-startUpdates)+" critic updates · "+measuredFits+"/"+measuredProbes+" informative same-state fits · mean ΔR "+(measuredFits?spreadSum/measuredFits:0).toFixed(3)+" · "+(policy.teacherCalls-startTeacher)+" teacher refreshes · ready for teacher-off playback";
+    setRuntime("TRAINED + MEASURED · FROZEN");render();
   }catch(error){ui.tuneStatus.textContent="training failed · "+String(error?.message||error);setRuntime("TRAINING ERROR",true)}
   finally{setBusy(false)}
 }
