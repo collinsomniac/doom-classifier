@@ -1,0 +1,125 @@
+name: causal-combat-model
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - tests/doom-causal-combat.spec.mjs
+      - src/core/counterfactual.js
+      - src/core/controller.js
+      - src/core/policy.js
+      - src/core/neural-set-residual.js
+      - src/env/doom-wasm.js
+      - doom.html
+      - styles.css
+      - .github/workflows/causal-combat-model.yml
+  workflow_dispatch:
+    inputs:
+      steps:
+        description: "Causal training decisions"
+        required: false
+        default: "768"
+        type: choice
+        options: ["256","512","768","1024"]
+      rollouts:
+        description: "Frozen replay rollouts"
+        required: false
+        default: "16"
+        type: choice
+        options: ["8","12","16","24"]
+      kill_target:
+        description: "Required frozen replay kills"
+        required: false
+        default: "20"
+        type: choice
+        options: ["10","15","20","25"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: causal-combat-model
+  cancel-in-progress: true
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CAUSAL_TRAIN_STEPS: ${{ github.event_name == 'workflow_dispatch' && inputs.steps || '768' }}
+      CAUSAL_REPLAY_ROLLOUTS: ${{ github.event_name == 'workflow_dispatch' && inputs.rollouts || '16' }}
+      CAUSAL_REPLAY_STEPS: "64"
+      CAUSAL_KILL_TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.kill_target || '20' }}
+      CAUSAL_OUTPUT_DIR: artifacts/causal-combat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Chromium tooling
+        run: |
+          npm install --no-save --no-package-lock @playwright/test@1.55.0
+          npx playwright install chromium
+      - name: Start static server
+        run: python3 -m http.server 8000 --bind 127.0.0.1 > /tmp/causal-combat-http.log 2>&1 &
+      - name: Train causal combat checkpoint and verify replay target
+        id: train
+        continue-on-error: true
+        run: npx playwright test tests/doom-causal-combat.spec.mjs --reporter=line
+      - name: Show combat report
+        if: always()
+        run: |
+          test -s artifacts/causal-combat/combat-report.json
+          node -e 'const x=require("./artifacts/causal-combat/combat-report.json"); console.log(JSON.stringify({target:x.killTarget,training:{kills:x.training.kills,damage:x.training.damage,examples:x.training.examples},evaluation:{kills:x.evaluation.totalKills,damage:x.evaluation.totalDamage,reward:x.evaluation.totalReward},replay:{kills:x.replay.totalKills,damage:x.replay.totalDamage}},null,2))'
+      - name: Upload checkpoint and replay bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: causal-combat-model
+          path: artifacts/causal-combat/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Determine publication eligibility
+        if: always()
+        id: gate
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs=require("fs");
+          const p="artifacts/causal-combat/combat-report.json";
+          if(!fs.existsSync(p)){console.log("publish=false");process.exit(0)}
+          const x=JSON.parse(fs.readFileSync(p,"utf8"));
+          const ok=x.evaluation.totalKills>=x.killTarget &&
+            x.replay.totalKills===x.evaluation.totalKills &&
+            x.replay.totalDamage===x.evaluation.totalDamage;
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,"publish="+String(ok)+"\n");
+          console.log({publish:ok,kills:x.evaluation.totalKills,target:x.killTarget});
+          NODE
+      - name: Publish validated combat model and replay
+        if: steps.gate.outputs.publish == 'true'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SNAPSHOT="$RUNNER_TEMP/model-runtime"
+          rm -rf "$SNAPSHOT"
+          mkdir -p "$SNAPSHOT"
+          cp artifacts/causal-combat/doom-causal-checkpoint.json "$SNAPSHOT/doom-starter.json"
+          cp artifacts/causal-combat/combat-replays.json "$SNAPSHOT/combat-replays.json"
+          cp artifacts/causal-combat/combat-report.json "$SNAPSHOT/combat-report.json"
+          node -e 'const fs=require("fs"),x=require("./artifacts/causal-combat/combat-report.json");fs.writeFileSync(process.argv[1],JSON.stringify({source_commit:process.env.GITHUB_SHA,workflow_run:process.env.GITHUB_RUN_ID,training:"exact-state causal policy curriculum",kills:x.evaluation.totalKills,target:x.killTarget,replay_verified:true},null,2))' "$SNAPSHOT/metadata.json"
+          cd "$SNAPSHOT"
+          git init
+          git checkout --orphan model-runtime
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "causal combat model from ${GITHUB_SHA}"
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin HEAD:model-runtime
+      - name: Enforce combat target
+        if: always()
+        shell: bash
+        run: |
+          test "${{ steps.gate.outputs.publish }}" = "true"
