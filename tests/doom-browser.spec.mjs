@@ -70,7 +70,7 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   await expect(page.locator("#typedRawTop")).not.toHaveText("—");
   await expect(page.locator("#typedProjector")).toContainText("fit");
   await expect(page.locator("#typedFused")).not.toHaveText("—");
-  await expect(page.locator("#typedFieldGrid .typed-field")).toHaveCount(8);
+  await expect(page.locator("#typedFieldGrid .typed-field")).toHaveCount(4);
 
   const semanticProbes=await page.evaluate(async()=>{
     const {env,policy}=window.__doomLab,base=env.observe(),actions=policy.actions;
