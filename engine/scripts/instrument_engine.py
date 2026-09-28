@@ -239,6 +239,7 @@ EMSCRIPTEN_KEEPALIVE int PromptFPS_HasSnapshot(void)
         """#if defined(__EMSCRIPTEN__)
 static int promptfps_snapshot_rndindex;
 static int promptfps_snapshot_prndindex;
+static int promptfps_snapshot_paused;
 static int promptfps_snapshot_turnheld;
 static int promptfps_snapshot_next_weapon;
 
@@ -246,6 +247,7 @@ void G_PromptFPSSaveSnapshot(void)
 {
     promptfps_snapshot_rndindex = rndindex;
     promptfps_snapshot_prndindex = prndindex;
+    promptfps_snapshot_paused = paused;
     promptfps_snapshot_turnheld = turnheld;
     promptfps_snapshot_next_weapon = next_weapon;
     savegameslot = 7;
@@ -260,6 +262,7 @@ void G_PromptFPSLoadSnapshot(void)
     G_DoLoadGame();
     rndindex = promptfps_snapshot_rndindex;
     prndindex = promptfps_snapshot_prndindex;
+    paused = promptfps_snapshot_paused;
     turnheld = promptfps_snapshot_turnheld;
     next_weapon = promptfps_snapshot_next_weapon;
     memset(gamekeydown, 0, sizeof(gamekeydown));
