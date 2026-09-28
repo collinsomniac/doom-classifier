@@ -132,6 +132,9 @@ export class NeuralSetResidualQ{
     this.entityLayer1=new Dense(this.hashDim,this.entityHidden,rng);
     this.entityLayer2=new Dense(this.entityHidden,this.entityDim,rng);
     this.queryLayer=new Dense(this.queryInputDim,this.entityDim,rng,{activation:"tanh"});
+    // Consequence learning gets its own action-conditioned record selector.
+    // This lets reward change "what matters" without overwriting the semantic encoder.
+    this.valueQueryLayer=new Dense(this.queryInputDim,this.entityDim,rng,{activation:"tanh"});
     this.headLayer=new Dense(this.headInputDim,this.headDim,rng);
     this.semanticLayer=new Dense(this.headDim,1,rng,{activation:"linear"});
     this.semanticAdapterLayer=new Dense(this.headInputDim,1,rng,{activation:"linear"});
@@ -146,9 +149,9 @@ export class NeuralSetResidualQ{
     for(let i=0;i<this.valueAdapterUp.w.length;i++)this.valueAdapterUp.w[i]*=.05;
     this.bootstrapRng=mulberry32((this.seed^0x9e3779b9)>>>0);
     this.semanticLayers=[this.globalLayer,this.temporalLayer,this.entityLayer1,this.entityLayer2,this.queryLayer,this.headLayer,this.semanticLayer,this.semanticAdapterLayer];
-    this.valueLayers=[this.valueHeadLayer,this.valueAdapterUp,this.valueLayer,...this.valueOutLayers];
+    this.valueLayers=[this.valueQueryLayer,this.valueHeadLayer,this.valueAdapterUp,this.valueLayer,...this.valueOutLayers];
     this.layers=[...this.semanticLayers,...this.valueLayers];
-    this.updates=0;this.distillUpdates=0;this.properScoreUpdates=0;this.targetSyncs=0;
+    this.updates=0;this.distillUpdates=0;this.properScoreUpdates=0;this.valueSupervisionUpdates=0;this.targetSyncs=0;
     if(this.useTargetNetwork){
       if(!this.targetNet){
         this.targetNet=new NeuralSetResidualQ(this.schema,this.actions,{
@@ -196,19 +199,28 @@ export class NeuralSetResidualQ{
   parameterCount(){return this.layers.reduce((n,l)=>n+l.count(),0)}
   exportCheckpoint(){
     return{
-      version:1,model:this.name,params:this.parameterCount(),updates:this.updates,distillUpdates:this.distillUpdates,properScoreUpdates:this.properScoreUpdates,targetSyncs:this.targetSyncs,
+      version:1,architectureVersion:2,model:this.name,params:this.parameterCount(),updates:this.updates,distillUpdates:this.distillUpdates,properScoreUpdates:this.properScoreUpdates,valueSupervisionUpdates:this.valueSupervisionUpdates,targetSyncs:this.targetSyncs,
       layers:this.layers.map(layer=>({w:Array.from(layer.w),b:Array.from(layer.b)}))
     };
   }
   importCheckpoint(checkpoint,{syncTarget=true}={}){
     if(!checkpoint||checkpoint.version!==1||!Array.isArray(checkpoint.layers))throw new Error("Unsupported neural checkpoint");
-    if(checkpoint.layers.length!==this.layers.length)throw new Error("Checkpoint layer count mismatch");
-    for(let i=0;i<this.layers.length;i++){
-      const source=checkpoint.layers[i],target=this.layers[i];
-      if(!Array.isArray(source?.w)||!Array.isArray(source?.b)||source.w.length!==target.w.length||source.b.length!==target.b.length)throw new Error("Checkpoint layer shape mismatch at "+i);
+    const legacy=checkpoint.layers.length===this.layers.length-1;
+    if(!legacy&&checkpoint.layers.length!==this.layers.length)throw new Error("Checkpoint layer count mismatch");
+    const copy=(source,target,index)=>{
+      if(!Array.isArray(source?.w)||!Array.isArray(source?.b)||source.w.length!==target.w.length||source.b.length!==target.b.length)throw new Error("Checkpoint layer shape mismatch at "+index);
       target.w.set(source.w);target.b.set(source.b);target.zeroGrad();
+    };
+    if(legacy){
+      // v1 checkpoints predate the private critic-attention query. Preserve every old
+      // weight and initialize the new query from the semantic selector for continuity.
+      for(let i=0;i<this.semanticLayers.length;i++)copy(checkpoint.layers[i],this.layers[i],i);
+      this.valueQueryLayer.w.set(this.queryLayer.w);this.valueQueryLayer.b.set(this.queryLayer.b);this.valueQueryLayer.zeroGrad();
+      for(let i=this.semanticLayers.length;i<checkpoint.layers.length;i++)copy(checkpoint.layers[i],this.layers[i+1],i);
+    }else{
+      for(let i=0;i<this.layers.length;i++)copy(checkpoint.layers[i],this.layers[i],i);
     }
-    this.updates=Math.max(0,Number(checkpoint.updates||0));this.distillUpdates=Math.max(0,Number(checkpoint.distillUpdates||0));this.properScoreUpdates=Math.max(0,Number(checkpoint.properScoreUpdates||0));this.targetSyncs=Math.max(0,Number(checkpoint.targetSyncs||0));
+    this.updates=Math.max(0,Number(checkpoint.updates||0));this.distillUpdates=Math.max(0,Number(checkpoint.distillUpdates||0));this.properScoreUpdates=Math.max(0,Number(checkpoint.properScoreUpdates||0));this.valueSupervisionUpdates=Math.max(0,Number(checkpoint.valueSupervisionUpdates||0));this.targetSyncs=Math.max(0,Number(checkpoint.targetSyncs||0));
     if(syncTarget&&this.targetNet)this.syncTarget();
     return this;
   }
@@ -237,25 +249,40 @@ export class NeuralSetResidualQ{
     context[p++]=Math.log1p(recordCount)/Math.log(1025);context[p]=Math.log1p(collectionCount)/Math.log(17);
     return{context,latents,records,cache:cache?{globalCache,temporalCache,recordCaches,maxIndex,recordCount}:null};
   }
-  attention(state,actionIndex){
+  attention(state,actionIndex,queryLayer=this.queryLayer){
     const queryInput=new Float32Array(this.queryInputDim);queryInput.set(this.actionEmbeddings[actionIndex],0);queryInput.set(state.context.slice(0,this.attentionStateDim),this.actionDim);
-    const queryCache=this.queryLayer.forward(queryInput),query=queryCache.out,n=state.latents.length,weights=new Float32Array(n),attended=new Float32Array(this.entityDim);
-    if(!n)return{queryCache,weights,attended};
-    const logits=new Float32Array(n),scale=1/Math.sqrt(this.entityDim);let peak=-Infinity;
-    for(let r=0;r<n;r++){let s=0,z=state.latents[r];for(let d=0;d<this.entityDim;d++)s+=query[d]*z[d];s*=scale;logits[r]=s;if(s>peak)peak=s}
-    let denom=0;for(let r=0;r<n;r++){const e=Math.exp(logits[r]-peak);weights[r]=e;denom+=e}denom=denom||1;
-    for(let r=0;r<n;r++){const w=weights[r]/denom;weights[r]=w;const z=state.latents[r];for(let d=0;d<this.entityDim;d++)attended[d]+=w*z[d]}
-    return{queryCache,weights,attended};
+    const queryCache=queryLayer.forward(queryInput),query=queryCache.out,n=state.latents.length,weights=new Float32Array(n),attended=new Float32Array(this.entityDim),groupMeans=new Array(n);
+    if(!n)return{queryCache,weights,attended,groupMeans};
+    // Normalize attention inside each declared collection, then give each non-empty
+    // collection equal mass. Hundreds of geometry lines can no longer drown out a
+    // handful of enemies or pickups merely because there are more records.
+    const groups=new Map();
+    for(let r=0;r<n;r++){const key=state.records[r]?.collectionId||"records";if(!groups.has(key))groups.set(key,[]);groups.get(key).push(r)}
+    const scale=1/Math.sqrt(this.entityDim),groupScale=1/Math.max(1,groups.size);
+    for(const indices of groups.values()){
+      let peak=-Infinity;const logits=new Float32Array(indices.length);
+      for(let k=0;k<indices.length;k++){const r=indices[k],z=state.latents[r];let s=0;for(let d=0;d<this.entityDim;d++)s+=query[d]*z[d];s*=scale;logits[k]=s;if(s>peak)peak=s}
+      let denom=0;for(let k=0;k<indices.length;k++)denom+=Math.exp(logits[k]-peak);denom=denom||1;
+      const mean=new Float32Array(this.entityDim);
+      for(let k=0;k<indices.length;k++){
+        const r=indices[k],local=Math.exp(logits[k]-peak)/denom,w=local*groupScale,z=state.latents[r];weights[r]=w;
+        for(let d=0;d<this.entityDim;d++){mean[d]+=local*z[d];attended[d]+=w*z[d]}
+      }
+      for(const r of indices)groupMeans[r]=mean;
+    }
+    return{queryCache,weights,attended,groupMeans};
   }
   actionForward(state,actionIndex){
-    const attn=this.attention(state,actionIndex),input=new Float32Array(this.headInputDim);
+    const attn=this.attention(state,actionIndex,this.queryLayer),valueAttn=this.attention(state,actionIndex,this.valueQueryLayer),input=new Float32Array(this.headInputDim),valueHeadInput=new Float32Array(this.headInputDim);
     input.set(state.context,0);input.set(attn.attended,this.contextDim);input.set(this.actionEmbeddings[actionIndex],this.contextDim+this.entityDim);
-    const h=this.headLayer.forward(input),semanticOut=this.semanticLayer.forward(h.out),semanticAdapterOut=this.semanticAdapterLayer.forward(input),valueHead=this.valueHeadLayer.forward(input),valueResidual=this.valueAdapterUp.forward(valueHead.out),valueInput=new Float32Array(this.headDim);
+    valueHeadInput.set(state.context,0);valueHeadInput.set(valueAttn.attended,this.contextDim);valueHeadInput.set(this.actionEmbeddings[actionIndex],this.contextDim+this.entityDim);
+    const h=this.headLayer.forward(input),semanticOut=this.semanticLayer.forward(h.out),semanticAdapterOut=this.semanticAdapterLayer.forward(input),valueHead=this.valueHeadLayer.forward(valueHeadInput),valueResidual=this.valueAdapterUp.forward(valueHead.out),valueInput=new Float32Array(this.headDim);
     for(let d=0;d<this.headDim;d++)valueInput[d]=h.out[d]+valueResidual.out[d];
     const valueHidden=this.valueLayer.forward(valueInput),valueOuts=this.valueOutLayers.map(layer=>layer.forward(valueHidden.out)),valueMemberScores=valueOuts.map(o=>o.out[0]);
     const semanticScore=semanticOut.out[0]+semanticAdapterOut.out[0],valueScore=valueMemberScores.reduce((a,b)=>a+b,0)/valueMemberScores.length;
     const memberScores=valueMemberScores.map(value=>semanticScore+this.valueWeight*value),score=semanticScore+this.valueWeight*valueScore;
-    return{score,semanticScore,valueScore,memberScores,valueMemberScores,input,h,semanticOut,semanticAdapterOut,valueHead,valueResidual,valueHidden,valueOuts,state,actionIndex,...attn};
+    return{score,semanticScore,valueScore,memberScores,valueMemberScores,input,valueHeadInput,h,semanticOut,semanticAdapterOut,valueHead,valueResidual,valueHidden,valueOuts,state,actionIndex,
+      ...attn,valueQueryCache:valueAttn.queryCache,valueWeights:valueAttn.weights,valueAttended:valueAttn.attended,valueGroupMeans:valueAttn.groupMeans};
   }
   scoreStatsObservation(observation,{temporal=null}={}){
     const state=this.encodeState(observation,{temporal}),scores=new Array(this.actions.length),semanticScores=new Array(this.actions.length),valueScores=new Array(this.actions.length),memberScores=new Array(this.actions.length),valueMemberScores=new Array(this.actions.length);
@@ -266,9 +293,9 @@ export class NeuralSetResidualQ{
   }
   scoresObservation(observation,{temporal=null}={}){return this.scoreStatsObservation(observation,{temporal}).scores}
   valueScoresObservation(observation,{temporal=null}={}){return this.scoreStatsObservation(observation,{temporal}).valueScores}
-  inspectAttention(observation,actionIndex,{topK=8,temporal=null}={}){
-    const state=this.encodeState(observation,{temporal}),forward=this.actionForward(state,actionIndex);
-    return state.records.map((meta,i)=>({...meta,weight:forward.weights[i]||0})).sort((a,b)=>b.weight-a.weight).slice(0,topK);
+  inspectAttention(observation,actionIndex,{topK=8,temporal=null,branch="semantic"}={}){
+    const state=this.encodeState(observation,{temporal}),forward=this.actionForward(state,actionIndex),weights=branch==="value"?forward.valueWeights:forward.weights;
+    return state.records.map((meta,i)=>({...meta,weight:weights?.[i]||0,branch})).sort((a,b)=>b.weight-a.weight).slice(0,topK);
   }
 
   fitDecisionDistributions(examples,{ridge=.02}={}){
@@ -314,8 +341,8 @@ export class NeuralSetResidualQ{
     if(n){
       const q=forward.queryCache.out,scale=1/Math.sqrt(this.entityDim),gradQuery=new Float32Array(this.entityDim);
       for(let r=0;r<n;r++){
-        const z=forward.state.latents[r],w=forward.weights[r];let centeredDot=0;
-        for(let d=0;d<this.entityDim;d++)centeredDot+=gradAttended[d]*(z[d]-forward.attended[d]);
+        const z=forward.state.latents[r],w=forward.weights[r],center=forward.groupMeans?.[r]||forward.attended;let centeredDot=0;
+        for(let d=0;d<this.entityDim;d++)centeredDot+=gradAttended[d]*(z[d]-center[d]);
         const gradLogit=w*centeredDot;
         for(let d=0;d<this.entityDim;d++){
           entityExtra[r][d]+=w*gradAttended[d]+gradLogit*q[d]*scale;
@@ -336,10 +363,19 @@ export class NeuralSetResidualQ{
       for(let d=0;d<gh.length;d++)gh[d]+=g[d];
     }
     const gValueInput=this.valueLayer.backward(forward.valueHidden,gh);
-    // Reward learning updates only the private low-rank residual + value layers.
-    // The gradient into the shared semantic hidden state is intentionally dropped.
-    const gValueHead=this.valueAdapterUp.backward(forward.valueResidual,gValueInput);
-    this.valueHeadLayer.backward(forward.valueHead,gValueHead);
+    // Reward learning updates a private low-rank residual, critic head, and private
+    // action-conditioned record selector. Semantic features remain protected.
+    const gValueHead=this.valueAdapterUp.backward(forward.valueResidual,gValueInput),gBase=this.valueHeadLayer.backward(forward.valueHead,gValueHead),n=forward.state.latents.length;
+    if(n){
+      const gradAttended=gBase.slice(this.contextDim,this.contextDim+this.entityDim),q=forward.valueQueryCache.out,scale=1/Math.sqrt(this.entityDim),gradQuery=new Float32Array(this.entityDim);
+      for(let r=0;r<n;r++){
+        const z=forward.state.latents[r],w=forward.valueWeights[r],center=forward.valueGroupMeans?.[r]||forward.valueAttended;let centeredDot=0;
+        for(let d=0;d<this.entityDim;d++)centeredDot+=gradAttended[d]*(z[d]-center[d]);
+        const gradLogit=w*centeredDot;
+        for(let d=0;d<this.entityDim;d++)gradQuery[d]+=gradLogit*z[d]*scale;
+      }
+      this.valueQueryLayer.backward(forward.valueQueryCache,gradQuery);
+    }
   }
   backwardState(state,gradContext,entityExtra){
     const cache=state.cache;this.globalLayer.backward(cache.globalCache,gradContext.slice(0,this.globalDim));
@@ -376,6 +412,36 @@ export class NeuralSetResidualQ{
     }
     this.backwardState(state,gradContext,entityExtra);this.applyLayers(this.semanticLayers,this.lr*strength);this.distillUpdates++;return{loss,student,teacher};
   }
+  superviseValueDistribution(observation,targetDistribution,{strength=.12,temporal=null}={}){
+    if(!targetDistribution||targetDistribution.length!==this.actions.length)return null;
+    const raw=Array.from(targetDistribution,v=>Math.max(0,Number(v)||0)),sum=raw.reduce((a,b)=>a+b,0);
+    if(sum<=0)return null;
+    const target=raw.map(v=>v/sum),state=this.encodeState(observation,{cache:false,temporal}),forwards=this.actions.map((_,i)=>this.actionForward(state,i)),student=softmax(forwards.map(x=>x.valueScore),1);
+    this.zeroGrad();let loss=0,brier=0;
+    for(let i=0;i<this.actions.length;i++){
+      loss-=target[i]*Math.log(Math.max(1e-8,student[i]));brier+=(student[i]-target[i])**2;
+      this.backwardValue(forwards[i],student[i]-target[i],{bootstrap:false});
+    }
+    this.applyLayers(this.valueLayers,this.lr*strength);this.valueSupervisionUpdates++;this.updates++;
+    return{loss,brier,student,target};
+  }
+  fitValueDistributions(examples,{steps=8,strength=.12}={}){
+    const valid=(examples||[]).filter(example=>{
+      const raw=Array.from(example?.target||example?.distribution||[],v=>Math.max(0,Number(v)||0));
+      return raw.length===this.actions.length&&raw.reduce((a,b)=>a+b,0)>0;
+    });
+    if(!valid.length)return null;
+    let last=null,totalLoss=0,totalBrier=0,updates=0;
+    for(let step=0;step<Math.max(1,Math.floor(steps));step++){
+      for(const example of valid){
+        last=this.superviseValueDistribution(example.observation,example.target||example.distribution,{strength,temporal:example.temporal||null});
+        if(last){totalLoss+=last.loss;totalBrier+=last.brier;updates++}
+      }
+    }
+    this.syncTarget?.();
+    return last?{rows:valid.length*this.actions.length,examples:valid.length,steps:Math.max(1,Math.floor(steps)),updates,meanLoss:totalLoss/updates,meanBrier:totalBrier/updates}:null;
+  }
+
   superviseDistribution(observation,targetDistribution,{strength=.35,temporal=null}={}){
     if(!targetDistribution||targetDistribution.length!==this.actions.length)return null;
     const raw=Array.from(targetDistribution,v=>Math.max(0,Number(v)||0)),sum=raw.reduce((a,b)=>a+b,0);
