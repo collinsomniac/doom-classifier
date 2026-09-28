@@ -237,14 +237,145 @@ EMSCRIPTEN_KEEPALIVE int PromptFPS_HasSnapshot(void)
 // Can be called by the startup code or the menu task,
 """,
         """#if defined(__EMSCRIPTEN__)
+#define PROMPTFPS_MAX_SNAPSHOT_MOBJS 8192
+
 static int promptfps_snapshot_rndindex;
 static int promptfps_snapshot_prndindex;
 static int promptfps_snapshot_paused;
 static int promptfps_snapshot_turnheld;
 static int promptfps_snapshot_next_weapon;
+static int promptfps_snapshot_mobj_count;
+static int promptfps_snapshot_target_index[PROMPTFPS_MAX_SNAPSHOT_MOBJS];
+static int promptfps_snapshot_tracer_index[PROMPTFPS_MAX_SNAPSHOT_MOBJS];
+static int promptfps_snapshot_player_attacker_index[MAXPLAYERS];
+static int *promptfps_snapshot_sector_soundtarget_index;
+static int promptfps_snapshot_sector_capacity;
+
+static int PromptFPS_MobjIndex(mobj_t *needle)
+{
+    thinker_t *th;
+    int index = 0;
+
+    if (needle == NULL)
+        return -1;
+
+    for (th = thinkercap.next; th != &thinkercap; th = th->next)
+    {
+        if (th->function.acp1 != (actionf_p1) P_MobjThinker)
+            continue;
+        if ((mobj_t *) th == needle)
+            return index;
+        ++index;
+    }
+
+    return -1;
+}
+
+static mobj_t *PromptFPS_MobjAtIndex(int wanted)
+{
+    thinker_t *th;
+    int index = 0;
+
+    if (wanted < 0)
+        return NULL;
+
+    for (th = thinkercap.next; th != &thinkercap; th = th->next)
+    {
+        if (th->function.acp1 != (actionf_p1) P_MobjThinker)
+            continue;
+        if (index == wanted)
+            return (mobj_t *) th;
+        ++index;
+    }
+
+    return NULL;
+}
+
+static int PromptFPS_CaptureSnapshotLinks(void)
+{
+    thinker_t *th;
+    int i;
+    int index = 0;
+
+    if (numsectors > promptfps_snapshot_sector_capacity)
+    {
+        int *next = realloc(promptfps_snapshot_sector_soundtarget_index,
+                            sizeof(int) * (size_t) numsectors);
+        if (next == NULL)
+            return 0;
+        promptfps_snapshot_sector_soundtarget_index = next;
+        promptfps_snapshot_sector_capacity = numsectors;
+    }
+
+    for (i = 0; i < MAXPLAYERS; ++i)
+        promptfps_snapshot_player_attacker_index[i] =
+            PromptFPS_MobjIndex(players[i].attacker);
+
+    for (i = 0; i < numsectors; ++i)
+        promptfps_snapshot_sector_soundtarget_index[i] =
+            PromptFPS_MobjIndex(sectors[i].soundtarget);
+
+    for (th = thinkercap.next; th != &thinkercap; th = th->next)
+    {
+        mobj_t *mobj;
+
+        if (th->function.acp1 != (actionf_p1) P_MobjThinker)
+            continue;
+        if (index >= PROMPTFPS_MAX_SNAPSHOT_MOBJS)
+            return 0;
+
+        mobj = (mobj_t *) th;
+        promptfps_snapshot_target_index[index] = PromptFPS_MobjIndex(mobj->target);
+        promptfps_snapshot_tracer_index[index] = PromptFPS_MobjIndex(mobj->tracer);
+        ++index;
+    }
+
+    promptfps_snapshot_mobj_count = index;
+    return 1;
+}
+
+static int PromptFPS_RestoreSnapshotLinks(void)
+{
+    thinker_t *th;
+    int i;
+    int index = 0;
+
+    for (th = thinkercap.next; th != &thinkercap; th = th->next)
+    {
+        mobj_t *mobj;
+
+        if (th->function.acp1 != (actionf_p1) P_MobjThinker)
+            continue;
+        if (index >= promptfps_snapshot_mobj_count)
+            return 0;
+
+        mobj = (mobj_t *) th;
+        mobj->target = PromptFPS_MobjAtIndex(promptfps_snapshot_target_index[index]);
+        mobj->tracer = PromptFPS_MobjAtIndex(promptfps_snapshot_tracer_index[index]);
+        ++index;
+    }
+
+    if (index != promptfps_snapshot_mobj_count)
+        return 0;
+
+    for (i = 0; i < MAXPLAYERS; ++i)
+        players[i].attacker =
+            PromptFPS_MobjAtIndex(promptfps_snapshot_player_attacker_index[i]);
+
+    if (numsectors > promptfps_snapshot_sector_capacity)
+        return 0;
+
+    for (i = 0; i < numsectors; ++i)
+        sectors[i].soundtarget =
+            PromptFPS_MobjAtIndex(promptfps_snapshot_sector_soundtarget_index[i]);
+
+    return 1;
+}
 
 void G_PromptFPSSaveSnapshot(void)
 {
+    if (!PromptFPS_CaptureSnapshotLinks())
+        return;
     promptfps_snapshot_rndindex = rndindex;
     promptfps_snapshot_prndindex = prndindex;
     promptfps_snapshot_paused = paused;
@@ -269,6 +400,7 @@ void G_PromptFPSLoadSnapshot(void)
     joyxmove = joyymove = joystrafemove = 0;
     mousex = mousey = 0;
     sendpause = sendsave = false;
+    PromptFPS_RestoreSnapshotLinks();
 }
 #endif
 
