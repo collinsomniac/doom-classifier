@@ -51,6 +51,8 @@ jobs:
         run: node tests/semantic-value-separation.mjs
       - name: Run measured critic supervision invariants
         run: node tests/counterfactual-value-supervision.mjs
+      - name: Run measured-fork training invariants
+        run: node tests/measured-fork-training.mjs
       - name: Run portable policy checkpoint round-trip
         run: node tests/checkpoint-roundtrip.mjs
       - name: Run prior/value fusion invariants
