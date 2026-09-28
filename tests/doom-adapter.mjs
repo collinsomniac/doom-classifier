@@ -66,7 +66,7 @@ assert.equal(attributedFlat.recent_player_pickups,1);
 assert.equal(attributedFlat.level_completed,1);
 assert.equal(attributedFlat.secret_exit,1);
 
-assert.equal(arena.actionMasks.fire,64);assert.equal(arena.actionMasks.forward_fire,65);assert.equal(arena.actionMasks.strafe_left_fire,80);assert.equal(arena.actionMasks.forward_turn_left_fire,69);assert.equal(arena.actionMasks.strafe_right_turn_right_fire,104);assert.equal(arena.actions.length,31);
+assert.equal(arena.actionMasks.fire,64);assert.equal(arena.actionMasks.forward_fire,65);assert.equal(arena.actionMasks.strafe_left_fire,80);assert.equal(arena.actionMasks.forward_turn_left_fire,69);assert.equal(arena.actionMasks.strafe_right_turn_right_fire,104);assert.equal(arena.actionMasks.forward_turn_left_fire_use,197);assert.equal(arena.actions.length,60);
 assert.equal(arena.actions.find(a=>a.id==="fire").params.fire,1);assert.equal(arena.actions.find(a=>a.id==="fire").params.forward,0);
 assert.equal(arena.actions.find(a=>a.id==="forward_fire").params.forward,1);assert.equal(arena.actions.find(a=>a.id==="forward_fire").params.fire,1);
 assert.equal(arena.schema.actionFields.length,8);
