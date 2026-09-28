@@ -32,10 +32,32 @@ test("owned Chocolate Doom runtime exposes causal event counters",async({page})=
 
     const observed={...(after.events||{})};
     await env.reset();
+    env.setActionMs(180);
+    const simplify=raw=>({
+      player:{
+        health:Number(raw.player?.health||0),armor:Number(raw.player?.armor||0),weapon:Number(raw.player?.weapon||0),
+        bullets:Number(raw.player?.ammo?.bullets||0),shells:Number(raw.player?.ammo?.shells||0),rockets:Number(raw.player?.ammo?.rockets||0),cells:Number(raw.player?.ammo?.cells||0),
+        x:Number(raw.player?.x||0),y:Number(raw.player?.y||0),z:Number(raw.player?.z||0),vx:Number(raw.player?.vx||0),vy:Number(raw.player?.vy||0),angle:Number(raw.player?.angle||0),kills:Number(raw.player?.kills||0)
+      },
+      events:{...(raw.events||{})},
+      enemies:(raw.world?.entities||[]).filter(e=>e.enemy).map(e=>({
+        type:Number(e.type||0),x:Number(e.x||0),y:Number(e.y||0),z:Number(e.z||0),
+        vx:Number(e.vx||0),vy:Number(e.vy||0),health:Number(e.health||0),targeting:!!e.targeting_player
+      })).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))
+    });
+    const snapshotSupported=env.supportsSnapshots(),snapshotToken=snapshotSupported?env.saveSnapshot():null;
+    const snapshotBefore=simplify(env.readRaw());
+    if(snapshotSupported){
+      await env.step("turn_right_fire");
+      env.restoreSnapshot(snapshotToken);
+    }
+    const snapshotRestored=simplify(env.readRaw());
+
+    await env.reset();
     const reset={...(env.readRaw().events||{})};
     env.setActionMs(110);
 
-    return{runtime:env.runtime,initial,observed,reset,pulses,lastOutcome};
+    return{runtime:env.runtime,initial,observed,reset,pulses,lastOutcome,snapshotSupported,snapshotBefore,snapshotRestored};
   });
 
   expect(result.runtime.owned).toBe(true);
@@ -51,6 +73,8 @@ test("owned Chocolate Doom runtime exposes causal event counters",async({page})=
   expect(result.lastOutcome?.damageDealt).toBeGreaterThan(0);
   expect(result.lastOutcome?.attributedCombatReward).toBeGreaterThan(0);
   expect(result.lastOutcome?.reward).toBeGreaterThan(0);
+  expect(result.snapshotSupported).toBe(true);
+  expect(result.snapshotRestored).toEqual(result.snapshotBefore);
   if(consoleErrors.length)throw new Error(consoleErrors.join(" | "));
 
   console.log("OWNED_ENGINE_ABI "+JSON.stringify(result));
