@@ -311,3 +311,5 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
   .lab-tabs{width:100%}.lab-tab{flex:1;padding:.62rem .5rem}
   .play-grid #doomCanvas{width:100%;max-width:none}
 }
+
+.attention-panel{grid-column:1/-1}.attention-dual{display:grid;grid-template-columns:1fr 1fr;gap:10px}.attention-dual>section{min-width:0;border:1px solid #202731;border-radius:10px;background:#090d12;padding:9px}.attention-branch-head{display:flex;justify-content:space-between;gap:8px;margin-bottom:7px}.attention-branch-head strong{font:800 9px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.07em}.attention-branch-head span{font:9px ui-monospace,monospace;color:var(--muted);text-align:right}@media(max-width:760px){.attention-dual{grid-template-columns:1fr}}
