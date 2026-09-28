@@ -27,9 +27,9 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
       ammoAfter=after.bullets+after.shells+after.rockets+after.cells;damage+=step.info?.outcome?.hostileHpLoss||0;
     }
     await env.reset();env.setActionMs(110);
-    return{ammoBefore,ammoAfter,damage,pulses,mask:env.actionMasks.fire,combo:env.actionMasks.strafe_left_fire,forwardTurnFire:env.actionMasks.forward_turn_left_fire,strafeTurnFire:env.actionMasks.strafe_right_turn_right_fire,actionCount:env.actions.length};
+    return{ammoBefore,ammoAfter,damage,pulses,mask:env.actionMasks.fire,combo:env.actionMasks.strafe_left_fire,forwardTurnFire:env.actionMasks.forward_turn_left_fire,strafeTurnFire:env.actionMasks.strafe_right_turn_right_fire,useCombo:env.actionMasks.forward_turn_left_fire_use,actionCount:env.actions.length};
   });
-  expect(fire.mask).toBe(64);expect(fire.combo).toBe(80);expect(fire.forwardTurnFire).toBe(69);expect(fire.strafeTurnFire).toBe(104);expect(fire.actionCount).toBe(31);expect(fire.ammoAfter<fire.ammoBefore||fire.damage>0).toBeTruthy();
+  expect(fire.mask).toBe(64);expect(fire.combo).toBe(80);expect(fire.forwardTurnFire).toBe(69);expect(fire.strafeTurnFire).toBe(104);expect(fire.useCombo).toBe(197);expect(fire.actionCount).toBe(60);expect(fire.ammoAfter<fire.ammoBefore||fire.damage>0).toBeTruthy();
 
   await page.locator("#prepareBtn").click();
   await page.waitForFunction(()=>{const text=document.querySelector("#prepareStatus")?.textContent||"";return text.includes("READY TO PLAY")||text.includes("Preparation failed")},null,{timeout:300000});
@@ -51,7 +51,7 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   await expect(page.locator("#circuitOutputLabel")).not.toContainText("waiting");
   await expect(page.locator("#circuitPriorTop")).not.toHaveText("—");
   await expect(page.locator("#circuitValueTop")).not.toHaveText("—");
-  await expect(page.locator("#circuitActions .circuit-action")).toHaveCount(31);
+  await expect(page.locator("#circuitActions .circuit-action")).toHaveCount(60);
   await expect(page.locator("#circuitActions .circuit-action.chosen")).toHaveCount(1);
   await expect(page.locator("#attentionList .attention-row").first()).toBeVisible();
   await expect(page.locator("#trainingOutput")).toContainText("s0001");
@@ -60,7 +60,7 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   await page.click("#counterfactualProbeBtn");
   await expect(page.locator("#counterfactualResults .counterfactual-row")).toHaveCount(31);
   await expect(page.locator("#counterfactualStatus")).toContainText("state restored");
-  expect(await page.evaluate(()=>window.__doomLab.counterfactual?.trials?.length)).toBe(31);
+  expect(await page.evaluate(()=>window.__doomLab.counterfactual?.trials?.length)).toBe(60);
   await expect(page.locator('[data-arch="actions"]')).toHaveClass(/hot/);
   await expect(page.locator("#architectureFlow")).toHaveClass(/tick-pulse/);
   const pulseAnimation=await page.evaluate(()=>getComputedStyle(document.querySelector('[data-arch="actions"]')).animationName);
