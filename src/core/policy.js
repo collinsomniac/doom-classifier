@@ -132,6 +132,12 @@ export class SemanticResidualPolicy{
     this.q.syncTarget?.({value:false});this.clearProbabilityCalibration();
     return{...result,refineSteps:Math.max(0,Math.floor(refineSteps))};
   }
+  fitCounterfactualValueDistributions(examples,{steps=8,strength=.12}={}){
+    if(!this.q?.fitValueDistributions)throw new Error("Residual model does not support measured value-distribution fitting");
+    const result=this.q.fitValueDistributions(examples,{steps,strength});
+    if(result)this.clearProbabilityCalibration();
+    return result;
+  }
   superviseDecisionDistribution(observation,targetDistribution,{steps=1,strength=.5,temporal=null}={}){
     if(!this.q?.superviseDistribution)throw new Error("Residual model does not support probability supervision");
     let result=null,totalLoss=0,totalBrier=0,used=0;
