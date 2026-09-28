@@ -58,7 +58,7 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   expect(await page.evaluate(()=>window.__doomLab.env.supportsSnapshots()&&window.__doomLab.env.supportsExactTics())).toBe(true);
   await page.selectOption("#counterfactualTics","6");
   await page.click("#counterfactualProbeBtn");
-  await expect(page.locator("#counterfactualResults .counterfactual-row")).toHaveCount(31);
+  await expect(page.locator("#counterfactualResults .counterfactual-row")).toHaveCount(60);
   await expect(page.locator("#counterfactualStatus")).toContainText("state restored");
   expect(await page.evaluate(()=>window.__doomLab.counterfactual?.trials?.length)).toBe(60);
   await expect(page.locator('[data-arch="actions"]')).toHaveClass(/hot/);
