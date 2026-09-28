@@ -511,6 +511,8 @@ But the frozen greedy policy still failed:
 
 This is a particularly useful negative result. The simulator, reward attribution, exploration process and training data can all produce rich behavior, yet the current exact-action critic plus post-hoc typed projection does not compress that experience into a state-conditioned player-like policy.
 
+The independent staged starter gate corroborated the collapse: baseline and every 64/128/192/256-decision checkpoint produced `back 24/24` with zero attributed damage in all three frozen rollouts, so publication remained withheld.
+
 The next architecture should therefore make typed dimensions and temporal belief state **native model structure**, not diagnostics around an exact-action Q function. The target is a recurrent structured-state controller with parallel typed heads, learned action/consequence state, and multi-horizon successor prediction.
 
 ## What remains unproven
