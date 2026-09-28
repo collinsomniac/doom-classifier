@@ -137,7 +137,15 @@ export class DoomWasmArena{
         {id:"kills",label:"intermission kill count",description:"single-player Chocolate Doom kill statistic; may include monster deaths caused by other monsters and is therefore telemetry, not player-attributed reward",min:0,max:100},
         {id:"visited_cells",label:"visited spatial cells",description:"number of distinct coarse player-position cells visited this episode",min:0,max:500},
         {id:"cell_visits",label:"current cell visits",description:"number of control transitions ending in the current coarse spatial cell",scale:16},
-        {id:"exploration_novelty",label:"exploration novelty",description:"inverse revisit count of the current spatial cell; higher means less familiar",min:0,max:1}
+        {id:"exploration_novelty",label:"exploration novelty",description:"inverse revisit count of the current spatial cell; higher means less familiar",min:0,max:1},
+        {id:"hostile_count",label:"living hostile count",description:"number of living hostile actors represented in structured state",min:0,max:100},
+        {id:"visible_hostile_count",label:"visible hostile count",description:"number of living hostile actors with current line of sight",min:0,max:100},
+        {id:"targeting_player_count",label:"hostiles targeting player",description:"number of living hostile actors currently targeting the player",min:0,max:100},
+        {id:"nearest_hostile_distance",label:"nearest hostile distance",description:"distance to the nearest living hostile actor; max sentinel when none exists",scale:1024},
+        {id:"nearest_hostile_relative_angle",label:"nearest hostile relative angle (+left / -right)",description:"signed relative bearing to nearest hostile: positive is left/counterclockwise and negative is right/clockwise",min:-1,max:1},
+        {id:"nearest_hostile_visible",label:"nearest hostile line of sight",description:"whether the nearest living hostile currently has direct line of sight",min:0,max:1},
+        {id:"nearest_pickup_distance",label:"nearest pickup distance",description:"distance to the nearest collectible; max sentinel when none exists",scale:1024},
+        {id:"nearest_pickup_relative_angle",label:"nearest pickup relative angle (+left / -right)",description:"signed relative bearing to nearest collectible: positive is left/counterclockwise and negative is right/clockwise",min:-1,max:1}
       ],
       collections:[
         {
@@ -158,7 +166,7 @@ export class DoomWasmArena{
             {id:"height",label:"entity height",description:"physical collision height",scale:128},
             {id:"health",label:"entity health",description:"remaining actor health when applicable",scale:256},
             {id:"distance",label:"distance",description:"distance from player to entity",scale:1024},
-            {id:"relative_angle",label:"relative angle",description:"signed angular displacement from the player\'s current view: zero is directly ahead, positive values are to the left / counterclockwise, and negative values are to the right / clockwise",min:-1,max:1},
+            {id:"relative_angle",label:"relative angle (+left / -right)",description:"signed angular displacement from the player\'s current view: zero is directly ahead, positive values are to the left / counterclockwise, and negative values are to the right / clockwise",min:-1,max:1},
             {id:"visible",label:"line of sight",description:"whether the engine reports direct line of sight",min:0,max:1},
             {id:"countkill",label:"hostile actor flag",description:"whether this actor counts toward the level hostile kill total",min:0,max:1},
             {id:"pickup",label:"collectible flag",description:"whether this engine object is collectible or special",min:0,max:1},
@@ -287,6 +295,8 @@ export class DoomWasmArena{
       line_id:Number(line.id||0),x1:Number(line.x1||0)-Number(p.x||0),y1:Number(line.y1||0)-Number(p.y||0),x2:Number(line.x2||0)-Number(p.x||0),y2:Number(line.y2||0)-Number(p.y||0),
       flags:Number(line.flags||0),blocking:line.blocking?1:0,special:Number(line.special||0),tag:Number(line.tag||0)
     }));
+    const livingHostiles=entities.filter(e=>e.countkill>0&&e.health>0),visibleHostiles=livingHostiles.filter(e=>e.visible>0),targeting=livingHostiles.filter(e=>e.targeting_player>0),pickups=entities.filter(e=>e.pickup>0);
+    const nearest=(items)=>items.reduce((best,item)=>!best||item.distance<best.distance?item:best,null),nearestHostile=nearest(livingHostiles),nearestPickup=nearest(pickups),far=8192;
     return{
       health:Number(p.health||0),armor:Number(p.armor||0),bullets:Number(p.ammo?.bullets||0),shells:Number(p.ammo?.shells||0),rockets:Number(p.ammo?.rockets||0),cells:Number(p.ammo?.cells||0),
       recent_damage:Number(p.recent_damage||0),recent_hostile_hp_loss:Number(this.lastHostileHpLoss||0),
@@ -295,6 +305,9 @@ export class DoomWasmArena{
       under_fire:p.under_fire?1:0,weapon:Number(p.weapon||0),
       player_x:Number(p.x||0),player_y:Number(p.y||0),player_z:Number(p.z||0),velocity_x:Number(p.vx||0),velocity_y:Number(p.vy||0),heading,kills:Number(p.kills||0),
       visited_cells:Number(this.lastExploration?.visitedCells||0),cell_visits:Number(this.lastExploration?.cellVisits||0),exploration_novelty:Number(this.lastExploration?.novelty??1),
+      hostile_count:livingHostiles.length,visible_hostile_count:visibleHostiles.length,targeting_player_count:targeting.length,
+      nearest_hostile_distance:Number(nearestHostile?.distance??far),nearest_hostile_relative_angle:Number(nearestHostile?.relative_angle??0),nearest_hostile_visible:Number(nearestHostile?.visible??0),
+      nearest_pickup_distance:Number(nearestPickup?.distance??far),nearest_pickup_relative_angle:Number(nearestPickup?.relative_angle??0),
       _collections:{entities,geometry}
     };
   }
