@@ -12,6 +12,7 @@ const STARTER_MODEL_BASE="https://raw.githubusercontent.com/collinsomniac/doom-c
 const query=new URLSearchParams(globalThis.location?.search||""),requestedRuntime=query.get("runtime")||"owned",starterMode=query.get("starter")||"auto";
 const $=id=>document.getElementById(id);
 const ui={
+  playTabBtn:$("playTabBtn"),inspectTabBtn:$("inspectTabBtn"),playTab:$("playTab"),inspectTab:$("inspectTab"),
   boot:$("bootBtn"),prepare:$("prepareBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),runtime:$("runtimeStatus"),runtimeTitle:$("runtimeTitle"),bootStatus:$("bootStatus"),
   iwad:$("iwadInput"),iwadStatus:$("iwadStatus"),engineChip:$("engineChip"),schemaChip:$("schemaChip"),teacherChip:$("teacherChip"),policyChip:$("policyChip"),prepareStatus:$("prepareStatus"),
   profile:$("profileSelect"),applyProfile:$("applyProfileBtn"),profileHint:$("profileHint"),teacherMode:$("teacherModeSelect"),useNeural:$("useNeuralToggle"),learn:$("learnToggle"),memory:$("memoryToggle"),explore:$("exploreToggle"),
@@ -580,6 +581,17 @@ async function manualPrimitive(){
   }catch(error){ui.manualStatus.textContent="manual action failed · "+String(error?.message||error)}
   finally{setBusy(false)}
 }
+
+function showLabTab(name){
+  const play=name!=="inspect";
+  if(ui.playTab)ui.playTab.hidden=!play;
+  if(ui.inspectTab)ui.inspectTab.hidden=play;
+  ui.playTabBtn?.classList.toggle("active",play);ui.inspectTabBtn?.classList.toggle("active",!play);
+  ui.playTabBtn?.setAttribute("aria-selected",String(play));ui.inspectTabBtn?.setAttribute("aria-selected",String(!play));
+  if(play)requestAnimationFrame(()=>ui.canvas?.focus?.({preventScroll:true}));
+}
+ui.playTabBtn?.addEventListener("click",()=>showLabTab("play"));
+ui.inspectTabBtn?.addEventListener("click",()=>showLabTab("inspect"));
 
 ui.iwad.addEventListener("change",()=>{const file=ui.iwad.files?.[0];ui.iwadStatus.textContent=file?"Selected local IWAD: "+file.name+" · "+(file.size/1048576).toFixed(1)+" MB":"Default: Freedoom 0.13.0"});
 ui.boot.addEventListener("click",boot);ui.prepare.addEventListener("click",prepareRecommended);ui.tune.addEventListener("click",tuneAgent);ui.eval.addEventListener("click",evaluateFrozen);ui.manual.addEventListener("click",manualPrimitive);ui.cfProbe.addEventListener("click",probeSameState);ui.cfFit.addEventListener("click",fitCounterfactualTargets);ui.cfClear.addEventListener("click",clearCounterfactualTargets);ui.loadStarter.addEventListener("click",loadBundledCheckpoint);ui.loadSaved.addEventListener("click",loadBrowserCheckpoint);ui.saveCheckpoint.addEventListener("click",saveBrowserCheckpoint);ui.exportCheckpoint.addEventListener("click",exportPortableCheckpoint);
