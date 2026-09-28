@@ -307,8 +307,8 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
 .lab-tab-panel.active{display:block}
 #playTab .lab-grid{grid-template-columns:1fr}
 #playTab .arena-panel{grid-column:1/-1;grid-row:auto}
-.doom-stage{display:grid;place-items:center;width:100%;overflow:hidden;border-radius:12px;background:#000}
-#doomCanvas{display:block;width:100%;height:auto!important;max-width:1120px;max-height:min(70vh,700px);aspect-ratio:auto;background:#000;border:1px solid #242c36;border-radius:12px;image-rendering:pixelated;object-fit:contain}
+.doom-stage{display:grid;place-items:center;width:100%;overflow:visible;border-radius:12px;background:#000}
+#doomCanvas{display:block;width:min(100%,1120px)!important;height:auto!important;max-width:100%;max-height:none;aspect-ratio:4/3!important;background:#000;border:1px solid #242c36;border-radius:12px;image-rendering:pixelated}
 .inspect-grid>.engine-controls-panel{align-self:start}
 @media(max-width:650px){
   .lab-tabs{top:env(safe-area-inset-top);margin-inline:-2px}

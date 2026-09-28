@@ -96,12 +96,13 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   const playLayout=await page.evaluate(()=>{
     const canvas=document.querySelector("#doomCanvas"),cr=canvas?.getBoundingClientRect();
     const offenders=[...document.querySelectorAll("body *")].filter(el=>{const s=getComputedStyle(el);return s.display!=="none"&&s.visibility!=="hidden"}).map(el=>{const r=el.getBoundingClientRect();return{tag:el.tagName,id:el.id||"",className:typeof el.className==="string"?el.className:"",left:r.left,right:r.right,width:r.width}}).filter(x=>x.right>innerWidth+1||x.left<-1).sort((a,b)=>b.width-a.width).slice(0,12);
-    return{viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,canvasWidth:cr?.width||0,canvasHeight:cr?.height||0,offenders};
+    return{viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,canvasWidth:cr?.width||0,canvasHeight:cr?.height||0,backingWidth:canvas?.width||0,backingHeight:canvas?.height||0,offenders};
   });
   console.log("MOBILE_PLAY_LAYOUT "+JSON.stringify(playLayout));
   expect(playLayout.scrollWidth,"overflow offenders: "+JSON.stringify(playLayout.offenders)).toBeLessThanOrEqual(playLayout.viewport+1);
   expect(playLayout.canvasWidth).toBeLessThanOrEqual(playLayout.viewport);
-  expect(playLayout.canvasWidth/playLayout.canvasHeight).toBeCloseTo(1.6,1);
+  expect(playLayout.backingWidth/playLayout.backingHeight).toBeCloseTo(4/3,2);
+  expect(playLayout.canvasWidth/playLayout.canvasHeight).toBeCloseTo(4/3,1);
 
   await page.locator("#inspectTabBtn").click();
   const inspectLayout=await page.evaluate(()=>{
