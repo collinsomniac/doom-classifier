@@ -32,10 +32,18 @@ assert.ok(instantaneous.temporal.every(v=>Math.abs(v)<1e-8),"disabled memory mus
 const diff=remembered.qScores.reduce((m,v,i)=>Math.max(m,Math.abs(v-instantaneous.qScores[i])),0);
 assert.ok(diff>1e-6,"neural scores must depend on temporal context, not only the instantaneous observation");
 
+const historyless=withMemory.q.scoreStatsObservation({signal:1,_collections:{}},{temporal:remembered.temporal,history:[]}).scores;
+const causalTrace=[{actionIndex:remembered.actionIndex,reward:.75,outcome:{progress:1,collision:false},done:false}];
+const historyful=withMemory.q.scoreStatsObservation({signal:1,_collections:{}},{temporal:remembered.temporal,history:causalTrace}).scores;
+const historyDiff=historyful.reduce((m,v,i)=>Math.max(m,Math.abs(v-historyless[i])),0);
+assert.ok(historyDiff>1e-6,"recent action/outcome history must condition the fast policy at identical current state");
+withMemory.commitActionOutcome(causalTrace[0]);
+assert.equal(withMemory.snapshotActionOutcomeHistory().length,1);
+
 const next=withMemory.encode({signal:.5},true,false);
 const learned=withMemory.learn({
   observation:{signal:1},temporal:remembered.temporal,features:remembered.features,actionIndex:remembered.actionIndex,reward:.5,
   nextObservation:{signal:.5},nextTemporal:next.temporal,nextFeatures:next.features,done:false
 });
 assert.ok(Number.isFinite(learned.td));
-console.log(JSON.stringify({ok:true,temporal:Array.from(remembered.temporal),scoreDiff:diff,td:learned.td}));
+console.log(JSON.stringify({ok:true,temporal:Array.from(remembered.temporal),scoreDiff:diff,historyDiff,td:learned.td}));
