@@ -100,17 +100,24 @@ export class SemanticResidualPolicy{
       probabilityCalibration:this.probabilityCalibrator?.export?.()||null,inferenceMode:"neural",q:this.q.exportCheckpoint()
     };
   }
-  importCheckpoint(checkpoint){
+  importCheckpoint(checkpoint,{schema=null,actions=null}={}){
     if(checkpoint?.format!=="doom-classifier-policy"||checkpoint.version!==1)throw new Error("Unsupported policy checkpoint");
     if(!checkpoint.schema||!Array.isArray(checkpoint.actions))throw new Error("Checkpoint is missing schema/actions");
+    const checkpointActionIds=checkpoint.actions.map(a=>a.id),runtimeActionIds=(actions||checkpoint.actions).map(a=>a.id);
+    const migrated=!!schema||!!actions?checkpointActionIds.length!==runtimeActionIds.length||checkpointActionIds.some((id,i)=>id!==runtimeActionIds[i]):false;
+    // Recreate the exact checkpoint feature/action bindings before loading its weights.
     this.reconfigure({schema:checkpoint.schema,actions:checkpoint.actions});
     if(!this.q?.importCheckpoint)throw new Error("Residual model does not support checkpoints");
     this.q.importCheckpoint(checkpoint.q);
     this.temperature=clamp(Number(checkpoint.temperature||this.baseTemperature),.05,2);
     this.baseTemperature=clamp(Number(checkpoint.baseTemperature||this.temperature),.05,2);
-    this.probabilityCalibrator=new TemperatureCalibrator();if(checkpoint.probabilityCalibration)this.probabilityCalibrator.import(checkpoint.probabilityCalibration);
+    this.probabilityCalibrator=new TemperatureCalibrator();if(checkpoint.probabilityCalibration&&!migrated)this.probabilityCalibrator.import(checkpoint.probabilityCalibration);
+    // Fixed-dimensional schema/action encoders let the same learned core be rebound to
+    // a newer typed surface without resetting weights. New controls receive composed
+    // semantic embeddings; stale post-hoc calibration is intentionally discarded.
+    if(schema||actions)this.reconfigure({schema:schema||checkpoint.schema,actions:actions||checkpoint.actions});
     this.inferenceMode="neural";this.teacherGeneration++;this.teacherPromise=null;this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];
-    return this;
+    return{policy:this,migrated,checkpointActions:checkpointActionIds.length,runtimeActions:this.actions.length};
   }
   clearProbabilityCalibration(){this.probabilityCalibrator=new TemperatureCalibrator();return this}
   fitProbabilityCalibration(samples,options={}){
