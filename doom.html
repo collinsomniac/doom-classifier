@@ -34,6 +34,24 @@
 <section class="grid lab-grid">
 <article class="panel arena-panel">
   <div class="panel-head"><div><p class="kicker">REAL ENGINE</p><h2 id="runtimeTitle">Chocolate Doom</h2></div><div id="weaponState" class="choice">weapon —</div></div>
+  <div id="decisionCircuit" class="decision-circuit-shell" aria-label="live decision circuit">
+    <div class="circuit-head">
+      <div><span class="circuit-kicker">LIVE DECISION CIRCUIT</span><strong id="circuitChosen">waiting for a decision</strong></div>
+      <div class="circuit-performance"><span id="circuitRate">0.0 decisions/s</span><span id="circuitLatency">0.0 ms / decision</span></div>
+    </div>
+    <div class="circuit-grid">
+      <div class="circuit-node circuit-input" data-circuit="state"><span>STATE</span><b id="circuitState">—</b><small>structured facts + records</small></div>
+      <div class="circuit-rails">
+        <div class="circuit-rail prior" data-circuit="prior"><i></i><div><span>SEMANTIC PRIOR</span><b id="circuitPriorTop">—</b><small id="circuitPriorMeta">waiting</small></div></div>
+        <div class="circuit-rail value" data-circuit="value"><i></i><div><span>LEARNED VALUE</span><b id="circuitValueTop">—</b><small id="circuitValueMeta">waiting</small></div></div>
+        <div class="circuit-rail search" data-circuit="search"><i></i><div><span>EXACT-STATE SEARCH</span><b id="circuitSearchTop">—</b><small id="circuitSearchMeta">fork ready after boot</small></div></div>
+      </div>
+      <div class="circuit-merge" data-circuit="fusion"><strong>Σ</strong><span>TRUST</span><small id="circuitFusionMeta">β 0</small></div>
+      <div class="circuit-node circuit-output" data-circuit="output"><span>OUTPUT</span><b id="circuitOutputGlyph">·</b><strong id="circuitOutputLabel">waiting</strong><small id="circuitOutputProb">p 0.000</small></div>
+    </div>
+    <div id="circuitActions" class="circuit-actions" aria-label="typed action outputs"></div>
+    <div class="circuit-footer"><span id="circuitBackend">engine WASM · fast core local-js</span><span id="circuitAgreement">prior / critic / fused waiting</span></div>
+  </div>
   <canvas id="doomCanvas" tabindex="0" width="640" height="400"></canvas>
   <div class="model-status" id="bootStatus">Engine has not been loaded.</div>
   <label class="range-row">primitive hold interval <input id="actionMs" type="range" min="60" max="250" value="110" /><output id="actionMsOut">110 ms</output></label>
