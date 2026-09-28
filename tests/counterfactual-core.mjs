@@ -35,15 +35,19 @@ const env=new ForkableRoutingArena(),before=structuredClone(env.state),prior=[.2
 const probe=await probeCounterfactualActions({environment:env,prior,horizon:1,temperature:.45});
 assert.deepEqual(env.state,before,"probing must restore the environment after branching");
 assert.deepEqual(probe.returns.map(v=>Number(v.toFixed(2))),[.35,.24,-.08]);
-assert.equal(probe.target.indexOf(Math.max(...probe.target)),0,"measured best branch should become the improved target top action");
 assert.ok(Math.abs(probe.target.reduce((a,b)=>a+b,0)-1)<1e-9);
-assert.ok(probe.target[0]>prior[0]);
-assert.ok(probe.target[2]<prior[2]);
+assert.ok(probe.target[0]>prior[0],"measured best branch must gain probability");
+assert.ok(probe.target[2]<prior[2],"measured worst branch must lose probability");
+assert.equal(probe.target.indexOf(Math.max(...probe.target)),1,"moderate update may preserve a strong incumbent prior");
+
+const sharp=await probeCounterfactualActions({environment:env,prior,horizon:1,temperature:.2});
+assert.equal(sharp.target.indexOf(Math.max(...sharp.target)),0,"low-temperature improvement should let clear measured advantage override the prior");
+assert.ok(sharp.target[0]>probe.target[0]);
 
 const subset=await probeCounterfactualActions({environment:env,prior,candidateIndices:[0,1],temperature:.6});
 assert.equal(subset.target[2],0);
 assert.ok(Math.abs(subset.target[0]+subset.target[1]-1)<1e-9);
 
 console.log("COUNTERFACTUAL_CORE "+JSON.stringify({
-  ok:true,returns:probe.returns,target:probe.target,prior,spread:probe.spread,scale:probe.scale
+  ok:true,returns:probe.returns,target:probe.target,sharpTarget:sharp.target,prior,spread:probe.spread,scale:probe.scale
 }));
