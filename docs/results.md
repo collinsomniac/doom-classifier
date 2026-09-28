@@ -483,6 +483,36 @@ A separate single small gradient step also reduced target CE from **1.07027 → 
 
 This gives the core four distinct evidence paths: semantic teacher distillation, causal reward/value learning, direct proper-distribution supervision, and optional held-out post-hoc probability calibration.
 
+## Factorized-axis + causal-history benchmark — 2026-09-28
+
+The first structural pass after the repeated motor-mode failures changed two inputs without increasing the 7,971-parameter core:
+
+- DOOM actions now expose four semantic axes (movement, view, trigger, interaction) while preserving literal button packets.
+- The temporal encoder receives a decayed trace of recent typed actions and observed consequences.
+
+A 256-decision / 64-step-rollout browser benchmark produced strong exploratory training behavior:
+
+- training return: **+10.484**
+- player-attributed hostile damage: **305**
+- player-attributed kills: **8**
+- action diversity: **15 / 15**
+- action switches: **242 / 255**
+- maximum identical-action streak: **2**
+- value/replay updates: **765**
+
+But the frozen greedy policy still failed:
+
+- before training: **back 24 / 24**, zero combat
+- after training: **back 23 / 24**, one turn-right decision, zero combat
+- semantic top: **back**
+- value top: **strafe right**
+- prior/value top-action agreement: **0**
+- mean fused entropy remained high (~0.972)
+
+This is a particularly useful negative result. The simulator, reward attribution, exploration process and training data can all produce rich behavior, yet the current exact-action critic plus post-hoc typed projection does not compress that experience into a state-conditioned player-like policy.
+
+The next architecture should therefore make typed dimensions and temporal belief state **native model structure**, not diagnostics around an exact-action Q function. The target is a recurrent structured-state controller with parallel typed heads, learned action/consequence state, and multi-horizon successor prediction.
+
 ## What remains unproven
 
 The strongest missing evidence is still:
