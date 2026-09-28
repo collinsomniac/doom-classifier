@@ -8,7 +8,7 @@ const controls=(mask)=>Object.freeze({
   strafe_left:(mask&BITS.STRAFE_LEFT)?1:0,strafe_right:(mask&BITS.STRAFE_RIGHT)?1:0,fire:(mask&BITS.FIRE)?1:0,use:(mask&BITS.USE)?1:0
 });
 const action=(id,label,description,mask)=>Object.freeze({id,label,description,mask,params:controls(mask)});
-const ACTION_SPECS=Object.freeze([
+const BASE_ACTION_SPECS=[
   action("forward","forward","hold forward movement",BITS.FORWARD),
   action("back","back","hold backward movement",BITS.BACK),
   action("turn_left","turn left","turn the view left",BITS.TURN_LEFT),
@@ -24,7 +24,40 @@ const ACTION_SPECS=Object.freeze([
   action("turn_right_fire","turn right + fire","turn right and fire the equipped weapon at the same time",BITS.TURN_RIGHT|BITS.FIRE),
   action("use","interact / open","press the use key to open doors, activate switches, lifts, or other usable map elements directly ahead",BITS.USE),
   action("wait","wait","apply no movement, turning, firing, or use input for this decision interval",0)
-]);
+];
+const TRANSLATION_OPTIONS=[
+  ["","no translation",0],
+  ["forward","forward",BITS.FORWARD],
+  ["back","back",BITS.BACK],
+  ["strafe_left","strafe left",BITS.STRAFE_LEFT],
+  ["strafe_right","strafe right",BITS.STRAFE_RIGHT]
+];
+const VIEW_OPTIONS=[
+  ["","keep view",0],
+  ["turn_left","turn left",BITS.TURN_LEFT],
+  ["turn_right","turn right",BITS.TURN_RIGHT]
+];
+const baseByMask=new Map(BASE_ACTION_SPECS.map(spec=>[spec.mask,spec])),cartesianByMask=new Map();
+for(const [moveId,moveLabel,moveMask] of TRANSLATION_OPTIONS){
+  for(const [viewId,viewLabel,viewMask] of VIEW_OPTIONS){
+    for(const firing of [false,true]){
+      for(const using of [false,true]){
+        const mask=moveMask|viewMask|(firing?BITS.FIRE:0)|(using?BITS.USE:0);
+        if(cartesianByMask.has(mask))continue;
+        const legacy=baseByMask.get(mask);
+        if(legacy){cartesianByMask.set(mask,legacy);continue}
+        const ids=[moveId,viewId,firing?"fire":"",using?"use":""].filter(Boolean);
+        const labels=[moveMask?moveLabel:"",viewMask?viewLabel:"",firing?"fire":"",using?"use":""].filter(Boolean);
+        const id=ids.join("_")||"wait",label=labels.join(" + ")||"wait";
+        const description=labels.length
+          ? "simultaneously hold "+labels.join(", ")+" for one control interval"
+          : "apply no movement, turning, firing, or use input for this decision interval";
+        cartesianByMask.set(mask,action(id,label,description,mask));
+      }
+    }
+  }
+}
+const ACTION_SPECS=Object.freeze([...cartesianByMask.values()].sort((a,b)=>a.mask-b.mask));
 const ENTITY_TYPES=Object.freeze({
   0:"player",1:"zombie man",2:"shotgun guy",3:"arch-vile",4:"arch-vile fire",5:"revenant",6:"revenant tracer missile",7:"smoke",8:"mancubus",9:"mancubus fireball",
   10:"chaingunner",11:"imp",12:"demon",13:"spectre",14:"cacodemon",15:"baron of hell",16:"baron fireball",17:"hell knight",18:"lost soul",19:"spider mastermind",
@@ -77,16 +110,16 @@ export class DoomWasmArena{
     this.schema={
       environment:"DOOM-compatible first-person shooter using standard movement, turning, weapon-fire, and use controls.",
       objective:"Play the current DOOM episode using only the observed game state and available controller inputs.",
-      actionSpace:{kind:"controller_buttons",simultaneous:true,representation:"joint-action baseline",description:"Each candidate is a literal controller-button packet held for one decision interval; no candidate encodes a tactical macro."},
+      actionSpace:{kind:"controller_buttons",simultaneous:true,representation:"complete factorized literal-control lattice",axes:["translation","view","trigger","interaction"],description:"All valid combinations of one translation choice, one view choice, trigger on/off, and interaction on/off are represented as literal controller packets. No candidate encodes a tactical macro."},
       actionFields:[
-        {id:"forward",label:"forward control",description:"whether this candidate holds forward movement",min:0,max:1},
-        {id:"back",label:"backward control",description:"whether this candidate holds backward movement",min:0,max:1},
-        {id:"turn_left",label:"turn left control",description:"whether this candidate turns the view left",min:0,max:1},
-        {id:"turn_right",label:"turn right control",description:"whether this candidate turns the view right",min:0,max:1},
-        {id:"strafe_left",label:"strafe left control",description:"whether this candidate moves sideways left",min:0,max:1},
-        {id:"strafe_right",label:"strafe right control",description:"whether this candidate moves sideways right",min:0,max:1},
-        {id:"fire",label:"weapon fire control",description:"whether this candidate fires the equipped weapon",min:0,max:1},
-        {id:"use",label:"use interaction control",description:"whether this candidate activates or uses the environment",min:0,max:1}
+        {id:"forward",label:"forward control",description:"move forward along the current view direction",axis:"translation",axisLabel:"translation",neutralLabel:"no translation",min:0,max:1},
+        {id:"back",label:"backward control",description:"move backward opposite the current view direction",axis:"translation",axisLabel:"translation",neutralLabel:"no translation",min:0,max:1},
+        {id:"turn_left",label:"turn left control",description:"rotate the view left / counterclockwise",axis:"view",axisLabel:"view direction",neutralLabel:"keep view direction",min:0,max:1},
+        {id:"turn_right",label:"turn right control",description:"rotate the view right / clockwise",axis:"view",axisLabel:"view direction",neutralLabel:"keep view direction",min:0,max:1},
+        {id:"strafe_left",label:"strafe left control",description:"move sideways left without changing view direction",axis:"translation",axisLabel:"translation",neutralLabel:"no translation",min:0,max:1},
+        {id:"strafe_right",label:"strafe right control",description:"move sideways right without changing view direction",axis:"translation",axisLabel:"translation",neutralLabel:"no translation",min:0,max:1},
+        {id:"fire",label:"weapon fire control",description:"fire the currently equipped weapon",axis:"trigger",axisLabel:"weapon trigger",neutralLabel:"do not fire",min:0,max:1},
+        {id:"use",label:"use interaction control",description:"activate or use the environment directly ahead",axis:"interaction",axisLabel:"interaction",neutralLabel:"do not use",min:0,max:1}
       ],
       fields:[
         {id:"health",label:"health",description:"remaining player vitality",min:0,max:200},
@@ -115,7 +148,15 @@ export class DoomWasmArena{
         {id:"kills",label:"intermission kill count",description:"single-player Chocolate Doom kill statistic; may include monster deaths caused by other monsters and is therefore telemetry, not player-attributed reward",min:0,max:100},
         {id:"visited_cells",label:"visited spatial cells",description:"number of distinct coarse player-position cells visited this episode",min:0,max:500},
         {id:"cell_visits",label:"current cell visits",description:"number of control transitions ending in the current coarse spatial cell",scale:16},
-        {id:"exploration_novelty",label:"exploration novelty",description:"inverse revisit count of the current spatial cell; higher means less familiar",min:0,max:1}
+        {id:"exploration_novelty",label:"exploration novelty",description:"inverse revisit count of the current spatial cell; higher means less familiar",min:0,max:1},
+        {id:"hostile_count",label:"living hostile count",description:"number of living hostile actors represented in structured state",min:0,max:100},
+        {id:"visible_hostile_count",label:"visible hostile count",description:"number of living hostile actors with current line of sight",min:0,max:100},
+        {id:"targeting_player_count",label:"hostiles targeting player",description:"number of living hostile actors currently targeting the player",min:0,max:100},
+        {id:"nearest_hostile_distance",label:"nearest hostile distance",description:"distance to the nearest living hostile actor; max sentinel when none exists",scale:1024},
+        {id:"nearest_hostile_relative_angle",label:"nearest hostile relative angle (+left / -right)",description:"signed relative bearing to nearest hostile: positive is left/counterclockwise and negative is right/clockwise",min:-1,max:1},
+        {id:"nearest_hostile_visible",label:"nearest hostile line of sight",description:"whether the nearest living hostile currently has direct line of sight",min:0,max:1},
+        {id:"nearest_pickup_distance",label:"nearest pickup distance",description:"distance to the nearest collectible; max sentinel when none exists",scale:1024},
+        {id:"nearest_pickup_relative_angle",label:"nearest pickup relative angle (+left / -right)",description:"signed relative bearing to nearest collectible: positive is left/counterclockwise and negative is right/clockwise",min:-1,max:1}
       ],
       collections:[
         {
@@ -136,7 +177,7 @@ export class DoomWasmArena{
             {id:"height",label:"entity height",description:"physical collision height",scale:128},
             {id:"health",label:"entity health",description:"remaining actor health when applicable",scale:256},
             {id:"distance",label:"distance",description:"distance from player to entity",scale:1024},
-            {id:"relative_angle",label:"relative angle",description:"signed angular displacement from the player's view",min:-1,max:1},
+            {id:"relative_angle",label:"relative angle (+left / -right)",description:"signed angular displacement from the player\'s current view: zero is directly ahead, positive values are to the left / counterclockwise, and negative values are to the right / clockwise",min:-1,max:1},
             {id:"visible",label:"line of sight",description:"whether the engine reports direct line of sight",min:0,max:1},
             {id:"countkill",label:"hostile actor flag",description:"whether this actor counts toward the level hostile kill total",min:0,max:1},
             {id:"pickup",label:"collectible flag",description:"whether this engine object is collectible or special",min:0,max:1},
@@ -265,6 +306,8 @@ export class DoomWasmArena{
       line_id:Number(line.id||0),x1:Number(line.x1||0)-Number(p.x||0),y1:Number(line.y1||0)-Number(p.y||0),x2:Number(line.x2||0)-Number(p.x||0),y2:Number(line.y2||0)-Number(p.y||0),
       flags:Number(line.flags||0),blocking:line.blocking?1:0,special:Number(line.special||0),tag:Number(line.tag||0)
     }));
+    const livingHostiles=entities.filter(e=>e.countkill>0&&e.health>0),visibleHostiles=livingHostiles.filter(e=>e.visible>0),targeting=livingHostiles.filter(e=>e.targeting_player>0),pickups=entities.filter(e=>e.pickup>0);
+    const nearest=(items)=>items.reduce((best,item)=>!best||item.distance<best.distance?item:best,null),nearestHostile=nearest(livingHostiles),nearestPickup=nearest(pickups),far=8192;
     return{
       health:Number(p.health||0),armor:Number(p.armor||0),bullets:Number(p.ammo?.bullets||0),shells:Number(p.ammo?.shells||0),rockets:Number(p.ammo?.rockets||0),cells:Number(p.ammo?.cells||0),
       recent_damage:Number(p.recent_damage||0),recent_hostile_hp_loss:Number(this.lastHostileHpLoss||0),
@@ -273,6 +316,9 @@ export class DoomWasmArena{
       under_fire:p.under_fire?1:0,weapon:Number(p.weapon||0),
       player_x:Number(p.x||0),player_y:Number(p.y||0),player_z:Number(p.z||0),velocity_x:Number(p.vx||0),velocity_y:Number(p.vy||0),heading,kills:Number(p.kills||0),
       visited_cells:Number(this.lastExploration?.visitedCells||0),cell_visits:Number(this.lastExploration?.cellVisits||0),exploration_novelty:Number(this.lastExploration?.novelty??1),
+      hostile_count:livingHostiles.length,visible_hostile_count:visibleHostiles.length,targeting_player_count:targeting.length,
+      nearest_hostile_distance:Number(nearestHostile?.distance??far),nearest_hostile_relative_angle:Number(nearestHostile?.relative_angle??0),nearest_hostile_visible:Number(nearestHostile?.visible??0),
+      nearest_pickup_distance:Number(nearestPickup?.distance??far),nearest_pickup_relative_angle:Number(nearestPickup?.relative_angle??0),
       _collections:{entities,geometry}
     };
   }

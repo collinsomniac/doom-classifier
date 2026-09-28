@@ -4,7 +4,7 @@ import {SemanticResidualPolicy} from "./core/policy.js";
 import {ExperimentController} from "./core/controller.js";
 import {TransformersNLIAdapter,NLI_PRESETS} from "./model-adapters/transformers-nli.js";
 import {MiniLMSchemaCompiler,SCHEMA_EMBEDDING_PRESET} from "./model-adapters/schema-embedding-compiler.js";
-import {probeCounterfactualActions} from "./core/counterfactual.js";
+import {semanticPriorAtState,measureCounterfactualValues,trainWithMeasuredForks} from "./core/measured-fork-training.js";
 import {softmax} from "./core/math.js";
 
 const OWNED_RUNTIME_BASE="https://raw.githubusercontent.com/collinsomniac/doom-classifier/engine-runtime";
@@ -12,6 +12,7 @@ const STARTER_MODEL_BASE="https://raw.githubusercontent.com/collinsomniac/doom-c
 const query=new URLSearchParams(globalThis.location?.search||""),requestedRuntime=query.get("runtime")||"owned",starterMode=query.get("starter")||"auto";
 const $=id=>document.getElementById(id);
 const ui={
+  playTabBtn:$("playTabBtn"),inspectTabBtn:$("inspectTabBtn"),playTab:$("playTab"),inspectTab:$("inspectTab"),
   boot:$("bootBtn"),prepare:$("prepareBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),runtime:$("runtimeStatus"),runtimeTitle:$("runtimeTitle"),bootStatus:$("bootStatus"),
   iwad:$("iwadInput"),iwadStatus:$("iwadStatus"),engineChip:$("engineChip"),schemaChip:$("schemaChip"),teacherChip:$("teacherChip"),policyChip:$("policyChip"),prepareStatus:$("prepareStatus"),
   profile:$("profileSelect"),applyProfile:$("applyProfileBtn"),profileHint:$("profileHint"),teacherMode:$("teacherModeSelect"),useNeural:$("useNeuralToggle"),learn:$("learnToggle"),memory:$("memoryToggle"),explore:$("exploreToggle"),
@@ -20,7 +21,7 @@ const ui={
   actionMs:$("actionMs"),actionMsOut:$("actionMsOut"),manualAction:$("manualActionSelect"),manual:$("manualBtn"),manualStatus:$("manualStatus"),weaponState:$("weaponState"),
   circuit:$("decisionCircuit"),circuitActions:$("circuitActions"),circuitChosen:$("circuitChosen"),circuitRate:$("circuitRate"),circuitLatency:$("circuitLatency"),circuitState:$("circuitState"),circuitPriorTop:$("circuitPriorTop"),circuitPriorMeta:$("circuitPriorMeta"),circuitValueTop:$("circuitValueTop"),circuitValueMeta:$("circuitValueMeta"),circuitSearchTop:$("circuitSearchTop"),circuitSearchMeta:$("circuitSearchMeta"),circuitFusionMeta:$("circuitFusionMeta"),circuitOutputGlyph:$("circuitOutputGlyph"),circuitOutputLabel:$("circuitOutputLabel"),circuitOutputProb:$("circuitOutputProb"),circuitBackend:$("circuitBackend"),circuitAgreement:$("circuitAgreement"),
   bars:$("actionBars"),chosen:$("chosenAction"),chosenSemantic:$("chosenSemantic"),chosenValue:$("chosenValue"),chosenScore:$("chosenScore"),probabilityCalibration:$("probabilityCalibration"),intentFire:$("intentFire"),intentStrafe:$("intentStrafe"),intentTurn:$("intentTurn"),intentForward:$("intentForward"),intentBack:$("intentBack"),intentUse:$("intentUse"),entropy:$("entropy"),margin:$("margin"),epistemic:$("epistemic"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),
-  attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),decodeTemp:$("decodeTemp"),replaySize:$("replaySize"),teacherReplaySize:$("teacherReplaySize"),valueBeta:$("valueBeta"),priorKL:$("priorKL"),klUtilization:$("klUtilization"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),
+  attention:$("attentionList"),valueAttention:$("valueAttentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),decodeTemp:$("decodeTemp"),replaySize:$("replaySize"),teacherReplaySize:$("teacherReplaySize"),valueBeta:$("valueBeta"),priorKL:$("priorKL"),klUtilization:$("klUtilization"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),
   schemaCompile:$("schemaCompileBtn"),schemaStatus:$("schemaStatus"),state:$("stateTable"),objective:$("objectiveText"),steps:$("steps"),episodes:$("episodes"),ret:$("return"),updates:$("updates"),lastReward:$("lastReward"),damageDealt:$("damageDealt"),hostileHpLoss:$("hostileHpLoss"),damageReceived:$("damageReceived"),combatAttribution:$("combatAttribution"),
   architecture:$("architectureFlow"),archMode:$("archMode"),archFeedback:$("archFeedback"),typedTrace:$("typedTrace"),typedRawTop:$("typedRawTop"),typedRawMeta:$("typedRawMeta"),typedProjector:$("typedProjector"),typedProjectorMeta:$("typedProjectorMeta"),typedStrongField:$("typedStrongField"),typedStrongFieldMeta:$("typedStrongFieldMeta"),typedTrust:$("typedTrust"),typedTrustMeta:$("typedTrustMeta"),typedFused:$("typedFused"),typedFusedMeta:$("typedFusedMeta"),typedFieldGrid:$("typedFieldGrid"),trainingModeBadge:$("trainingModeBadge"),trainingOutput:$("trainingOutput"),teacherTranscript:$("teacherTranscript"),
   log:$("eventLog"),export:$("exportBtn"),dot:$("statusDot")
@@ -276,10 +277,6 @@ function renderTeacherTranscript(){
     return '<article class="teacher-item '+(index===0?"latest":"")+'"><div class="teacher-item-head"><strong>'+escapeHtml(item.model)+' · '+escapeHtml(item.kind)+'</strong><span>s'+String(item.step).padStart(4,"0")+' · '+Number(item.ms||0).toFixed(0)+' ms</span></div><div class="teacher-reason">'+escapeHtml(item.reason)+'</div><div class="teacher-actions">'+actions+'</div><div class="teacher-meta">'+fit+calibration+'</div><details><summary>state sent to teacher</summary><pre class="teacher-state">'+escapeHtml(item.stateText||"state serializer unavailable")+'</pre></details></article>';
   }).join("");
 }
-function semanticPriorAtState(observation){
-  const stats=policy.q.scoreStatsObservation(observation,{temporal:null});
-  return softmax(stats.semanticScores,Math.max(.05,Number(policy.temperature)||1));
-}
 function renderCounterfactual(){
   if(!ui.cfResults)return;
   const count=counterfactualExamples.length;ui.cfExamples.textContent=String(count);
@@ -296,23 +293,22 @@ function renderCounterfactual(){
     return '<div class="counterfactual-row '+(rank===0?"top-measured":"")+'"><strong>'+(rank+1)+'. '+escapeHtml(row.trial.label||row.trial.id)+'</strong><div class="counterfactual-cell"><span>prior</span><b>'+(row.prior*100).toFixed(1)+'%</b></div><div class="counterfactual-cell"><span>return</span><b>'+Number(row.ret||0).toFixed(3)+'</b></div><div class="counterfactual-cell"><span>target</span><b>'+(row.target*100).toFixed(1)+'%</b></div><div class="counterfactual-outcome">'+(bits.join(" · ")||"no causal event")+'</div></div>';
   }).join("");
 }
+async function measuredValueProbe({tics=24,fallbackTics=null,collect=true,fit=false,fitSteps=6,fitStrength=.08}={}){
+  const measured=await measureCounterfactualValues({environment:env,policy,tics,fallbackTics,fit,fitSteps,fitStrength});
+  lastCounterfactualProbe=measured.probe;
+  if(collect&&measured.example){
+    counterfactualExamples.push(measured.example);
+    if(counterfactualExamples.length>12)counterfactualExamples.shift();
+  }
+  return measured;
+}
 async function probeSameState(){
   if(!prepared||!env?.supportsSnapshots?.()||!env?.supportsExactTics?.())return;
   controller.pause();counterfactualBusy=true;setBusy(true);ui.cfStatus.textContent="Forking one exact state across all typed actions…";renderCounterfactual();renderArchitecture(env.lastObservation||env.observe(),controller.lastDecision,env.lastOutcome);await Promise.resolve();
-  const started=performance.now();
   try{
-    const observation=env.lastObservation||env.observe(),prior=semanticPriorAtState(observation),tics=Math.max(1,Number(ui.cfTics.value)||24);
-    const probe=await probeCounterfactualActions({
-      environment:env,actions:policy.actions,prior,horizon:1,temperature:.45,priorStrength:1,
-      stepper:id=>env.stepTics(id,tics)
-    });
-    lastCounterfactualProbe={...probe,prior,tics,ms:performance.now()-started,t:Date.now()};
-    if(Number(probe.spread||0)>1e-9){
-      counterfactualExamples.push({observation:probe.observation,target:probe.target,temporal:null,meta:{tics,spread:probe.spread}});
-      if(counterfactualExamples.length>12)counterfactualExamples.shift();
-    }
+    const {probe}=await measuredValueProbe({tics:Math.max(1,Number(ui.cfTics.value)||24),collect:true,fit:false});
     const best=probe.returns.reduce((bi,v,i,a)=>v>a[bi]?i:bi,0);
-    ui.cfStatus.textContent="PROBE COMPLETE · "+probe.trials.length+" exact branches × "+tics+" tics · "+(performance.now()-started).toFixed(1)+" ms · best "+policy.actions[best].id+" · state restored"+(probe.spread<=1e-9?" · no return separation, not collected":"");
+    ui.cfStatus.textContent="PROBE COMPLETE · "+probe.trials.length+" exact branches × "+probe.tics+" tics · "+Number(probe.ms||0).toFixed(1)+" ms · best "+policy.actions[best].id+" · state restored"+(probe.spread<=1e-9?" · no return separation, not collected":"");
   }catch(error){ui.cfStatus.textContent="probe failed · "+String(error?.message||error)}
   finally{counterfactualBusy=false;setBusy(false);render()}
 }
@@ -320,10 +316,10 @@ function fitCounterfactualTargets(){
   if(!prepared||!counterfactualExamples.length)return;
   controller.pause();setBusy(true);
   try{
-    const teacherBefore=policy.teacherCalls,result=policy.fitDecisionDistributions(counterfactualExamples,{ridge:.04,refineSteps:2,strength:.04});
+    const teacherBefore=policy.teacherCalls,result=policy.fitCounterfactualValueDistributions(counterfactualExamples,{steps:10,strength:.10});
     if(!result)throw new Error("No valid counterfactual targets to fit");
     lastCounterfactualFit={...result,t:Date.now(),examples:counterfactualExamples.length};
-    ui.cfStatus.textContent="MEASURED TARGET FIT · "+counterfactualExamples.length+" states · "+Number(result.rows||0)+" action rows · "+Number(result.refineSteps||0)+" refinement passes · teacher calls "+(policy.teacherCalls-teacherBefore);
+    ui.cfStatus.textContent="MEASURED VALUE FIT · "+counterfactualExamples.length+" states · "+Number(result.rows||0)+" action rows · "+Number(result.steps||0)+" critic passes · semantic prior protected · teacher calls "+(policy.teacherCalls-teacherBefore);
     checkpointReady=false;checkpointInfo=null;setRuntime("COUNTERFACTUAL FIT · FROZEN READY");
   }catch(error){ui.cfStatus.textContent="counterfactual fit failed · "+String(error?.message||error)}
   finally{setBusy(false);render()}
@@ -343,13 +339,15 @@ function render(){
   ui.probabilityCalibration.textContent=d?.probabilityCalibrated?("fitted · T×"+Number(d.probabilityCalibrationTemperature||1).toFixed(3)):"unverified on DOOM";
   if(d){
     const decisionObs=controller.trace.at(-1)?.observation||obs;
-    const attended=policy.q.inspectAttention?.(decisionObs,d.actionIndex,{topK:6,temporal:d.temporal})||[];
-    ui.attentionCount.textContent=attended.length+" records";
-    ui.attention.innerHTML=attended.length?attended.map(item=>{
+    const attended=policy.q.inspectAttention?.(decisionObs,d.actionIndex,{topK:6,temporal:d.temporal,branch:"semantic"})||[];
+    const valueAttended=policy.q.inspectAttention?.(decisionObs,d.actionIndex,{topK:6,temporal:d.temporal,branch:"value"})||[];
+    const attentionHtml=items=>items.length?items.map(item=>{
       const interesting=Object.entries(item.record||{}).filter(([,value])=>typeof value==="number"&&Number.isFinite(value)&&value!==0).sort((a,b)=>Math.abs(Number(b[1]))-Math.abs(Number(a[1]))).slice(0,5);
       const detail=interesting.map(([key,value])=>key+"="+Number(value).toFixed(Math.abs(value)<10?2:0)).join(" · ");
       return '<div class="attention-row"><div><strong>'+item.collectionId+'['+item.index+']</strong><small>'+detail+'</small></div><span>'+(item.weight*100).toFixed(1)+'%</span></div>';
     }).join(""):'<div class="attention-empty">No structured records in this observation.</div>';
+    ui.attentionCount.textContent=(attended.length+valueAttended.length)+" records";
+    ui.attention.innerHTML=attentionHtml(attended);if(ui.valueAttention)ui.valueAttention.innerHTML=attentionHtml(valueAttended);
     ui.lastReward.textContent=d.reward.toFixed(3);ui.chosen.textContent=d.action.label;ui.chosenSemantic.textContent=Number(d.semanticPriorScores?.[d.actionIndex]??0).toFixed(3);ui.chosenValue.textContent=Number(d.valueScores?.[d.actionIndex]??0).toFixed(3);ui.chosenScore.textContent=Number(d.qScores?.[d.actionIndex]??0).toFixed(3);ui.entropy.textContent=d.uncertainty.entropy.toFixed(3);ui.margin.textContent=d.uncertainty.margin.toFixed(3);ui.epistemic.textContent=(d.uncertainty.epistemic||0).toFixed(3);ui.novelty.textContent=d.uncertainty.novelty.toFixed(3);
     const marginal=field=>policy.actions.reduce((sum,action,i)=>sum+(Number(action.params?.[field]||0)>0?d.probs[i]:0),0);
     ui.intentFire.textContent=marginal("fire").toFixed(3);
@@ -424,12 +422,12 @@ async function importPortableCheckpoint(checkpoint,label="checkpoint"){
   try{
     if(policy.semantic&&policy.semantic!==hashSemantic&&policy.semantic?.dispose)await policy.semantic.dispose().catch(()=>{});
     policy.setSemantic(hashSemantic);teacherReady=false;
-    policy.importCheckpoint(checkpoint);schemaCompiled=true;checkpointReady=true;checkpointInfo=checkpoint.build||null;
+    const imported=policy.importCheckpoint(checkpoint,{schema:env.schema,actions:env.actions});schemaCompiled=true;checkpointReady=true;checkpointInfo=checkpoint.build||null;checkpointInfo={...(checkpointInfo||{}),migrated:!!imported?.migrated,checkpointActions:Number(imported?.checkpointActions||policy.actions.length),runtimeActions:Number(imported?.runtimeActions||policy.actions.length)};
     await controller.reset({learning:false});applyProfile("frozen");ui.profile.value="frozen";
     ui.modelSelect.value="hash";ui.modelStatus.textContent="Teacher not required · loaded frozen checkpoint.";
     ui.schemaStatus.textContent="Compiled semantic schema restored from checkpoint.";
     ui.prepareStatus.textContent="READY TO PLAY · "+label+" · "+policy.q.parameterCount()+" params · teacher-free neural fast path";
-    const summary=checkpointSummary(checkpointInfo);ui.checkpointStatus.textContent=summary?(label+" loaded · quality-gated stage "+summary.stage+" · "+summary.decisions+" causal training decisions · validation "+summary.damage.toFixed(0)+" damage / "+summary.kills.toFixed(0)+" kills / return "+summary.reward.toFixed(3)+" · "+policy.q.parameterCount()+" params"):(label+" loaded · "+policy.q.parameterCount()+" params · "+policy.q.updates+" consequence updates");
+    const summary=checkpointSummary(checkpointInfo),migration=checkpointInfo?.migrated?(" · migrated "+checkpointInfo.checkpointActions+"→"+checkpointInfo.runtimeActions+" typed actions; calibration reset"):"";ui.checkpointStatus.textContent=(summary?(label+" loaded · quality-gated stage "+summary.stage+" · "+summary.decisions+" causal training decisions · validation "+summary.damage.toFixed(0)+" damage / "+summary.kills.toFixed(0)+" kills / return "+summary.reward.toFixed(3)+" · "+policy.q.parameterCount()+" params"):(label+" loaded · "+policy.q.parameterCount()+" params · "+policy.q.updates+" consequence updates"))+migration;
     setRuntime("CHECKPOINT READY");render();
   }catch(error){ui.checkpointStatus.textContent="checkpoint load failed · "+String(error?.message||error);setRuntime("CHECKPOINT ERROR",true)}
   finally{setBusy(false)}
@@ -529,13 +527,25 @@ async function switchTeacher(){
   finally{setBusy(false)}
 }
 async function tuneAgent(){
-  if(!prepared)return;controller.pause();setBusy(true);applyProfile("learning");ui.tuneProgress.value=0;ui.tuneBadge.textContent="training";
+  if(!prepared)return;controller.pause();setBusy(true);applyProfile("learning");ui.tuneProgress.value=0;ui.tuneBadge.textContent="training + measured forks";
   const steps=Number(ui.tuneSteps.value)||128,startUpdates=policy.q.updates,startTeacher=policy.teacherCalls;
   try{
-    const result=await controller.trainBurst({steps,epsilon:.16,rolloutHorizon:64,onProgress:p=>{ui.tuneProgress.value=p.ratio*100;ui.tuneStatus.textContent="training "+p.completed+"/"+p.total+" · updates "+(p.updates-startUpdates)+" · rollout restarts "+p.rolloutRestarts}});
+    const result=await trainWithMeasuredForks({
+      controller,policy,environment:env,steps,stageSize:32,epsilon:.16,tics:24,fallbackTics:35,fitSteps:6,fitStrength:.08,resetEvery:64,bootstrapProbe:true,
+      onProgress:p=>{
+        ui.tuneProgress.value=p.ratio*100;
+        ui.tuneStatus.textContent=(p.phase==="td"?"training ":"stage ")+p.completed+"/"+p.total+" · critic updates "+(policy.q.updates-startUpdates)+" · measured fits "+p.measuredFits;
+      },
+      onProbe:async measured=>{
+        lastCounterfactualProbe=measured.probe;
+        if(measured.example){counterfactualExamples.push(measured.example);if(counterfactualExamples.length>12)counterfactualExamples.shift()}
+        ui.tuneStatus.textContent="measured "+measured.phase+" fork · "+measured.probe.trials.length+" branches × "+measured.probe.tics+" tics · ΔR "+Number(measured.probe.spread||0).toFixed(3);
+        renderCounterfactual();await Promise.resolve();
+      }
+    });
     applyProfile("frozen");ui.profile.value="frozen";ui.tuneBadge.textContent="frozen neural";
-    ui.tuneStatus.textContent="TRAINING COMPLETE · "+result.completed+" decisions across "+(result.rolloutRestarts+1)+" rollouts · "+result.actionDiversity+" actions explored · "+result.updates+" reward updates · "+(policy.teacherCalls-startTeacher)+" teacher refreshes · ready for teacher-off playback";
-    setRuntime("TRAINED · FROZEN");render();
+    ui.tuneStatus.textContent="TRAINING COMPLETE · "+result.completed+" decisions · "+result.actionDiversity+" actions explored · "+(policy.q.updates-startUpdates)+" critic updates · "+result.measuredFits+"/"+result.measuredProbes+" informative same-state fits · mean ΔR "+Number(result.meanMeasuredSpread||0).toFixed(3)+" · "+(policy.teacherCalls-startTeacher)+" teacher refreshes · ready for teacher-off playback";
+    setRuntime("TRAINED + MEASURED · FROZEN");render();
   }catch(error){ui.tuneStatus.textContent="training failed · "+String(error?.message||error);setRuntime("TRAINING ERROR",true)}
   finally{setBusy(false)}
 }
@@ -580,6 +590,17 @@ async function manualPrimitive(){
   }catch(error){ui.manualStatus.textContent="manual action failed · "+String(error?.message||error)}
   finally{setBusy(false)}
 }
+
+function showLabTab(name){
+  const play=name!=="inspect";
+  if(ui.playTab)ui.playTab.hidden=!play;
+  if(ui.inspectTab)ui.inspectTab.hidden=play;
+  ui.playTabBtn?.classList.toggle("active",play);ui.inspectTabBtn?.classList.toggle("active",!play);
+  ui.playTabBtn?.setAttribute("aria-selected",String(play));ui.inspectTabBtn?.setAttribute("aria-selected",String(!play));
+  if(play)requestAnimationFrame(()=>ui.canvas?.focus?.({preventScroll:true}));
+}
+ui.playTabBtn?.addEventListener("click",()=>showLabTab("play"));
+ui.inspectTabBtn?.addEventListener("click",()=>showLabTab("inspect"));
 
 ui.iwad.addEventListener("change",()=>{const file=ui.iwad.files?.[0];ui.iwadStatus.textContent=file?"Selected local IWAD: "+file.name+" · "+(file.size/1048576).toFixed(1)+" MB":"Default: Freedoom 0.13.0"});
 ui.boot.addEventListener("click",boot);ui.prepare.addEventListener("click",prepareRecommended);ui.tune.addEventListener("click",tuneAgent);ui.eval.addEventListener("click",evaluateFrozen);ui.manual.addEventListener("click",manualPrimitive);ui.cfProbe.addEventListener("click",probeSameState);ui.cfFit.addEventListener("click",fitCounterfactualTargets);ui.cfClear.addEventListener("click",clearCounterfactualTargets);ui.loadStarter.addEventListener("click",loadBundledCheckpoint);ui.loadSaved.addEventListener("click",loadBrowserCheckpoint);ui.saveCheckpoint.addEventListener("click",saveBrowserCheckpoint);ui.exportCheckpoint.addEventListener("click",exportPortableCheckpoint);

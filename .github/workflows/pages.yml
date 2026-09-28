@@ -49,6 +49,10 @@ jobs:
         run: node tests/target-network.mjs
       - name: Run semantic/value separation invariants
         run: node tests/semantic-value-separation.mjs
+      - name: Run measured critic supervision invariants
+        run: node tests/counterfactual-value-supervision.mjs
+      - name: Run measured-fork training invariants
+        run: node tests/measured-fork-training.mjs
       - name: Run portable policy checkpoint round-trip
         run: node tests/checkpoint-roundtrip.mjs
       - name: Run prior/value fusion invariants
@@ -67,6 +71,8 @@ jobs:
         run: node tests/nli-state-summary.mjs
       - name: Run independent NLI score invariants
         run: node tests/nli-independent-scores.mjs
+      - name: Run factorized typed-control NLI invariants
+        run: node tests/nli-factorized-controls.mjs
       - name: Run schema transfer invariants
         run: node tests/schema-transfer.mjs
       - name: Run task-agnostic adapter contract

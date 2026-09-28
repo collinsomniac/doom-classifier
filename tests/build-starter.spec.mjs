@@ -60,13 +60,17 @@ test("build and round-trip a quality-gated teacher-free starter checkpoint",asyn
   const candidates=[{stage:0,training:null,evaluation:before,checkpoint:baselineCheckpoint}];
   console.log("STARTER_STAGE "+JSON.stringify({stage:0,evaluation:before}));
   for(let stage=1;stage<=4;stage++){
-    const training=await page.evaluate(async()=>{
-      const {policy:p,controller:c}=window.__doomLab;
+    const training=await page.evaluate(async stage=>{
+      const {policy:p,controller:c,env}=window.__doomLab;
+      const {trainWithMeasuredForks}=await import("/src/core/measured-fork-training.js");
       p.setInferenceMode("adaptive");c.memory=true;c.useResidual=true;
-      const result=await c.trainBurst({steps:64,epsilon:.16,rolloutHorizon:64});
+      const result=await trainWithMeasuredForks({
+        controller:c,policy:p,environment:env,steps:64,stageSize:32,epsilon:.16,
+        tics:24,fallbackTics:35,fitSteps:6,fitStrength:.08,resetEvery:64,bootstrapProbe:stage===1
+      });
       await p.awaitTeacher?.();
       return{...result,params:p.q.parameterCount(),updates:p.q.updates,teacherCalls:p.teacherCalls};
-    });
+    },stage);
     const evaluation=await frozenEvalSuite(page,{steps:24,repeats:3}),checkpoint=await page.evaluate(()=>window.__doomLab.policy.exportCheckpoint());
     candidates.push({stage,training,evaluation,checkpoint});
     console.log("STARTER_STAGE "+JSON.stringify({stage,training:{return:training.return,updates:training.updates,teacherCalls:training.teacherCalls},evaluation}));

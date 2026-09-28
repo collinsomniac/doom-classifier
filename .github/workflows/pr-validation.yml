@@ -1,0 +1,55 @@
+name: pr-validation
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check JavaScript
+        run: find src tests -name '*.js' -o -name '*.mjs' | xargs -n1 node --check
+      - name: Core architecture invariants
+        run: |
+          node tests/doom-adapter.mjs
+          node tests/neural-set.mjs
+          node tests/action-attention.mjs
+          node tests/semantic-value-separation.mjs
+          node tests/counterfactual-value-supervision.mjs
+          node tests/measured-fork-training.mjs
+          node tests/checkpoint-roundtrip.mjs
+          node tests/proper-decision-supervision.mjs
+          node tests/nli-independent-scores.mjs
+          node tests/nli-factorized-controls.mjs
+          node tests/action-factorization.mjs
+          node tests/typed-action-params.mjs
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Chromium tooling
+        run: |
+          npm install --no-save --no-package-lock @playwright/test@1.55.0
+          npx playwright install chromium
+      - name: Start static server
+        run: python3 -m http.server 8000 --bind 127.0.0.1 > /tmp/pr-validation-http.log 2>&1 &
+      - name: Boot real DOOM and verify tabs/model circuit
+        run: npx playwright test tests/doom-browser.spec.mjs --reporter=line

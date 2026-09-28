@@ -93,10 +93,28 @@ export class TransformersNLIAdapter{
   }
   compile(schema,actions){
     this.schema=schema;this.actions=actions;this.nullBiasLogits=null;this.nullBiasPromise=null;
-    this.labels=actions.map(a=>{
-      const active=Object.entries(a.params||{}).filter(([,v])=>Number(v)>0).map(([k])=>k.replaceAll("_"," "));
-      return a.label+" — controller buttons: "+(active.length?active.join(", "):"none")+"; "+a.description;
-    });
+    const binary=(schema.actionFields||[]).filter(field=>!field.enum&&Number(field.min)===0&&Number(field.max)===1);
+    const allBinary=binary.length>=2&&actions.every(action=>binary.every(field=>Object.prototype.hasOwnProperty.call(action.params||{},field.id)));
+    const axisFields=new Map();
+    if(allBinary&&binary.every(field=>field.axis)){
+      for(const field of binary){if(!axisFields.has(field.axis))axisFields.set(field.axis,[]);axisFields.get(field.axis).push(field)}
+    }
+    this.factorAxes=axisFields.size?Array.from(axisFields,([id,fields])=>{
+      const first=fields[0],axisLabel=first.axisLabel||id.replaceAll("_"," ");
+      const neutral={id:"__neutral__",fieldId:null,label:(first.neutralLabel||("keep "+axisLabel+" neutral"))+" — select no active "+axisLabel+" control"};
+      const active=fields.map(field=>({id:field.id,fieldId:field.id,label:(field.label||field.id)+" — "+(field.description||field.id)}));
+      return{id,label:axisLabel,fields,options:[neutral,...active]};
+    }):null;
+    this.factorizedControls=!this.factorAxes&&allBinary?binary:null;
+    this.factorLabelEntries=this.factorAxes?this.factorAxes.flatMap(axis=>axis.options.map(option=>({axisId:axis.id,...option}))):null;
+    this.labels=this.factorAxes
+      ? this.factorLabelEntries.map(entry=>entry.label)
+      : this.factorizedControls
+        ? this.factorizedControls.map(field=>"activate "+(field.label||field.id)+" — "+(field.description||field.id))
+        : actions.map(a=>{
+            const active=Object.entries(a.params||{}).filter(([,v])=>Number(v)>0).map(([k])=>k.replaceAll("_"," "));
+            return a.label+" — controller buttons: "+(active.length?active.join(", "):"none")+"; "+a.description;
+          });
   }
   report(info){this.onProgress({...info,normalizedProgress:normalizeProgress(info)})}
   async load(){
@@ -164,17 +182,48 @@ export class TransformersNLIAdapter{
     }
     return text;
   }
-  outputLogits(output){
+  outputLogits(output,labels=this.labels){
     const independent=new Map((output?.labels||[]).map((label,i)=>[label,output.scores[i]])),eps=1e-6;
-    return this.labels.map(label=>{
+    return labels.map(label=>{
       const p=Math.max(eps,Math.min(1-eps,Number(independent.get(label)??eps)));
       return Math.log(p/(1-p));
     });
   }
+  composeFactorizedControls(fieldLogits){
+    if(this.factorAxes){
+      const probabilities=new Map(),eps=1e-8;let offset=0;
+      for(const axis of this.factorAxes){
+        const logits=fieldLogits.slice(offset,offset+axis.options.length),peak=Math.max(...logits),exp=logits.map(v=>Math.exp(Number(v)-peak)),sum=exp.reduce((a,b)=>a+b,0)||1;
+        probabilities.set(axis.id,axis.options.map((option,i)=>({option,p:Math.max(eps,exp[i]/sum)})));offset+=axis.options.length;
+      }
+      const scores=this.actions.map(action=>{
+        let logp=0;
+        for(const axis of this.factorAxes){
+          const active=axis.fields.find(field=>Number(action.params?.[field.id]||0)>.5),id=active?.id||"__neutral__";
+          const row=probabilities.get(axis.id)||[],choice=row.find(x=>x.option.id===id)||row[0];
+          logp+=Math.log(Math.max(eps,choice?.p||eps));
+        }
+        return logp/Math.max(1,this.factorAxes.length);
+      });
+      const mean=scores.reduce((a,b)=>a+b,0)/Math.max(1,scores.length);return scores.map(v=>v-mean);
+    }
+    if(!this.factorizedControls)return fieldLogits;
+    const eps=1e-7,sigmoid=x=>1/(1+Math.exp(-Math.max(-30,Math.min(30,Number(x)||0))));
+    const scores=this.actions.map(action=>{
+      let logp=0;
+      for(let i=0;i<this.factorizedControls.length;i++){
+        const field=this.factorizedControls[i],p=Math.max(eps,Math.min(1-eps,sigmoid(fieldLogits[i]))),active=Number(action.params?.[field.id]||0)>.5;
+        logp+=active?Math.log(p):Math.log(1-p);
+      }
+      return logp/this.factorizedControls.length;
+    });
+    const mean=scores.reduce((a,b)=>a+b,0)/Math.max(1,scores.length);
+    return scores.map(v=>v-mean);
+  }
   async classifyPremise(premise){
     if(!this.classifier)await this.load();
-    const output=await this.classifier(premise,this.labels,{multi_label:true,hypothesis_template:"Given only the observed game state and literal controller meanings, using {} for the next control interval is contextually appropriate."});
-    return this.outputLogits(output);
+    const output=await this.classifier(premise,this.labels,{multi_label:true,hypothesis_template:"Given only the observed structured state and literal controller mechanics, {} for the next control interval is contextually appropriate."});
+    return this.composeFactorizedControls(this.outputLogits(output,this.labels));
   }
   nullStateText(){
     return JSON.stringify({

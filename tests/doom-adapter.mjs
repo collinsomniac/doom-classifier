@@ -22,6 +22,9 @@ assert.equal(flat.health,87);assert.equal(flat.weapon,1);assert.equal(flat.under
 assert.equal(flat._collections.entities[1].engine_record_id,8);assert.equal(flat._collections.entities[1].targeting_player,1);assert.equal(flat._collections.entities[2].pickup,1);
 assert.equal(flat._collections.entities[1].kind,1);assert.equal(flat._collections.entities[2].kind,3);assert.equal(flat._collections.entities[3].kind,2);
 assert.equal(flat._collections.geometry[0].line_id,4);assert.equal(flat._collections.geometry[0].flags,1);assert.equal(flat._collections.geometry[0].x1,-20);
+assert.equal(flat.hostile_count,2);assert.equal(flat.visible_hostile_count,2);assert.equal(flat.targeting_player_count,1);
+assert.equal(flat.nearest_hostile_distance,28);assert.equal(flat.nearest_hostile_relative_angle,-.25);assert.equal(flat.nearest_hostile_visible,1);
+assert.equal(flat.nearest_pickup_distance,10);assert.equal(flat.nearest_pickup_relative_angle,0);
 
 const damaged=structuredClone(raw);damaged.world.entities[1].health=15;
 const damageOutcome=arena.outcome(raw,damaged,{exploration:{newCell:false,visitedCells:1}});
@@ -63,7 +66,7 @@ assert.equal(attributedFlat.recent_player_pickups,1);
 assert.equal(attributedFlat.level_completed,1);
 assert.equal(attributedFlat.secret_exit,1);
 
-assert.equal(arena.actionMasks.fire,64);assert.equal(arena.actionMasks.forward_fire,65);assert.equal(arena.actionMasks.strafe_left_fire,80);
+assert.equal(arena.actionMasks.fire,64);assert.equal(arena.actionMasks.forward_fire,65);assert.equal(arena.actionMasks.strafe_left_fire,80);assert.equal(arena.actionMasks.forward_turn_left_fire,69);assert.equal(arena.actionMasks.strafe_right_turn_right_fire,104);assert.equal(arena.actionMasks.forward_turn_left_fire_use,197);assert.equal(arena.actions.length,60);
 assert.equal(arena.actions.find(a=>a.id==="fire").params.fire,1);assert.equal(arena.actions.find(a=>a.id==="fire").params.forward,0);
 assert.equal(arena.actions.find(a=>a.id==="forward_fire").params.forward,1);assert.equal(arena.actions.find(a=>a.id==="forward_fire").params.fire,1);
 assert.equal(arena.schema.actionFields.length,8);

@@ -296,3 +296,20 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
 @media(max-width:650px){
   .circuit-performance{display:grid;gap:1px;text-align:right}.circuit-grid{grid-template-columns:72px minmax(0,1fr) 46px 82px;gap:4px}.circuit-node{padding:5px}.circuit-node>small{display:none}.circuit-merge{width:44px;height:44px}.circuit-rail{grid-template-columns:30px minmax(0,1fr);gap:5px;padding:3px 4px}.circuit-rail>div{grid-template-columns:1fr}.circuit-rail span{font-size:6px}.circuit-rail b{font-size:8px}.circuit-rail small{font-size:7px}.circuit-output>b{font-size:20px}.circuit-footer{display:grid;gap:2px;white-space:normal}
 }
+
+
+/* Two-surface lab layout: gameplay stays large; diagnostics live in a second tab. */
+.lab-tabs{display:flex;gap:6px;margin:0 0 12px;padding:4px;border:1px solid var(--line);border-radius:12px;background:#0b0f14;width:max-content;max-width:100%}
+.lab-tab{background:transparent;color:var(--muted);border:1px solid transparent;padding:.55rem .9rem;border-radius:8px;font:800 .72rem ui-monospace,monospace}
+.lab-tab.active{background:#18200f;color:var(--accent);border-color:#46552c}
+.tab-panel[hidden]{display:none!important}
+.play-grid{display:block}
+.play-grid .arena-panel{width:100%;grid-column:1/-1}
+.play-grid #doomCanvas{width:min(100%,1280px);height:auto;aspect-ratio:16/10;margin:0 auto;background:#000}
+.engine-controls-panel{grid-column:1/-1}
+@media(max-width:650px){
+  .lab-tabs{width:100%}.lab-tab{flex:1;padding:.62rem .5rem}
+  .play-grid #doomCanvas{width:100%;max-width:none}
+}
+
+.attention-panel{grid-column:1/-1}.attention-dual{display:grid;grid-template-columns:1fr 1fr;gap:10px}.attention-dual>section{min-width:0;border:1px solid #202731;border-radius:10px;background:#090d12;padding:9px}.attention-branch-head{display:flex;justify-content:space-between;gap:8px;margin-bottom:7px}.attention-branch-head strong{font:800 9px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.07em}.attention-branch-head span{font:9px ui-monospace,monospace;color:var(--muted);text-align:right}@media(max-width:760px){.attention-dual{grid-template-columns:1fr}}

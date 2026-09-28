@@ -18,4 +18,14 @@ target.importCheckpoint(checkpoint);
 const after=target.q.scoreStatsObservation(obs);
 for(const key of ["scores","semanticScores","valueScores"])for(let i=0;i<before[key].length;i++)assert.ok(Math.abs(before[key][i]-after[key][i])<1e-7,key+" round-trip mismatch");
 assert.deepEqual(target.actions.map(a=>a.id),["go","wait"]);assert.equal(target.inferenceMode,"neural");assert.equal(target.temperature,.61);assert.equal(target.probabilityCalibrator.fitted,true);assert.ok(Math.abs(target.probabilityCalibrator.temperature-source.probabilityCalibrator.temperature)<1e-12);
+const expandedActions=[
+  ...actions,
+  {id:"go_plus",label:"go + auxiliary",description:"apply go plus auxiliary control",params:{go:1}}
+];
+const migrated=new SemanticResidualPolicy({schema,actions:expandedActions,semantic:new HashSemanticAdapter(),residual:"neural-set",seed:222,inferenceMode:"adaptive"});
+const migration=migrated.importCheckpoint(checkpoint,{schema,actions:expandedActions});
+assert.equal(migration.migrated,true);assert.equal(migration.checkpointActions,2);assert.equal(migration.runtimeActions,3);
+assert.deepEqual(migrated.actions.map(a=>a.id),["go","wait","go_plus"]);
+assert.equal(migrated.probabilityCalibrator.fitted,false,"output-space migration must invalidate stale calibration");
+const migratedScores=migrated.q.scoreStatsObservation(obs);assert.equal(migratedScores.scores.length,3);assert.ok(migratedScores.scores.every(Number.isFinite));
 console.log(JSON.stringify({ok:true,params:target.q.parameterCount(),bytes:JSON.stringify(checkpoint).length}));
