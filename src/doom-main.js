@@ -18,6 +18,7 @@ const ui={
   tune:$("tuneBtn"),eval:$("evalBtn"),evalResults:$("evalResults"),tuneSteps:$("tuneSteps"),tuneProgress:$("tuneProgress"),tuneStatus:$("tuneStatus"),tuneBadge:$("tuneBadge"),loadStarter:$("loadStarterBtn"),loadSaved:$("loadSavedBtn"),saveCheckpoint:$("saveCheckpointBtn"),exportCheckpoint:$("exportCheckpointBtn"),checkpointStatus:$("checkpointStatus"),
   cfProbe:$("counterfactualProbeBtn"),cfFit:$("counterfactualFitBtn"),cfClear:$("counterfactualClearBtn"),cfTics:$("counterfactualTics"),cfBadge:$("counterfactualBadge"),cfStatus:$("counterfactualStatus"),cfResults:$("counterfactualResults"),cfExamples:$("counterfactualExamples"),cfSpread:$("counterfactualSpread"),cfPriorTop:$("counterfactualPriorTop"),cfMeasuredTop:$("counterfactualMeasuredTop"),cfTargetTop:$("counterfactualTargetTop"),
   actionMs:$("actionMs"),actionMsOut:$("actionMsOut"),manualAction:$("manualActionSelect"),manual:$("manualBtn"),manualStatus:$("manualStatus"),weaponState:$("weaponState"),
+  circuit:$("decisionCircuit"),circuitActions:$("circuitActions"),circuitChosen:$("circuitChosen"),circuitRate:$("circuitRate"),circuitLatency:$("circuitLatency"),circuitState:$("circuitState"),circuitPriorTop:$("circuitPriorTop"),circuitPriorMeta:$("circuitPriorMeta"),circuitValueTop:$("circuitValueTop"),circuitValueMeta:$("circuitValueMeta"),circuitSearchTop:$("circuitSearchTop"),circuitSearchMeta:$("circuitSearchMeta"),circuitFusionMeta:$("circuitFusionMeta"),circuitOutputGlyph:$("circuitOutputGlyph"),circuitOutputLabel:$("circuitOutputLabel"),circuitOutputProb:$("circuitOutputProb"),circuitBackend:$("circuitBackend"),circuitAgreement:$("circuitAgreement"),
   bars:$("actionBars"),chosen:$("chosenAction"),chosenSemantic:$("chosenSemantic"),chosenValue:$("chosenValue"),chosenScore:$("chosenScore"),probabilityCalibration:$("probabilityCalibration"),intentFire:$("intentFire"),intentStrafe:$("intentStrafe"),intentTurn:$("intentTurn"),intentForward:$("intentForward"),intentBack:$("intentBack"),intentUse:$("intentUse"),entropy:$("entropy"),margin:$("margin"),epistemic:$("epistemic"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),
   attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),decodeTemp:$("decodeTemp"),replaySize:$("replaySize"),teacherReplaySize:$("teacherReplaySize"),valueBeta:$("valueBeta"),priorKL:$("priorKL"),klUtilization:$("klUtilization"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),
   schemaCompile:$("schemaCompileBtn"),schemaStatus:$("schemaStatus"),state:$("stateTable"),objective:$("objectiveText"),steps:$("steps"),episodes:$("episodes"),ret:$("return"),updates:$("updates"),lastReward:$("lastReward"),damageDealt:$("damageDealt"),hostileHpLoss:$("hostileHpLoss"),damageReceived:$("damageReceived"),combatAttribution:$("combatAttribution"),
@@ -67,6 +68,79 @@ function weaponLabel(obs){
   const ammo=value===1||value===3?obs.bullets:value===2||value===8?obs.shells:value===4?obs.rockets:value===5||value===6?obs.cells:"∞";
   return category+" · ammo "+ammo;
 }
+function actionGlyph(action){
+  const p=action?.params||{},bits=[];
+  if(Number(p.strafe_left||0)>0)bits.push("←");
+  if(Number(p.strafe_right||0)>0)bits.push("→");
+  if(Number(p.turn_left||0)>0)bits.push("↶");
+  if(Number(p.turn_right||0)>0)bits.push("↷");
+  if(Number(p.forward||0)>0)bits.push("↑");
+  if(Number(p.back||0)>0)bits.push("↓");
+  if(Number(p.fire||0)>0)bits.push("◎");
+  if(Number(p.use||0)>0)bits.push("◇");
+  return bits.join("")||"·";
+}
+function topScoreIndex(values){
+  if(!values?.length)return -1;
+  let best=0;for(let i=1;i<values.length;i++)if(Number(values[i])>Number(values[best]))best=i;
+  return best;
+}
+function measuredDecisionRate(){
+  const rows=controller?.trace?.slice(-16)||[];
+  if(rows.length<2)return 0;
+  const elapsed=(Number(rows.at(-1)?.t||0)-Number(rows[0]?.t||0))/1000;
+  return elapsed>0?(rows.length-1)/elapsed:0;
+}
+function setCircuitHot(name,hot){
+  const node=ui.circuit?.querySelector('[data-circuit="'+name+'"]');
+  if(node)node.classList.toggle("hot",!!hot);
+}
+function renderDecisionCircuit(obs,d){
+  if(!ui.circuit||!policy||!env)return;
+  const entities=obs?._collections?.entities?.length||0,geometry=obs?._collections?.geometry?.length||0;
+  ui.circuitState.textContent=(policy.schema?.fields?.length||0)+"F · "+entities+"E · "+geometry+"G";
+  const fastBackend=policy.q?.backend||"local-js",teacherBackend=isLearnedTeacher()?(policy.semantic?.backend||"loaded"):"off";
+  ui.circuitBackend.textContent="engine WASM · fast "+fastBackend+" · teacher "+teacherBackend;
+  const rate=measuredDecisionRate(),lat=Number(d?.latencyMs||controller?.latencySummary?.().last||0);
+  ui.circuitRate.textContent=(rate||Number(controller?.hz||0)).toFixed(1)+" decisions/s";
+  ui.circuitLatency.textContent=lat.toFixed(1)+" ms / decision";
+  setCircuitHot("state",!!d);setCircuitHot("prior",!!d);setCircuitHot("value",!!d&&Number(d.valueBeta||0)>0);
+  setCircuitHot("search",counterfactualBusy||!!(lastCounterfactualProbe&&Date.now()-Number(lastCounterfactualProbe.t||0)<1800));
+  setCircuitHot("fusion",!!d);setCircuitHot("output",!!d);
+  if(!d){
+    ui.circuitChosen.textContent="waiting for a decision";
+    ui.circuitPriorTop.textContent="—";ui.circuitValueTop.textContent="—";
+    ui.circuitOutputGlyph.textContent="·";ui.circuitOutputLabel.textContent="waiting";ui.circuitOutputProb.textContent="p 0.000";
+    ui.circuitFusionMeta.textContent="β 0";ui.circuitAgreement.textContent="prior / critic / fused waiting";
+    return;
+  }
+  const semanticTop=topScoreIndex(d.semanticPriorScores),valueTop=topScoreIndex(d.valueScores);
+  const semanticAction=semanticTop>=0?policy.actions[semanticTop]:null,valueAction=valueTop>=0?policy.actions[valueTop]:null;
+  const chosen=d.action,chosenP=Number(d.probs?.[d.actionIndex]||0);
+  ui.circuitChosen.textContent=actionGlyph(chosen)+" "+(chosen?.label||chosen?.id||"waiting");
+  ui.circuitPriorTop.textContent=semanticAction?(actionGlyph(semanticAction)+" "+semanticAction.id):"—";
+  ui.circuitPriorMeta.textContent=semanticTop>=0?("score "+Number(d.semanticPriorScores?.[semanticTop]||0).toFixed(3)+(d.teacherUsed?" · teacher tick":d.teacherPending?" · teacher pending":" · fast prior")):"waiting";
+  ui.circuitValueTop.textContent=valueAction?(actionGlyph(valueAction)+" "+valueAction.id):"—";
+  ui.circuitValueMeta.textContent=valueTop>=0?("Q "+Number(d.valueScores?.[valueTop]||0).toFixed(3)+" · authority "+(Number(d.criticAuthority||0)*100).toFixed(0)+"%"):"waiting";
+  if(lastCounterfactualProbe?.returns?.length){
+    const measuredTop=topScoreIndex(lastCounterfactualProbe.returns),a=policy.actions[measuredTop];
+    ui.circuitSearchTop.textContent=a?(actionGlyph(a)+" "+a.id):"—";
+    ui.circuitSearchMeta.textContent="same state · "+Number(lastCounterfactualProbe.tics||0)+" tics · ΔR "+Number(lastCounterfactualProbe.spread||0).toFixed(3);
+  }else{
+    ui.circuitSearchTop.textContent=env.supportsSnapshots?.()&&env.supportsExactTics?.()?"fork ready":"unavailable";
+    ui.circuitSearchMeta.textContent=env.supportsSnapshots?.()&&env.supportsExactTics?.()?"snapshot + deterministic tics":"runtime lacks exact fork";
+  }
+  ui.circuitFusionMeta.textContent="β "+Number(d.valueBeta||0).toFixed(1)+" · KL "+Number(d.priorKL||0).toFixed(3);
+  ui.circuitOutputGlyph.textContent=actionGlyph(chosen);ui.circuitOutputLabel.textContent=chosen?.id||"waiting";ui.circuitOutputProb.textContent="p "+chosenP.toFixed(3);
+  const semanticId=semanticAction?.id||"—",valueId=valueAction?.id||"—",chosenId=chosen?.id||"—";
+  ui.circuitAgreement.textContent="prior "+semanticId+(semanticId===valueId?" = ":" ≠ ")+"critic "+valueId+" → fused "+chosenId;
+  [...(ui.circuitActions?.children||[])].forEach((chip,i)=>{
+    chip.classList.toggle("chosen",i===d.actionIndex);
+    chip.classList.toggle("semantic-top",i===semanticTop);
+    chip.classList.toggle("value-top",i===valueTop);
+    const prob=chip.querySelector('[data-role="prob"]');if(prob)prob.textContent=Number(d.probs?.[i]||0).toFixed(2);
+  });
+}
 function buildBars(){
   ui.bars.innerHTML="";ui.manualAction.innerHTML="";
   if(!env)return;
@@ -77,6 +151,7 @@ function buildBars(){
     const value=document.createElement("span");value.textContent="0.000";row.append(label,track,value);ui.bars.append(row);
     const option=document.createElement("option");option.value=a.id;option.textContent=a.label;ui.manualAction.append(option);
   }
+  if(ui.circuitActions)ui.circuitActions.innerHTML=env.actions.map((a,i)=>'<div class="circuit-action" data-index="'+i+'" title="'+escapeHtml(a.label||a.id)+'"><b>'+escapeHtml(actionGlyph(a))+'</b><span>'+escapeHtml(a.id)+'</span><small data-role="prob">0.00</small></div>').join("");
   if([...ui.manualAction.options].some(o=>o.value==="fire"))ui.manualAction.value="fire";
 }
 function syncRuntimeConfig(){
@@ -286,7 +361,7 @@ function render(){
     [...ui.bars.children].forEach((row,i)=>{row.querySelector(".bar-fill").style.width=(d.probs[i]*100).toFixed(1)+"%";row.lastElementChild.textContent=d.probs[i].toFixed(3)});
     ui.log.textContent=controller.trace.slice(-14).reverse().map(t=>"s"+String(t.step).padStart(4,"0")+" "+(t.teacherUsed?"Q":t.teacherPending?"…":"·")+" "+t.action.padEnd(19)+" p="+Math.max(...Object.values(t.probabilities)).toFixed(3)+" r="+t.reward.toFixed(3)+" dmg="+Number(t.outcome?.damageDealt||0).toFixed(0)+" "+t.residualLatencyMs.toFixed(1)+"ms").join("\n");
   }
-  renderArchitecture(obs,d,outcome);renderTypedFields(d);renderTrainingStream();renderTeacherTranscript();renderCounterfactual();
+  renderDecisionCircuit(obs,d);renderArchitecture(obs,d,outcome);renderTypedFields(d);renderTrainingStream();renderTeacherTranscript();renderCounterfactual();
   updateReadiness();
 }
 function bindController(){

@@ -9,6 +9,7 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   if((await page.locator("#runtimeStatus").textContent())!=="ENGINE READY")throw new Error("DOOM boot failed. "+(await page.locator("#bootStatus").textContent()));
   await expect(page.locator("#stateTable .state-row")).toHaveCount(25);
   await expect(page.locator("#architectureFlow")).toBeVisible();
+  await expect(page.locator("#decisionCircuit")).toBeVisible();
   await expect(page.locator('[data-arch="environment"]')).toHaveClass(/active/);
   expect(await page.evaluate(()=>window.__doomLab.env.runtime?.owned)).toBe(true);
   await expect(page.locator("#weaponState")).toContainText("pistol");
@@ -40,6 +41,12 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
 
   await page.locator("#stepBtn").click();await expect(page.locator("#steps")).toHaveText("1",{timeout:8000});
   await expect(page.locator("#chosenAction")).not.toHaveText("—");await expect(page.locator("#eventLog")).toContainText("s0001");
+  await expect(page.locator("#circuitChosen")).not.toContainText("waiting");
+  await expect(page.locator("#circuitOutputLabel")).not.toContainText("waiting");
+  await expect(page.locator("#circuitPriorTop")).not.toHaveText("—");
+  await expect(page.locator("#circuitValueTop")).not.toHaveText("—");
+  await expect(page.locator("#circuitActions .circuit-action")).toHaveCount(15);
+  await expect(page.locator("#circuitActions .circuit-action.chosen")).toHaveCount(1);
   await expect(page.locator("#attentionList .attention-row").first()).toBeVisible();
   await expect(page.locator("#trainingOutput")).toContainText("s0001");
   expect(await page.evaluate(()=>window.__doomLab.env.supportsSnapshots()&&window.__doomLab.env.supportsExactTics())).toBe(true);
