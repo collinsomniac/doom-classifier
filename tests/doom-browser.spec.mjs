@@ -7,9 +7,12 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   await page.goto("http://127.0.0.1:8000/doom.html?starter=off",{waitUntil:"domcontentloaded"});await page.locator("#bootBtn").click();
   await page.waitForFunction(()=>{const text=document.querySelector("#runtimeStatus")?.textContent;return text==="ENGINE READY"||text==="BOOT FAILED"},null,{timeout:90000});
   if((await page.locator("#runtimeStatus").textContent())!=="ENGINE READY")throw new Error("DOOM boot failed. "+(await page.locator("#bootStatus").textContent()));
-  await expect(page.locator("#stateTable .state-row")).toHaveCount(25);
-  await expect(page.locator("#architectureFlow")).toBeVisible();
+  await expect(page.locator("#stateTable .state-row")).toHaveCount(33);
+  await expect(page.locator("#playTab")).toBeVisible();
+  await expect(page.locator("#inspectTab")).toBeHidden();
   await expect(page.locator("#decisionCircuit")).toBeVisible();
+  const desktopPlay=await page.evaluate(()=>({canvas:document.querySelector("#doomCanvas")?.getBoundingClientRect().width||0,viewport:innerWidth}));
+  expect(desktopPlay.canvas).toBeGreaterThan(desktopPlay.viewport*.70);
   await expect(page.locator('[data-arch="environment"]')).toHaveClass(/active/);
   expect(await page.evaluate(()=>window.__doomLab.env.runtime?.owned)).toBe(true);
   await expect(page.locator("#weaponState")).toContainText("pistol");
@@ -24,9 +27,9 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
       ammoAfter=after.bullets+after.shells+after.rockets+after.cells;damage+=step.info?.outcome?.hostileHpLoss||0;
     }
     await env.reset();env.setActionMs(110);
-    return{ammoBefore,ammoAfter,damage,pulses,mask:env.actionMasks.fire,combo:env.actionMasks.strafe_left_fire};
+    return{ammoBefore,ammoAfter,damage,pulses,mask:env.actionMasks.fire,combo:env.actionMasks.strafe_left_fire,forwardTurnFire:env.actionMasks.forward_turn_left_fire,strafeTurnFire:env.actionMasks.strafe_right_turn_right_fire,actionCount:env.actions.length};
   });
-  expect(fire.mask).toBe(64);expect(fire.combo).toBe(80);expect(fire.ammoAfter<fire.ammoBefore||fire.damage>0).toBeTruthy();
+  expect(fire.mask).toBe(64);expect(fire.combo).toBe(80);expect(fire.forwardTurnFire).toBe(69);expect(fire.strafeTurnFire).toBe(104);expect(fire.actionCount).toBe(31);expect(fire.ammoAfter<fire.ammoBefore||fire.damage>0).toBeTruthy();
 
   await page.locator("#prepareBtn").click();
   await page.waitForFunction(()=>{const text=document.querySelector("#prepareStatus")?.textContent||"";return text.includes("READY TO PLAY")||text.includes("Preparation failed")},null,{timeout:300000});
@@ -34,6 +37,9 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   if(prepare.includes("failed"))throw new Error("Preparation failed: "+prepare+" browser="+consoleErrors.join(" | "));
   await expect(page.locator("#schemaChip")).toContainText("schema compiled");await expect(page.locator("#teacherChip")).toContainText("teacher loaded");await expect(page.locator("#policyChip")).toContainText("ready to play");
   await expect(page.locator("#backboneName")).toContainText("params");
+  await page.locator("#inspectTabBtn").click();
+  await expect(page.locator("#inspectTab")).toBeVisible();
+  await expect(page.locator("#architectureFlow")).toBeVisible();
   await expect(page.locator("#teacherTranscript .teacher-item").first()).toBeVisible();
   await expect(page.locator('[data-arch="teacher"]')).toHaveClass(/active/);
   const prepareFit=await page.evaluate(()=>window.__doomLab.policy.lastTeacherResult);console.log("TEACHER_BOOTSTRAP_FIT "+JSON.stringify(prepareFit));
@@ -45,16 +51,16 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   await expect(page.locator("#circuitOutputLabel")).not.toContainText("waiting");
   await expect(page.locator("#circuitPriorTop")).not.toHaveText("—");
   await expect(page.locator("#circuitValueTop")).not.toHaveText("—");
-  await expect(page.locator("#circuitActions .circuit-action")).toHaveCount(15);
+  await expect(page.locator("#circuitActions .circuit-action")).toHaveCount(31);
   await expect(page.locator("#circuitActions .circuit-action.chosen")).toHaveCount(1);
   await expect(page.locator("#attentionList .attention-row").first()).toBeVisible();
   await expect(page.locator("#trainingOutput")).toContainText("s0001");
   expect(await page.evaluate(()=>window.__doomLab.env.supportsSnapshots()&&window.__doomLab.env.supportsExactTics())).toBe(true);
   await page.selectOption("#counterfactualTics","6");
   await page.click("#counterfactualProbeBtn");
-  await expect(page.locator("#counterfactualResults .counterfactual-row")).toHaveCount(15);
+  await expect(page.locator("#counterfactualResults .counterfactual-row")).toHaveCount(31);
   await expect(page.locator("#counterfactualStatus")).toContainText("state restored");
-  expect(await page.evaluate(()=>window.__doomLab.counterfactual?.trials?.length)).toBe(15);
+  expect(await page.evaluate(()=>window.__doomLab.counterfactual?.trials?.length)).toBe(31);
   await expect(page.locator('[data-arch="actions"]')).toHaveClass(/hot/);
   await expect(page.locator("#architectureFlow")).toHaveClass(/tick-pulse/);
   const pulseAnimation=await page.evaluate(()=>getComputedStyle(document.querySelector('[data-arch="actions"]')).animationName);
@@ -85,17 +91,23 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   console.log("SEMANTIC_DOOM_PROBES "+JSON.stringify(semanticProbes));
 
   await page.setViewportSize({width:390,height:844});
-  const mobileLayout=await page.evaluate(()=>{
-    const flow=document.querySelector("#architectureFlow"),env=document.querySelector('[data-arch="environment"]'),state=document.querySelector('[data-arch="state"]'),canvas=document.querySelector("#doomCanvas"),controls=document.querySelector(".control-panel"),architecture=document.querySelector(".architecture-panel");
-    const fr=flow?.getBoundingClientRect(),er=env?.getBoundingClientRect(),sr=state?.getBoundingClientRect(),cr=canvas?.getBoundingClientRect(),ctr=controls?.getBoundingClientRect(),ar=architecture?.getBoundingClientRect();
-    const offenders=[...document.querySelectorAll("body *")].map(el=>{const r=el.getBoundingClientRect();return{tag:el.tagName,id:el.id||"",className:typeof el.className==="string"?el.className:"",left:r.left,right:r.right,width:r.width}}).filter(x=>x.right>innerWidth+1||x.left<-1).sort((a,b)=>b.width-a.width).slice(0,12);
-    return{viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,flowWidth:fr?.width||0,envTop:er?.top||0,stateTop:sr?.top||0,canvasBottom:cr?.bottom||0,architectureTop:ar?.top||0,controlsTop:ctr?.top||0,offenders};
+  await page.locator("#inspectTabBtn").click();
+  const inspectMobile=await page.evaluate(()=>{
+    const flow=document.querySelector("#architectureFlow"),fr=flow?.getBoundingClientRect();
+    const offenders=[...document.querySelectorAll("#inspectTab *")].map(el=>{const r=el.getBoundingClientRect();return{tag:el.tagName,id:el.id||"",right:r.right,left:r.left,width:r.width}}).filter(x=>x.right>innerWidth+1||x.left<-1).sort((a,b)=>b.width-a.width).slice(0,12);
+    return{viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,flowWidth:fr?.width||0,offenders};
   });
-  console.log("MOBILE_LAYOUT "+JSON.stringify(mobileLayout));
-  expect(mobileLayout.scrollWidth,"overflow offenders: "+JSON.stringify(mobileLayout.offenders)).toBeLessThanOrEqual(mobileLayout.viewport+1);
-  expect(mobileLayout.flowWidth).toBeLessThanOrEqual(mobileLayout.viewport);
-  expect(mobileLayout.stateTop).toBeGreaterThan(mobileLayout.envTop);
-  expect(mobileLayout.architectureTop).toBeGreaterThanOrEqual(mobileLayout.canvasBottom);
-  expect(mobileLayout.controlsTop).toBeGreaterThan(mobileLayout.architectureTop);
+  console.log("MOBILE_INSPECT_LAYOUT "+JSON.stringify(inspectMobile));
+  expect(inspectMobile.scrollWidth,"overflow offenders: "+JSON.stringify(inspectMobile.offenders)).toBeLessThanOrEqual(inspectMobile.viewport+1);
+  expect(inspectMobile.flowWidth).toBeLessThanOrEqual(inspectMobile.viewport);
+  await page.locator("#playTabBtn").click();
+  const playMobile=await page.evaluate(()=>{
+    const canvas=document.querySelector("#doomCanvas")?.getBoundingClientRect(),play=document.querySelector("#playTab")?.getBoundingClientRect();
+    return{viewport:innerWidth,canvasWidth:canvas?.width||0,playWidth:play?.width||0,inspectHidden:document.querySelector("#inspectTab")?.hidden};
+  });
+  console.log("MOBILE_PLAY_LAYOUT "+JSON.stringify(playMobile));
+  expect(playMobile.inspectHidden).toBe(true);
+  expect(playMobile.canvasWidth).toBeGreaterThan(playMobile.viewport*.75);
+  expect(playMobile.canvasWidth).toBeLessThanOrEqual(playMobile.playWidth+1);
   if(consoleErrors.length)throw new Error("Browser errors after successful prepared-model step: "+consoleErrors.join(" | "));
 });
