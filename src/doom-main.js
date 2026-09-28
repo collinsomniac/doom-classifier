@@ -360,7 +360,7 @@ function render(){
   ui.probabilityCalibration.textContent=d?.probabilityCalibrated?("fitted · T×"+Number(d.probabilityCalibrationTemperature||1).toFixed(3)):"unverified on DOOM";
   if(d){
     const decisionObs=controller.trace.at(-1)?.observation||obs;
-    const attended=policy.q.inspectAttention?.(decisionObs,d.actionIndex,{topK:6,temporal:d.temporal})||[];
+    const attended=policy.q.inspectAttention?.(decisionObs,d.actionIndex,{topK:6,temporal:d.temporal,history:d.history})||[];
     ui.attentionCount.textContent=attended.length+" records";
     ui.attention.innerHTML=attended.length?attended.map(item=>{
       const interesting=Object.entries(item.record||{}).filter(([,value])=>typeof value==="number"&&Number.isFinite(value)&&value!==0).sort((a,b)=>Math.abs(Number(b[1]))-Math.abs(Number(a[1]))).slice(0,5);
