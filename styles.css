@@ -315,3 +315,5 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
   .lab-tab-btn{flex:1 1 0}
   #doomCanvas{max-width:100%;max-height:none}
 }
+
+.replay-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}.replay-controls select{min-width:190px;background:#0c1015;color:var(--text);border:1px solid #303946;border-radius:9px;padding:.55rem}.replay-controls button{flex:0 0 auto}

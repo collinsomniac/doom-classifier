@@ -15,7 +15,7 @@ const ui={
   boot:$("bootBtn"),prepare:$("prepareBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),runtime:$("runtimeStatus"),runtimeTitle:$("runtimeTitle"),bootStatus:$("bootStatus"),
   iwad:$("iwadInput"),iwadStatus:$("iwadStatus"),engineChip:$("engineChip"),schemaChip:$("schemaChip"),teacherChip:$("teacherChip"),policyChip:$("policyChip"),prepareStatus:$("prepareStatus"),
   profile:$("profileSelect"),applyProfile:$("applyProfileBtn"),profileHint:$("profileHint"),teacherMode:$("teacherModeSelect"),useNeural:$("useNeuralToggle"),learn:$("learnToggle"),memory:$("memoryToggle"),explore:$("exploreToggle"),
-  tune:$("tuneBtn"),eval:$("evalBtn"),evalResults:$("evalResults"),tuneSteps:$("tuneSteps"),tuneProgress:$("tuneProgress"),tuneStatus:$("tuneStatus"),tuneBadge:$("tuneBadge"),loadStarter:$("loadStarterBtn"),loadSaved:$("loadSavedBtn"),saveCheckpoint:$("saveCheckpointBtn"),exportCheckpoint:$("exportCheckpointBtn"),checkpointStatus:$("checkpointStatus"),
+  tune:$("tuneBtn"),eval:$("evalBtn"),evalResults:$("evalResults"),tuneSteps:$("tuneSteps"),tuneProgress:$("tuneProgress"),tuneStatus:$("tuneStatus"),tuneBadge:$("tuneBadge"),loadStarter:$("loadStarterBtn"),loadSaved:$("loadSavedBtn"),saveCheckpoint:$("saveCheckpointBtn"),exportCheckpoint:$("exportCheckpointBtn"),checkpointStatus:$("checkpointStatus"),publishedReplaySelect:$("publishedReplaySelect"),publishedReplayBtn:$("publishedReplayBtn"),publishedReplayStatus:$("publishedReplayStatus"),
   cfProbe:$("counterfactualProbeBtn"),cfFit:$("counterfactualFitBtn"),cfClear:$("counterfactualClearBtn"),cfTics:$("counterfactualTics"),cfBadge:$("counterfactualBadge"),cfStatus:$("counterfactualStatus"),cfResults:$("counterfactualResults"),cfExamples:$("counterfactualExamples"),cfSpread:$("counterfactualSpread"),cfPriorTop:$("counterfactualPriorTop"),cfMeasuredTop:$("counterfactualMeasuredTop"),cfTargetTop:$("counterfactualTargetTop"),
   actionMs:$("actionMs"),actionMsOut:$("actionMsOut"),manualAction:$("manualActionSelect"),manual:$("manualBtn"),manualStatus:$("manualStatus"),weaponState:$("weaponState"),
   circuit:$("decisionCircuit"),circuitActions:$("circuitActions"),circuitChosen:$("circuitChosen"),circuitRate:$("circuitRate"),circuitLatency:$("circuitLatency"),circuitState:$("circuitState"),circuitPriorTop:$("circuitPriorTop"),circuitPriorMeta:$("circuitPriorMeta"),circuitValueTop:$("circuitValueTop"),circuitValueMeta:$("circuitValueMeta"),circuitSearchTop:$("circuitSearchTop"),circuitSearchMeta:$("circuitSearchMeta"),circuitFusionMeta:$("circuitFusionMeta"),circuitOutputGlyph:$("circuitOutputGlyph"),circuitOutputLabel:$("circuitOutputLabel"),circuitOutputProb:$("circuitOutputProb"),circuitBackend:$("circuitBackend"),circuitAgreement:$("circuitAgreement"),
@@ -29,7 +29,7 @@ const ui={
 let env=null,policy=null,controller=null,hashSemantic=null;
 let engineReady=false,schemaCompiled=false,teacherReady=false,checkpointReady=false,busy=false,prepared=false,checkpointInfo=null;
 let lastArchPulseDecision=-1;
-let lastCounterfactualProbe=null,counterfactualExamples=[],counterfactualBusy=false,lastCounterfactualFit=null;
+let lastCounterfactualProbe=null,counterfactualExamples=[],counterfactualBusy=false,lastCounterfactualFit=null,publishedReplayBundle=null,replayBusy=false;
 
 function setLabTab(name,{updateHash=true}={}){
   const active=name==="inspect"?"inspect":"play";
@@ -69,6 +69,8 @@ function updateReadiness(){
   ui.prepare.disabled=lock;ui.loadModel.disabled=lock;ui.schemaCompile.disabled=lock;ui.manual.disabled=lock;ui.manualAction.disabled=lock;ui.reset.disabled=lock;ui.export.disabled=lock;
   if(ui.loadStarter)ui.loadStarter.disabled=lock;if(ui.loadSaved)ui.loadSaved.disabled=lock||!localStorage.getItem("doom-classifier-checkpoint-v1");
   if(ui.saveCheckpoint)ui.saveCheckpoint.disabled=busy||!prepared;if(ui.exportCheckpoint)ui.exportCheckpoint.disabled=busy||!prepared;
+  if(ui.publishedReplaySelect)ui.publishedReplaySelect.disabled=busy||replayBusy||!publishedReplayBundle?.runs?.length;
+  if(ui.publishedReplayBtn)ui.publishedReplayBtn.disabled=busy||replayBusy||!publishedReplayBundle?.runs?.length||!engineReady;
   const forkReady=!!env?.supportsSnapshots?.()&&!!env?.supportsExactTics?.();if(ui.cfProbe)ui.cfProbe.disabled=busy||!prepared||!forkReady;if(ui.cfTics)ui.cfTics.disabled=busy||!forkReady;if(ui.cfFit)ui.cfFit.disabled=busy||!prepared||!counterfactualExamples.length;if(ui.cfClear)ui.cfClear.disabled=busy||!counterfactualExamples.length;
   for(const element of [ui.profile,ui.applyProfile,ui.teacherMode,ui.useNeural,ui.learn,ui.memory,ui.explore,ui.tune,ui.eval,ui.tuneSteps,ui.start,ui.step])element.disabled=busy||!prepared;
   if(controller?.state==="RUNNING")ui.start.disabled=false;
@@ -446,22 +448,53 @@ async function importPortableCheckpoint(checkpoint,label="checkpoint"){
     ui.modelSelect.value="hash";ui.modelStatus.textContent="Teacher not required · loaded frozen checkpoint.";
     ui.schemaStatus.textContent="Compiled semantic schema restored from checkpoint.";
     ui.prepareStatus.textContent="READY TO PLAY · "+label+" · "+policy.q.parameterCount()+" params · teacher-free neural fast path";
-    const summary=checkpointSummary(checkpointInfo);ui.checkpointStatus.textContent=summary?(label+" loaded · quality-gated stage "+summary.stage+" · "+summary.decisions+" causal training decisions · validation "+summary.damage.toFixed(0)+" damage / "+summary.kills.toFixed(0)+" kills / return "+summary.reward.toFixed(3)+" · "+policy.q.parameterCount()+" params"):(label+" loaded · "+policy.q.parameterCount()+" params · "+policy.q.updates+" consequence updates");
+    const summary=checkpointSummary(checkpointInfo);ui.checkpointStatus.textContent=summary?(label+" loaded · "+(summary.kind==="causal"?"causal policy":"quality-gated stage "+summary.stage)+" · "+summary.decisions+" training decisions · validation "+summary.damage.toFixed(0)+" damage / "+summary.kills.toFixed(0)+" kills / return "+summary.reward.toFixed(3)+" · "+policy.q.parameterCount()+" params"):(label+" loaded · "+policy.q.parameterCount()+" params · "+policy.q.updates+" consequence updates");
     setRuntime("CHECKPOINT READY");render();
   }catch(error){ui.checkpointStatus.textContent="checkpoint load failed · "+String(error?.message||error);setRuntime("CHECKPOINT ERROR",true)}
   finally{setBusy(false)}
 }
 function checkpointSummary(build){
   if(!build)return null;
+  if(build.selection==="exact-state causal policy curriculum"||Number.isFinite(Number(build.causalSteps))){
+    const validation=build.validation||{},training=build.training||{};
+    return{
+      kind:"causal",stage:null,decisions:Number(build.causalSteps||0),
+      reward:Number(validation.reward??training.return??0),
+      damage:Number(validation.damage??training.damage??0),
+      kills:Number(validation.kills??training.kills??0)
+    };
+  }
   const stage=Number(build.selectedStage),selected=build.candidates?.find?.(x=>Number(x.stage)===stage),decisions=Number(build.trainingDecisions||stage*64||0);
   if(!Number.isFinite(stage)||!selected)return null;
-  return{stage,decisions,reward:Number(selected.reward||0),damage:Number(selected.damage||0),kills:Number(selected.kills||0)};
+  return{kind:"staged",stage,decisions,reward:Number(selected.reward||0),damage:Number(selected.damage||0),kills:Number(selected.kills||0)};
 }
 function starterCheckpointUsable(checkpoint){
-  const build=checkpoint?.build,selected=build?.candidates?.find?.(x=>Number(x.stage)===Number(build.selectedStage));
-  if(!selected)return false;
-  const reward=Number(selected.reward||0),damage=Number(selected.damage||0),kills=Number(selected.kills||0);
-  return reward>0&&(kills>=1||damage>=20);
+  const summary=checkpointSummary(checkpoint?.build);
+  return !!summary&&summary.reward>0&&(summary.kills>=1||summary.damage>=20);
+}
+async function fetchPublishedCombatReport(){
+  const response=await fetch(STARTER_MODEL_BASE+"/combat-report.json",{cache:"no-cache"});
+  if(!response.ok)throw new Error("combat report HTTP "+response.status);
+  return response.json();
+}
+async function fetchPublishedReplayBundle(){
+  const response=await fetch(STARTER_MODEL_BASE+"/combat-replays.json",{cache:"no-cache"});
+  if(!response.ok)throw new Error("combat replay HTTP "+response.status);
+  const bundle=await response.json();
+  if(!Array.isArray(bundle?.runs)||!bundle.runs.length)throw new Error("combat replay bundle is empty");
+  return bundle;
+}
+function installReplayBundle(bundle){
+  publishedReplayBundle=bundle;
+  if(ui.publishedReplaySelect){
+    ui.publishedReplaySelect.innerHTML=bundle.runs.map((run,i)=>'<option value="'+i+'">run '+(i+1)+' · '+Number(run.kills||0)+' kills · '+Number(run.damage||0)+' dmg · '+Number(run.steps||run.actions?.length||0)+' decisions</option>').join("");
+    ui.publishedReplaySelect.value="0";
+  }
+  if(ui.publishedReplayStatus){
+    const kills=bundle.runs.reduce((s,r)=>s+Number(r.kills||0),0),damage=bundle.runs.reduce((s,r)=>s+Number(r.damage||0),0);
+    ui.publishedReplayStatus.textContent="Published replay bundle · "+bundle.runs.length+" runs · "+kills+" kills · "+damage+" damage · exact "+Number(bundle.actionTics||4)+"-tic packets";
+  }
+  updateReadiness();
 }
 async function fetchStarterCheckpoint(){
   const urls=[STARTER_MODEL_BASE+"/doom-starter.json","./models/doom-starter.json"];
@@ -471,6 +504,18 @@ async function fetchStarterCheckpoint(){
       const response=await fetch(url,{cache:"no-cache"});
       if(response.ok){
         const checkpoint=await response.json();
+        if(url.includes("model-runtime")){
+          try{
+            const report=await fetchPublishedCombatReport();
+            if(report?.evaluation&&checkpoint?.build){
+              checkpoint.build.validation={
+                reward:Number(report.evaluation.totalReward||0),
+                damage:Number(report.evaluation.totalDamage||0),
+                kills:Number(report.evaluation.totalKills||0)
+              };
+            }
+          }catch{}
+        }
         if(!starterCheckpointUsable(checkpoint))throw new Error("published starter failed minimum combat-quality gate");
         return{checkpoint,url};
       }
@@ -484,7 +529,8 @@ async function loadBundledCheckpoint({silent=false}={}){
     if(!silent)ui.checkpointStatus.textContent="Fetching validated starter…";
     const {checkpoint,url}=await fetchStarterCheckpoint();
     await importPortableCheckpoint(checkpoint,"validated starter");
-    const summary=checkpointSummary(checkpointInfo);ui.checkpointStatus.textContent=(summary?("Validated starter · stage "+summary.stage+" / "+summary.decisions+" causal decisions · "+summary.damage.toFixed(0)+" damage · "+summary.kills.toFixed(0)+" kills · return "+summary.reward.toFixed(3)):"Validated starter loaded")+" · "+policy.q.parameterCount()+" params · source "+(url.includes("model-runtime")?"model-runtime snapshot":"local bundle");
+    const summary=checkpointSummary(checkpointInfo);ui.checkpointStatus.textContent=(summary?("Validated starter · "+(summary.kind==="causal"?"causal policy":"stage "+summary.stage)+" / "+summary.decisions+" decisions · "+summary.damage.toFixed(0)+" damage · "+summary.kills.toFixed(0)+" kills · return "+summary.reward.toFixed(3)):"Validated starter loaded")+" · "+policy.q.parameterCount()+" params · source "+(url.includes("model-runtime")?"model-runtime snapshot":"local bundle");
+    if(url.includes("model-runtime"))try{installReplayBundle(await fetchPublishedReplayBundle())}catch(error){if(ui.publishedReplayStatus)ui.publishedReplayStatus.textContent="Replay bundle unavailable · "+String(error?.message||error)}
     return true;
   }catch(error){
     if(!silent)ui.checkpointStatus.textContent="Validated starter unavailable · "+String(error?.message||error);
@@ -498,6 +544,36 @@ async function maybeAutoLoadStarter(){
   if(!loaded)ui.checkpointStatus.textContent="No published starter yet · use Prepare Recommended to bootstrap from the generic core.";
   return loaded;
 }
+async function replayPublishedRun(){
+  if(replayBusy||!engineReady)return;
+  try{
+    if(!publishedReplayBundle)installReplayBundle(await fetchPublishedReplayBundle());
+    const index=Math.max(0,Math.min(publishedReplayBundle.runs.length-1,Number(ui.publishedReplaySelect?.value||0))),run=publishedReplayBundle.runs[index],tics=Number(publishedReplayBundle.actionTics||4);
+    if(!run?.actions?.length)throw new Error("selected replay has no actions");
+    replayBusy=true;controller.pause();await controller.quiesce({teacher:true});updateReadiness();
+    await env.reset();policy.resetEpisode();
+    if(ui.publishedReplayStatus)ui.publishedReplayStatus.textContent="Replaying run "+(index+1)+" · 0 / "+run.actions.length;
+    let kills=0,damage=0;
+    for(let i=0;i<run.actions.length;i++){
+      const item=run.actions[i],actionId=typeof item==="string"?item:item.action,actionIndex=policy.actions.findIndex(a=>a.id===actionId);
+      const step=env.stepTics(actionId,tics),outcome=step.info?.outcome||null;
+      policy.commitActionOutcome?.({actionIndex,reward:step.reward,outcome,done:step.done});
+      kills+=Number(outcome?.playerKillDelta||0);damage+=Number(outcome?.damageDealt||0);
+      if(i%2===0||i+1===run.actions.length){
+        if(ui.publishedReplayStatus)ui.publishedReplayStatus.textContent="Replaying run "+(index+1)+" · "+(i+1)+" / "+run.actions.length+" · "+kills+" kills · "+damage+" damage";
+        render();await new Promise(resolve=>setTimeout(resolve,70));
+      }
+      if(step.done)break;
+    }
+    if(ui.publishedReplayStatus)ui.publishedReplayStatus.textContent="Replay complete · run "+(index+1)+" · "+kills+" kills · "+damage+" damage · expected "+Number(run.kills||0)+" / "+Number(run.damage||0);
+  }catch(error){
+    if(ui.publishedReplayStatus)ui.publishedReplayStatus.textContent="Replay failed · "+String(error?.message||error);
+  }finally{
+    replayBusy=false;updateReadiness();render();
+  }
+}
+ui.publishedReplayBtn?.addEventListener("click",replayPublishedRun);
+
 async function loadBrowserCheckpoint(){
   try{const raw=localStorage.getItem("doom-classifier-checkpoint-v1");if(!raw)throw new Error("no browser-saved checkpoint");await importPortableCheckpoint(JSON.parse(raw),"browser-saved checkpoint")}
   catch(error){ui.checkpointStatus.textContent="browser checkpoint load failed · "+String(error?.message||error)}
