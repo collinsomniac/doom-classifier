@@ -67,7 +67,7 @@ export class SemanticResidualPolicy{
     this.priorKlBudget=Math.max(0,Number(priorKlBudget)||0);this.valueBetaMax=Math.max(0,Number(valueBetaMax)||0);this.valueBetaSearchSteps=Math.max(1,Math.floor(valueBetaSearchSteps));this.valueTrustUpdates=Math.max(1,Math.floor(valueTrustUpdates));this.valueEpistemicBudget=clamp(Number(valueEpistemicBudget??.025),0,1);this.typedValueBlend=clamp(Number(typedValueBlend??.65),0,1);this.typedValueRidge=Math.max(1e-6,Number(typedValueRidge)||.05);
     this.criticKlExpansion=Math.max(0,Number(criticKlExpansion)||0);this.criticKlFloor=clamp(Number(criticKlFloor??.10),0,1);this.criticAgreementFloor=clamp(Number(criticAgreementFloor??.67),0,.99);this.criticSnrFloor=Math.max(0,Number(criticSnrFloor??.75));this.criticSnrTarget=Math.max(this.criticSnrFloor+1e-6,Number(criticSnrTarget??2));this.criticGapShareTarget=Math.max(1e-6,Number(criticGapShareTarget??.25));
     this.novelty=new NoveltyTracker(this.baseSize);
-    this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherGeneration=0;this.teacherPromise=null;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];this.onTeacherResult=null;this.probabilityCalibrator=new TemperatureCalibrator();
+    this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherGeneration=0;this.teacherPromise=null;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];this.onTeacherResult=null;this.probabilityCalibrator=new TemperatureCalibrator();this.actionOutcomeHistory=[];this.actionOutcomeHistoryLimit=4;
     this.setSemantic(semantic);
   }
   setSemantic(semantic){
@@ -83,13 +83,27 @@ export class SemanticResidualPolicy{
     this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;this.novelty=new NoveltyTracker(this.baseSize);
     if(this.q.setSchema&&this.q.setActions){this.q.setSchema(schema);this.q.setActions(actions)}
     else if(this.q instanceof LinearResidualQ){this.q=new LinearResidualQ(actions.length,this.featureSize)}
-    this.semantic.compile(schema,actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];this.replay=[];this.teacherReplay=[];this.nStepBuffer=[];this.probabilityCalibrator=new TemperatureCalibrator();
+    this.semantic.compile(schema,actions);this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];this.replay=[];this.teacherReplay=[];this.nStepBuffer=[];this.actionOutcomeHistory=[];this.probabilityCalibrator=new TemperatureCalibrator();
     return this;
   }
-  resetEpisode(){this.memory.reset();this.nStepBuffer=[]}
+  resetEpisode(){this.memory.reset();this.nStepBuffer=[];this.actionOutcomeHistory=[]}
+  snapshotActionOutcomeHistory(){
+    return this.actionOutcomeHistory.map(item=>({
+      actionIndex:Number(item.actionIndex),reward:Number(item.reward||0),done:!!item.done,
+      outcome:item.outcome?Object.fromEntries(Object.entries(item.outcome).filter(([,v])=>typeof v==="number"||typeof v==="boolean")):null
+    }));
+  }
+  previewActionOutcome({actionIndex,reward=0,outcome=null,done=false}={}){
+    const next=[{actionIndex:Number(actionIndex),reward:Number(reward||0),outcome,done:!!done},...this.snapshotActionOutcomeHistory()];
+    return next.slice(0,this.actionOutcomeHistoryLimit);
+  }
+  commitActionOutcome(entry){
+    this.actionOutcomeHistory=this.previewActionOutcome(entry);
+    return this.snapshotActionOutcomeHistory();
+  }
   resetLearning(){
     this.teacherGeneration++;this.teacherPromise=null;this.q.reset();this.novelty.reset();this.rng=mulberry32(this.seed);this.replayRng=mulberry32((this.seed^0x517cc1b7)>>>0);this.teacherReplayRng=mulberry32((this.seed^0xa341316c)>>>0);this.replay=[];this.teacherReplay=[];this.nStepBuffer=[];this.temperature=this.baseTemperature;
-    this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];this.probabilityCalibrator=new TemperatureCalibrator();
+    this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];this.actionOutcomeHistory=[];this.probabilityCalibrator=new TemperatureCalibrator();
   }
   exportCheckpoint(){
     if(!this.q?.exportCheckpoint)throw new Error("Residual model does not support checkpoints");
@@ -207,19 +221,19 @@ export class SemanticResidualPolicy{
     const klUtilization=budget>0?clamp(chosen.kl/budget,0,1):0,epistemicUtilization=epistemicBudget>0?clamp(chosen.epistemic/epistemicBudget,0,1):0;
     return{scores:chosen.scores,memberScores:chosen.memberScores,valueBeta:chosen.beta,priorKL:chosen.kl,valueTrust,basePriorKlBudget:baseBudget,priorKlBudget:budget,klUtilization,valueEpistemic:chosen.epistemic,valueEpistemicBudget:epistemicBudget,epistemicUtilization,valueBetaSaturated,priorProbs:prior,typedValueScores:effectiveValue,typedValueProjected:typed.projected,typedValueFit:typed.fitQuality,typedValueBlendUsed:typed.blendUsed,typedFieldCoefficients:typed.coefficients,criticTopIndex:criticTop,criticRunnerIndex:criticRunner,criticGap,criticSpread,criticGapShare,criticTopAgreement,criticMarginMean,criticMarginStd,criticMarginSnr,criticRankingConfidence,criticAuthority,criticKlGate,criticKlMultiplier};
   }
-  residualEvaluation(obs,features,temporal=null){
+  residualEvaluation(obs,features,temporal=null,history=null){
     if(this.q.scoreStatsObservation){
-      const raw=this.q.scoreStatsObservation(obs,{temporal});
+      const raw=this.q.scoreStatsObservation(obs,{temporal,history});
       if(raw.semanticScores&&raw.valueScores){
         const fused=this.fusePriorValue(raw.semanticScores,raw.valueScores,raw.valueMemberScores,{temperature:this.temperature});
         return{...raw,...fused,rawScores:raw.scores};
       }
       return raw;
     }
-    const scores=this.q.scoresObservation?this.q.scoresObservation(obs,{temporal}):this.q.scores(features);
+    const scores=this.q.scoresObservation?this.q.scoresObservation(obs,{temporal,history}):this.q.scores(features);
     return{scores,memberScores:null,valueBeta:0,priorKL:0,valueTrust:0,priorKlBudget:0,klUtilization:0,valueBetaSaturated:false};
   }
-  residualScores(obs,features,temporal=null){return this.residualEvaluation(obs,features,temporal).scores}
+  residualScores(obs,features,temporal=null,history=null){return this.residualEvaluation(obs,features,temporal,history).scores}
   async semanticScores(obs,semantic=this.semantic){
     const t=performance.now(),scores=await semantic.score(obs);this.semanticCalls++;return{scores,ms:performance.now()-t};
   }
@@ -336,8 +350,8 @@ export class SemanticResidualPolicy{
   async awaitTeacher(){return this.teacherPromise?this.teacherPromise:null}
 
   async decide(obs,{useResidual=true,memory=true,explore=false}={}){
-    const t0=performance.now(),encoded=this.encode(obs,memory,true),novelty=this.novelty.observe(encoded.base);
-    const residualStart=performance.now(),residualEval=this.residualEvaluation(obs,encoded.features,encoded.temporal);let q=residualEval.scores,residualMs=performance.now()-residualStart;
+    const t0=performance.now(),encoded=this.encode(obs,memory,true),novelty=this.novelty.observe(encoded.base),history=this.snapshotActionOutcomeHistory();
+    const residualStart=performance.now(),residualEval=this.residualEvaluation(obs,encoded.features,encoded.temporal,history);let q=residualEval.scores,residualMs=performance.now()-residualStart;
     let activeFusion=residualEval,epistemic=ensembleDisagreement(residualEval.memberScores,this.temperature);
     let sem=new Array(this.actions.length).fill(0),semanticMs=0,teacherUsed=false,semanticUsed=false,logits;
     const mode=useResidual?this.inferenceMode:"hybrid";
@@ -367,7 +381,7 @@ export class SemanticResidualPolicy{
     }
     const stats=confidenceStats(probs);this.decisionCount++;
     return{
-      actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:logits,semanticPriorScores:activeFusion.semanticScores||residualEval.semanticScores||null,valueScores:residualEval.valueScores||null,features:encoded.features,temporal:encoded.temporal,
+      actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:logits,semanticPriorScores:activeFusion.semanticScores||residualEval.semanticScores||null,valueScores:residualEval.valueScores||null,features:encoded.features,temporal:encoded.temporal,history,
       valueBeta:Number(activeFusion.valueBeta||0),priorKL:Number(activeFusion.priorKL||0),valueTrust:Number(activeFusion.valueTrust||0),basePriorKlBudget:Number(activeFusion.basePriorKlBudget||0),priorKlBudget:Number(activeFusion.priorKlBudget||0),klUtilization:Number(activeFusion.klUtilization||0),valueEpistemic:Number(activeFusion.valueEpistemic||0),valueEpistemicBudget:Number(activeFusion.valueEpistemicBudget??this.valueEpistemicBudget),epistemicUtilization:Number(activeFusion.epistemicUtilization||0),valueBetaSaturated:!!activeFusion.valueBetaSaturated,typedValueScores:activeFusion.typedValueScores||null,typedValueFit:Number(activeFusion.typedValueFit||0),typedValueBlendUsed:Number(activeFusion.typedValueBlendUsed||0),typedFieldCoefficients:activeFusion.typedFieldCoefficients||null,criticTopIndex:Number(activeFusion.criticTopIndex??-1),criticRunnerIndex:Number(activeFusion.criticRunnerIndex??-1),criticGap:Number(activeFusion.criticGap||0),criticSpread:Number(activeFusion.criticSpread||0),criticGapShare:Number(activeFusion.criticGapShare||0),criticTopAgreement:Number(activeFusion.criticTopAgreement||0),criticMarginMean:Number(activeFusion.criticMarginMean||0),criticMarginStd:Number(activeFusion.criticMarginStd||0),criticMarginSnr:Number(activeFusion.criticMarginSnr||0),criticRankingConfidence:Number(activeFusion.criticRankingConfidence||0),criticAuthority:Number(activeFusion.criticAuthority||0),criticKlGate:Number(activeFusion.criticKlGate??1),criticKlMultiplier:Number(activeFusion.criticKlMultiplier||1),
       probabilityCalibrated:!!this.probabilityCalibrator?.fitted,probabilityCalibrationTemperature:Number(this.probabilityCalibrator?.temperature||1),probabilityTemperature,
       uncertainty:{...stats,novelty,epistemic},latencyMs:performance.now()-t0,semanticLatencyMs:semanticMs,residualLatencyMs:residualMs,
