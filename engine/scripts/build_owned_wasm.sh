@@ -19,7 +19,7 @@ git -C "${WORK}/upstream" checkout --detach FETCH_HEAD
 git -C "${WORK}/upstream" submodule update --init --recursive --depth 1
 
 python3 "${ROOT}/engine/scripts/instrument_engine.py" "${WORK}/upstream/vendor/chocolate-doom"
-git -C "${WORK}/upstream" diff -- vendor/chocolate-doom/src/doom/browser_doom_bridge.c vendor/chocolate-doom/src/doom/p_inter.c vendor/chocolate-doom/src/doom/g_game.c > "${DIST}/telemetry.patch"
+git -C "${WORK}/upstream" diff -- vendor/chocolate-doom/src/doom/browser_doom_bridge.c vendor/chocolate-doom/src/doom/p_inter.c vendor/chocolate-doom/src/doom/g_game.c vendor/chocolate-doom/src/d_loop.c > "${DIST}/telemetry.patch"
 
 (
   cd "${WORK}/upstream"

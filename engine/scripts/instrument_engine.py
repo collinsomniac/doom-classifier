@@ -32,7 +32,8 @@ def main() -> None:
     bridge = root / "src/doom/browser_doom_bridge.c"
     p_inter = root / "src/doom/p_inter.c"
     g_game = root / "src/doom/g_game.c"
-    for path in (bridge, p_inter, g_game):
+    d_loop = root / "src/d_loop.c"
+    for path in (bridge, p_inter, g_game, d_loop):
         if not path.is_file():
             raise SystemExit(f"missing expected source file: {path}")
 
@@ -120,6 +121,20 @@ static void PromptFPS_ResetEvents(void)
 
 extern void G_PromptFPSSaveSnapshot(void);
 extern void G_PromptFPSLoadSnapshot(void);
+extern int D_PromptFPSStepTics(int count);
+
+EMSCRIPTEN_KEEPALIVE int PromptFPS_StepTics(int controls, int count)
+{
+    int ran;
+    if (count < 0)
+        count = 0;
+    if (count > 256)
+        count = 256;
+    PromptFPS_SetControls(controls);
+    ran = D_PromptFPSStepTics(count);
+    PromptFPS_SetControls(0);
+    return ran;
+}
 
 EMSCRIPTEN_KEEPALIVE int PromptFPS_SaveSnapshot(void)
 {
@@ -419,6 +434,33 @@ void G_PromptFPSLoadSnapshot(void)
         "    PromptFPS_RecordLevelComplete(secretexit ? 1 : 0);\n"
         "#endif\n",
         "level completion recorder",
+    )
+
+    insert_before_unique_line(
+        d_loop,
+        "void D_RegisterLoopCallbacks",
+        """#if defined(__EMSCRIPTEN__)
+int D_PromptFPSStepTics(int count)
+{
+    boolean old_singletics = singletics;
+    int i;
+
+    if (count < 0)
+        count = 0;
+    if (count > 256)
+        count = 256;
+
+    singletics = true;
+    for (i = 0; i < count; ++i)
+        TryRunTics();
+    singletics = old_singletics;
+
+    return count;
+}
+#endif
+
+""",
+        "exact tic stepping hook",
     )
 
     print("doom-classifier telemetry instrumentation applied")

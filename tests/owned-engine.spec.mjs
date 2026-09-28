@@ -57,7 +57,22 @@ test("owned Chocolate Doom runtime exposes causal event counters",async({page})=
     const reset={...(env.readRaw().events||{})};
     env.setActionMs(110);
 
-    return{runtime:env.runtime,initial,observed,reset,pulses,lastOutcome,snapshotSupported,snapshotBefore,snapshotRestored};
+    const exactTicSupported=env.supportsExactTics();
+    const exactSnapshot=env.saveSnapshot();
+    const runExact=()=>{
+      env.restoreSnapshot(exactSnapshot);
+      const beforeExact=env.readRaw(),stepExact=env.stepTics("fire",6),afterExact=env.readRaw();
+      return{
+        delta:Number(afterExact.engine_state?.gametic||0)-Number(beforeExact.engine_state?.gametic||0),
+        state:simplify(afterExact),
+        reward:Number(stepExact.reward||0),
+        outcome:stepExact.info?.outcome||null
+      };
+    };
+    const exactA=runExact(),exactB=runExact();
+    env.restoreSnapshot(exactSnapshot);
+
+    return{runtime:env.runtime,initial,observed,reset,pulses,lastOutcome,snapshotSupported,snapshotBefore,snapshotRestored,exactTicSupported,exactA,exactB};
   });
 
   expect(result.runtime.owned).toBe(true);
@@ -75,6 +90,12 @@ test("owned Chocolate Doom runtime exposes causal event counters",async({page})=
   expect(result.lastOutcome?.reward).toBeGreaterThan(0);
   expect(result.snapshotSupported).toBe(true);
   expect(result.snapshotRestored).toEqual(result.snapshotBefore);
+  expect(result.exactTicSupported).toBe(true);
+  expect(result.exactA.delta).toBe(6);
+  expect(result.exactB.delta).toBe(6);
+  expect(result.exactB.state).toEqual(result.exactA.state);
+  expect(result.exactB.reward).toBe(result.exactA.reward);
+  expect(result.exactB.outcome).toEqual(result.exactA.outcome);
   if(consoleErrors.length)throw new Error(consoleErrors.join(" | "));
 
   console.log("OWNED_ENGINE_ABI "+JSON.stringify(result));

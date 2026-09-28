@@ -204,6 +204,16 @@ export class DoomWasmArena{
   supportsSnapshots(){
     return typeof this.module?._PromptFPS_SaveSnapshot==="function"&&typeof this.module?._PromptFPS_RestoreSnapshot==="function";
   }
+  supportsExactTics(){return typeof this.module?._PromptFPS_StepTics==="function"}
+  stepTics(actionId,tics=4){
+    if(!this.supportsExactTics())throw new Error("This DOOM runtime does not expose exact tic stepping");
+    if(!(actionId in this.actionMasks))throw new Error("Unsupported Doom action: "+actionId);
+    const before=this.lastRaw||this.readRaw(),count=Math.max(0,Math.min(256,Math.floor(Number(tics)||0)));
+    const ran=Number(this.module.ccall("PromptFPS_StepTics","number",["number","number"],[this.actionMasks[actionId],count])||0);
+    const after=this.readRaw(),exploration=this.commitExploration(after),outcome=this.outcome(before,after,{exploration});
+    this.lastHostileHpLoss=outcome.hostileHpLoss;this.lastNativeEvents=nativeEventDeltas(before,after);this.lastOutcome=outcome;this.lastRaw=after;this.lastObservation=this.flatten(after);
+    return{observation:this.lastObservation,reward:outcome.reward,done:outcome.dead||outcome.levelCompleted,info:{raw:after,outcome,engine:after.engine||"Chocolate Doom",exactTics:ran}};
+  }
   saveSnapshot(){
     if(!this.supportsSnapshots())throw new Error("DOOM runtime does not support counterfactual snapshots");
     const ok=this.module.ccall("PromptFPS_SaveSnapshot","number",[],[]);
