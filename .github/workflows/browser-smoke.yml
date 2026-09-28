@@ -10,6 +10,7 @@ on:
       - src/core/**
       - src/model-adapters/**
       - tests/doom-browser.spec.mjs
+      - tests/causal-starter-load.spec.mjs
       - .github/workflows/browser-smoke.yml
   workflow_dispatch:
 
@@ -38,4 +39,4 @@ jobs:
           python3 -m http.server 8000 --bind 127.0.0.1 > /tmp/doom-classifier-http.log 2>&1 &
           echo $! > /tmp/doom-classifier-http.pid
       - name: Boot real DOOM in Chromium
-        run: npx playwright test tests/doom-browser.spec.mjs --reporter=line
+        run: npx playwright test tests/doom-browser.spec.mjs tests/causal-starter-load.spec.mjs --reporter=line
