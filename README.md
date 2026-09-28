@@ -26,7 +26,7 @@ A manual primitive tester is also available after engine boot so FIRE/movement c
 
 ## Current fast controller
 
-Current model: **`SchemaSemanticValueSetNet`**, **7,316 trainable parameters**.
+Current model: **`SchemaSemanticValueSetNet`**, **7,971 trainable parameters**.
 
 The controller contains:
 
@@ -109,7 +109,7 @@ Unattributed hostile HP loss and vanilla intermission kill count remain visible 
 
 Latest GitHub Actions CPU sample, 768 structured records:
 
-- parameters: **7,316**
+- parameters: **7,971**
 - p50: **~7.45 ms**
 - p95: **~9.82 ms**
 
