@@ -439,12 +439,12 @@ async function importPortableCheckpoint(checkpoint,label="checkpoint"){
   try{
     if(policy.semantic&&policy.semantic!==hashSemantic&&policy.semantic?.dispose)await policy.semantic.dispose().catch(()=>{});
     policy.setSemantic(hashSemantic);teacherReady=false;
-    policy.importCheckpoint(checkpoint);schemaCompiled=true;checkpointReady=true;checkpointInfo=checkpoint.build||null;
+    const imported=policy.importCheckpoint(checkpoint,{schema:env.schema,actions:env.actions});schemaCompiled=true;checkpointReady=true;checkpointInfo=checkpoint.build||null;checkpointInfo={...(checkpointInfo||{}),migrated:!!imported?.migrated,checkpointActions:Number(imported?.checkpointActions||policy.actions.length),runtimeActions:Number(imported?.runtimeActions||policy.actions.length)};
     await controller.reset({learning:false});applyProfile("frozen");ui.profile.value="frozen";
     ui.modelSelect.value="hash";ui.modelStatus.textContent="Teacher not required · loaded frozen checkpoint.";
     ui.schemaStatus.textContent="Compiled semantic schema restored from checkpoint.";
     ui.prepareStatus.textContent="READY TO PLAY · "+label+" · "+policy.q.parameterCount()+" params · teacher-free neural fast path";
-    const summary=checkpointSummary(checkpointInfo);ui.checkpointStatus.textContent=summary?(label+" loaded · quality-gated stage "+summary.stage+" · "+summary.decisions+" causal training decisions · validation "+summary.damage.toFixed(0)+" damage / "+summary.kills.toFixed(0)+" kills / return "+summary.reward.toFixed(3)+" · "+policy.q.parameterCount()+" params"):(label+" loaded · "+policy.q.parameterCount()+" params · "+policy.q.updates+" consequence updates");
+    const summary=checkpointSummary(checkpointInfo),migration=checkpointInfo?.migrated?(" · migrated "+checkpointInfo.checkpointActions+"→"+checkpointInfo.runtimeActions+" typed actions; calibration reset"):"";ui.checkpointStatus.textContent=(summary?(label+" loaded · quality-gated stage "+summary.stage+" · "+summary.decisions+" causal training decisions · validation "+summary.damage.toFixed(0)+" damage / "+summary.kills.toFixed(0)+" kills / return "+summary.reward.toFixed(3)+" · "+policy.q.parameterCount()+" params"):(label+" loaded · "+policy.q.parameterCount()+" params · "+policy.q.updates+" consequence updates"))+migration;
     setRuntime("CHECKPOINT READY");render();
   }catch(error){ui.checkpointStatus.textContent="checkpoint load failed · "+String(error?.message||error);setRuntime("CHECKPOINT ERROR",true)}
   finally{setBusy(false)}
