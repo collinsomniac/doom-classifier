@@ -321,10 +321,10 @@ function fitCounterfactualTargets(){
   if(!prepared||!counterfactualExamples.length)return;
   controller.pause();setBusy(true);
   try{
-    const teacherBefore=policy.teacherCalls,result=policy.fitDecisionDistributions(counterfactualExamples,{ridge:.04,refineSteps:2,strength:.04});
+    const teacherBefore=policy.teacherCalls,result=policy.fitCounterfactualValueDistributions(counterfactualExamples,{steps:10,strength:.10});
     if(!result)throw new Error("No valid counterfactual targets to fit");
     lastCounterfactualFit={...result,t:Date.now(),examples:counterfactualExamples.length};
-    ui.cfStatus.textContent="MEASURED TARGET FIT · "+counterfactualExamples.length+" states · "+Number(result.rows||0)+" action rows · "+Number(result.refineSteps||0)+" refinement passes · teacher calls "+(policy.teacherCalls-teacherBefore);
+    ui.cfStatus.textContent="MEASURED VALUE FIT · "+counterfactualExamples.length+" states · "+Number(result.rows||0)+" action rows · "+Number(result.steps||0)+" critic passes · semantic prior protected · teacher calls "+(policy.teacherCalls-teacherBefore);
     checkpointReady=false;checkpointInfo=null;setRuntime("COUNTERFACTUAL FIT · FROZEN READY");
   }catch(error){ui.cfStatus.textContent="counterfactual fit failed · "+String(error?.message||error)}
   finally{setBusy(false);render()}
