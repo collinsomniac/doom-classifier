@@ -4,6 +4,12 @@
 <body><main class="shell">
 <header class="hero"><div><p class="eyebrow">GENERIC TYPED DECISION LEARNER / DOOM ENVIRONMENT ADAPTER / BROWSER FINE-TUNE</p><h1>DOOM Neural Decision Lab</h1><p class="lede">A task-agnostic structured-state policy learns typed decisions from semantic priors and real consequences. DOOM is the current environment adapter—not the architecture itself.</p></div><div class="status-pill"><span id="statusDot"></span><span id="runtimeStatus">ENGINE OFFLINE</span></div></header>
 
+<nav class="lab-tabs" aria-label="lab views">
+  <button id="playTabBtn" class="lab-tab-btn active" type="button" data-tab-target="play" aria-selected="true">Play</button>
+  <button id="inspectTabBtn" class="lab-tab-btn" type="button" data-tab-target="inspect" aria-selected="false">Inspect / Train</button>
+</nav>
+
+<div id="playTab" class="lab-tab-panel active" data-tab-panel="play">
 <section class="workflow panel">
   <article class="workflow-step">
     <div class="step-number">1</div><div class="step-body"><p class="kicker">ENGINE</p><h2>Boot real Doom mechanics</h2>
@@ -52,7 +58,15 @@
     <div id="circuitActions" class="circuit-actions" aria-label="typed action outputs"></div>
     <div class="circuit-footer"><span id="circuitBackend">engine WASM · fast core local-js</span><span id="circuitAgreement">prior / critic / fused waiting</span></div>
   </div>
-  <canvas id="doomCanvas" tabindex="0" width="640" height="400"></canvas>
+  <div class="doom-stage"><canvas id="doomCanvas" tabindex="0" width="640" height="400"></canvas></div>
+</article>
+</section>
+</div>
+
+<div id="inspectTab" class="lab-tab-panel" data-tab-panel="inspect" hidden>
+<section class="grid lab-grid inspect-grid">
+<article class="panel engine-controls-panel">
+  <div class="panel-head"><div><p class="kicker">ENGINE CONTROLS</p><h2>Runtime + primitive verification</h2></div></div>
   <div class="model-status" id="bootStatus">Engine has not been loaded.</div>
   <label class="range-row">primitive hold interval <input id="actionMs" type="range" min="60" max="250" value="110" /><output id="actionMsOut">110 ms</output></label>
   <div class="manual-row"><select id="manualActionSelect" disabled></select><button id="manualBtn" class="secondary" disabled>Test primitive</button><span id="manualStatus" class="model-status">Use this to verify FIRE/movement without involving the model.</span></div>
@@ -195,5 +209,6 @@
 </details>
 
 <section class="panel log-panel"><div class="panel-head"><div><p class="kicker">TRACE</p><h2>Recent decisions</h2></div><button id="exportBtn" class="secondary" disabled>Export trace</button></div><pre id="eventLog">Boot the engine to begin.</pre></section>
+</div>
 <footer><span>environment adapter → structured state → semantic prior + learned value → KL fusion → typed action</span><span><a href="./docs/results.md">results</a> · <a href="./docs/architecture.md">architecture</a> · <a href="./synthetic.html">legacy synthetic benchmark</a></span></footer>
 </main><script type="module" src="./src/doom-main.js"></script></body></html>

@@ -8,9 +8,13 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   await page.waitForFunction(()=>{const text=document.querySelector("#runtimeStatus")?.textContent;return text==="ENGINE READY"||text==="BOOT FAILED"},null,{timeout:90000});
   if((await page.locator("#runtimeStatus").textContent())!=="ENGINE READY")throw new Error("DOOM boot failed. "+(await page.locator("#bootStatus").textContent()));
   await expect(page.locator("#stateTable .state-row")).toHaveCount(25);
-  await expect(page.locator("#architectureFlow")).toBeVisible();
   await expect(page.locator("#decisionCircuit")).toBeVisible();
+  await expect(page.locator("#doomCanvas")).toBeVisible();
+  await expect(page.locator("#architectureFlow")).toBeHidden();
+  await page.locator("#inspectTabBtn").click();
+  await expect(page.locator("#architectureFlow")).toBeVisible();
   await expect(page.locator('[data-arch="environment"]')).toHaveClass(/active/);
+  await page.locator("#playTabBtn").click();
   expect(await page.evaluate(()=>window.__doomLab.env.runtime?.owned)).toBe(true);
   await expect(page.locator("#weaponState")).toContainText("pistol");
   await expect(page.locator("#manualActionSelect")).toHaveValue("fire");
@@ -34,8 +38,10 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   if(prepare.includes("failed"))throw new Error("Preparation failed: "+prepare+" browser="+consoleErrors.join(" | "));
   await expect(page.locator("#schemaChip")).toContainText("schema compiled");await expect(page.locator("#teacherChip")).toContainText("teacher loaded");await expect(page.locator("#policyChip")).toContainText("ready to play");
   await expect(page.locator("#backboneName")).toContainText("params");
+  await page.locator("#inspectTabBtn").click();
   await expect(page.locator("#teacherTranscript .teacher-item").first()).toBeVisible();
   await expect(page.locator('[data-arch="teacher"]')).toHaveClass(/active/);
+  await page.locator("#playTabBtn").click();
   const prepareFit=await page.evaluate(()=>window.__doomLab.policy.lastTeacherResult);console.log("TEACHER_BOOTSTRAP_FIT "+JSON.stringify(prepareFit));
   expect(Number(prepareFit?.distillation?.kl)).toBeLessThan(.12);
 
@@ -47,6 +53,7 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   await expect(page.locator("#circuitValueTop")).not.toHaveText("—");
   await expect(page.locator("#circuitActions .circuit-action")).toHaveCount(15);
   await expect(page.locator("#circuitActions .circuit-action.chosen")).toHaveCount(1);
+  await page.locator("#inspectTabBtn").click();
   await expect(page.locator("#attentionList .attention-row").first()).toBeVisible();
   await expect(page.locator("#trainingOutput")).toContainText("s0001");
   expect(await page.evaluate(()=>window.__doomLab.env.supportsSnapshots()&&window.__doomLab.env.supportsExactTics())).toBe(true);
@@ -85,17 +92,29 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   console.log("SEMANTIC_DOOM_PROBES "+JSON.stringify(semanticProbes));
 
   await page.setViewportSize({width:390,height:844});
-  const mobileLayout=await page.evaluate(()=>{
-    const flow=document.querySelector("#architectureFlow"),env=document.querySelector('[data-arch="environment"]'),state=document.querySelector('[data-arch="state"]'),canvas=document.querySelector("#doomCanvas"),controls=document.querySelector(".control-panel"),architecture=document.querySelector(".architecture-panel");
-    const fr=flow?.getBoundingClientRect(),er=env?.getBoundingClientRect(),sr=state?.getBoundingClientRect(),cr=canvas?.getBoundingClientRect(),ctr=controls?.getBoundingClientRect(),ar=architecture?.getBoundingClientRect();
-    const offenders=[...document.querySelectorAll("body *")].map(el=>{const r=el.getBoundingClientRect();return{tag:el.tagName,id:el.id||"",className:typeof el.className==="string"?el.className:"",left:r.left,right:r.right,width:r.width}}).filter(x=>x.right>innerWidth+1||x.left<-1).sort((a,b)=>b.width-a.width).slice(0,12);
-    return{viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,flowWidth:fr?.width||0,envTop:er?.top||0,stateTop:sr?.top||0,canvasBottom:cr?.bottom||0,architectureTop:ar?.top||0,controlsTop:ctr?.top||0,offenders};
+  await page.locator("#playTabBtn").click();
+  const playLayout=await page.evaluate(()=>{
+    const canvas=document.querySelector("#doomCanvas"),cr=canvas?.getBoundingClientRect();
+    const offenders=[...document.querySelectorAll("body *")].filter(el=>{const s=getComputedStyle(el);return s.display!=="none"&&s.visibility!=="hidden"}).map(el=>{const r=el.getBoundingClientRect();return{tag:el.tagName,id:el.id||"",className:typeof el.className==="string"?el.className:"",left:r.left,right:r.right,width:r.width}}).filter(x=>x.right>innerWidth+1||x.left<-1).sort((a,b)=>b.width-a.width).slice(0,12);
+    return{viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,canvasWidth:cr?.width||0,canvasHeight:cr?.height||0,offenders};
   });
-  console.log("MOBILE_LAYOUT "+JSON.stringify(mobileLayout));
-  expect(mobileLayout.scrollWidth,"overflow offenders: "+JSON.stringify(mobileLayout.offenders)).toBeLessThanOrEqual(mobileLayout.viewport+1);
-  expect(mobileLayout.flowWidth).toBeLessThanOrEqual(mobileLayout.viewport);
-  expect(mobileLayout.stateTop).toBeGreaterThan(mobileLayout.envTop);
-  expect(mobileLayout.architectureTop).toBeGreaterThanOrEqual(mobileLayout.canvasBottom);
-  expect(mobileLayout.controlsTop).toBeGreaterThan(mobileLayout.architectureTop);
+  console.log("MOBILE_PLAY_LAYOUT "+JSON.stringify(playLayout));
+  expect(playLayout.scrollWidth,"overflow offenders: "+JSON.stringify(playLayout.offenders)).toBeLessThanOrEqual(playLayout.viewport+1);
+  expect(playLayout.canvasWidth).toBeLessThanOrEqual(playLayout.viewport);
+  expect(playLayout.canvasWidth/playLayout.canvasHeight).toBeCloseTo(1.6,1);
+
+  await page.locator("#inspectTabBtn").click();
+  const inspectLayout=await page.evaluate(()=>{
+    const flow=document.querySelector("#architectureFlow"),env=document.querySelector('[data-arch="environment"]'),state=document.querySelector('[data-arch="state"]'),controls=document.querySelector(".control-panel"),architecture=document.querySelector(".architecture-panel");
+    const fr=flow?.getBoundingClientRect(),er=env?.getBoundingClientRect(),sr=state?.getBoundingClientRect(),ctr=controls?.getBoundingClientRect(),ar=architecture?.getBoundingClientRect();
+    const offenders=[...document.querySelectorAll("body *")].filter(el=>{const s=getComputedStyle(el);return s.display!=="none"&&s.visibility!=="hidden"}).map(el=>{const r=el.getBoundingClientRect();return{tag:el.tagName,id:el.id||"",className:typeof el.className==="string"?el.className:"",left:r.left,right:r.right,width:r.width}}).filter(x=>x.right>innerWidth+1||x.left<-1).sort((a,b)=>b.width-a.width).slice(0,12);
+    return{viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,flowWidth:fr?.width||0,envTop:er?.top||0,stateTop:sr?.top||0,architectureTop:ar?.top||0,controlsTop:ctr?.top||0,offenders};
+  });
+  console.log("MOBILE_INSPECT_LAYOUT "+JSON.stringify(inspectLayout));
+  expect(inspectLayout.scrollWidth,"overflow offenders: "+JSON.stringify(inspectLayout.offenders)).toBeLessThanOrEqual(inspectLayout.viewport+1);
+  expect(inspectLayout.flowWidth).toBeLessThanOrEqual(inspectLayout.viewport);
+  expect(inspectLayout.stateTop).toBeGreaterThan(inspectLayout.envTop);
+  expect(inspectLayout.controlsTop).toBeGreaterThanOrEqual(0);
+  expect(inspectLayout.architectureTop).toBeGreaterThan(inspectLayout.controlsTop);
   if(consoleErrors.length)throw new Error("Browser errors after successful prepared-model step: "+consoleErrors.join(" | "));
 });

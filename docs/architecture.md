@@ -54,7 +54,7 @@ No language-tokenization pass is required on ordinary neural-only ticks.
 
 ## Fast model: SchemaSemanticValueSetNet
 
-Current trainable parameter count: **7,316**.
+Current trainable parameter count: **7,971**.
 
 Model size is independent of record count and candidate-action count.
 
@@ -76,11 +76,13 @@ Declared scalar fields modulate their compiled field representations.
 
 The objective itself contributes to the compiled global representation.
 
-### Temporal state
+### Temporal / causal state
 
-A separate learned channel encodes recent normalized scalar deltas. Temporal information is therefore distinguishable from instantaneous values rather than silently concatenated.
+A separate learned channel encodes recent normalized scalar deltas. The same fixed-width channel now also receives a decayed **action → observed consequence trace** containing the previous typed action, reward, terminal flag, and numeric/boolean outcome facts.
 
-Current limitation: variable records are not yet identity-tracked through time.
+This is deliberately generic. It lets identical instantaneous states score differently after different recent actions—for example, repeated motion with no useful consequence versus an action followed by positive progress—without a game-specific anti-loop rule and without increasing parameter count.
+
+This is an intermediate recurrence mechanism, not the final learned belief state. Variable records are still not identity-tracked through time and the trace itself is not yet a trainable recurrent latent.
 
 ### Variable collections
 
@@ -119,11 +121,16 @@ A candidate may contain:
 - optional semantic vector;
 - numeric/categorical `params` governed by `schema.actionFields`.
 
-The DOOM harness uses this to represent compound literal controls such as `strafe_left + fire` as:
+The DOOM harness now exposes four orthogonal semantic axes:
 
-`{ strafe_left: 1, fire: 1, ... }`
+- movement: hold / forward / backward / strafe left / strafe right;
+- view: keep heading / turn left / turn right;
+- trigger: hold fire / fire;
+- interaction: no use / use.
 
-Thus related candidates share primitive structure even though the final decoder still evaluates coherent compound actions.
+The literal button facts remain attached to every action for actuation and diagnostics. A compound packet such as `strafe_left + fire` therefore shares the same `trigger=fire` representation as every other firing packet while retaining its distinct movement choice.
+
+This is closer to a Jev-style decomposed decision interface than the earlier eight independent button booleans, although the current fast core still evaluates the finite joint candidates before typed projection.
 
 This generalizes to coordinates, actuator strengths, bids, thresholds, tool arguments, route candidates, etc.
 
@@ -355,12 +362,85 @@ Disallowed responsibility:
 
 Latest CI CPU stress sample:
 
-- 7,316 trainable parameters;
+- 7,971 trainable parameters;
 - 768 variable records;
 - p50 ~7.45 ms;
 - p95 ~9.82 ms.
 
 Action-cardinality scaling remains parameter-count invariant.
+
+## Why the current policy can look non-player-like
+
+The repeated frozen starter gate exposed a structural failure rather than a simple reward-scale problem. On the latest pre-change run, the semantic baseline produced useful combat in only one of three frozen rollouts; the other two collapsed to `turn_right`. After staged reward training, repeated rollouts collapsed mostly to `forward` with zero combat.
+
+The common pattern is **motor-mode stickiness**. The current critic primarily learns values for complete joint actions. Typed structure is projected back into those scores after the fact, so an easy-to-reinforce exact action can become a stable attractor even when the underlying semantic dimensions should be changing independently.
+
+The next core should invert that relationship.
+
+## Proposed next core: recurrent typed-decision model
+
+The target fast architecture is:
+
+`structured records → semantic set encoder → recurrent belief state h_t → parallel typed option heads → constrained composition → literal actuator packet`
+
+### 1. Semantic set encoder
+
+Keep the schema-compiled scalar and record encoders, but move from a single mean/max summary toward a small learned slot bank. Slots should preserve several simultaneously relevant concepts—threat, resource, traversable space, interaction candidate—without baking those names into the core. The slots are learned from schema semantics and consequences rather than hard-coded game categories.
+
+### 2. Learned recurrent belief state
+
+Replace the hand-built scalar delta memory with a tiny recurrent state, e.g. a GRU-style state in the 32–96 dimensional range:
+
+`h_t = GRU(h_(t-1), encoded_state_t, previous_typed_action, observed_consequence_t)`
+
+The important addition is the action/outcome pair. The model must be able to represent not only “what is true now?” but “what did I just try, and what changed because of it?”
+
+The causal trace implemented in the current branch is the low-risk precursor to this learned state.
+
+### 3. Parallel typed option heads
+
+Treat each declared control axis/question as a native output head, not merely as metadata attached to a joint action classifier. For DOOM:
+
+- movement;
+- view;
+- trigger;
+- interaction.
+
+Each option is still represented semantically at request time, so the architecture remains useful for different schemas. All heads share the same belief state and run in one forward pass.
+
+### 4. Small interaction/composition layer
+
+Independent axes are not perfectly independent. Add a deliberately low-rank interaction term between chosen axis options, then compose only actuator-valid packets. This captures synergies such as “move + fire” without requiring the network to relearn every combination as an unrelated class.
+
+### 5. Multi-horizon consequence prediction
+
+A single scalar Q target is too easy to game with locally repetitive behavior. Predict several consequence summaries/horizons from the same latent:
+
+- immediate reward/event distribution;
+- short-horizon return;
+- longer-horizon return;
+- successor latent / state-change prediction.
+
+This gives the hidden state pressure to encode what actions *do*, not merely which button recently correlated with reward.
+
+### 6. Same-state causal supervision
+
+Use the owned engine snapshot/fork mechanism as a training oracle on selected states. Counterfactual rollouts should supervise the typed option heads with proper distributions and train the consequence model against measured successor differences. These probes are expensive training-time evidence and disappear from the fast frozen path.
+
+### 7. Calibrated autonomy
+
+Keep ensemble disagreement, but calibrate confidence against **decision regret**: when the model reports high confidence, the chosen composed action should rarely be materially worse than the measured alternatives. This is more useful than softmax sharpness alone.
+
+### 8. Compute placement
+
+The intended deployment split is:
+
+- environment and deterministic simulation: WASM;
+- tiny recurrent control core: whichever of JS/WASM-SIMD/WebGPU benchmarks fastest for its size;
+- schema compiler / larger Transformers.js teacher: WebGPU where available;
+- browser visualization: GPU-rendered but observational only.
+
+The fast core should not be moved to WebGPU merely for architectural symmetry; at very small matrix sizes dispatch/copy overhead can dominate.
 
 ## Architectural limitations / next work
 
