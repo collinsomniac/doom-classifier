@@ -188,11 +188,24 @@ export class NeuralSetResidualQ{
     this.compiledTemporal=(schema.fields||[]).map(field=>({field,valueSparse:compileSparse("recent change in "+descriptor(field),this.hashDim,1),semanticDense:projectSemanticVector(field.semanticVector,this.hashDim)}));this.compiledTemporalPrefix=compileSparse("recent temporal state change",this.hashDim,.2);
     this.compiledCollections=(schema.collections||[]).map(collection=>({id:collection.id,fields:compileFields(collection.fields,this.hashDim),prefixSparse:compileSparse([collection.label,collection.description].filter(Boolean).join(" ")||collection.id,this.hashDim,.2),prefixDense:projectSemanticVector(collection.semanticVector,this.hashDim)}));
     this.compiledActionFields=compileFields(schema.actionFields||[],this.actionDim);
-    if(this.actions)this.actionEmbeddings=this.actions.map(a=>actionVector(a,this.actionDim,this.compiledActionFields));
+    this.compiledHistoryActionFields=compileFields(schema.actionFields||[],this.hashDim);
+    this.historyPrefix=compileSparse("recent decision action and observed consequence",this.hashDim,.25);
+    this.historyRewardSparse=compileSparse("recent action reward consequence",this.hashDim,.7);
+    this.historyDoneSparse=compileSparse("recent episode termination",this.hashDim,.5);
+    this.historyOutcomeSparse=new Map();
+    if(this.actions){
+      this.actionEmbeddings=this.actions.map(a=>actionVector(a,this.actionDim,this.compiledActionFields));
+      this.historyActionEmbeddings=this.actions.map(a=>actionVector(a,this.hashDim,this.compiledHistoryActionFields));
+    }
     if(this.targetNet)this.targetNet.setSchema(schema);
     return this;
   }
-  setActions(actions){this.actions=actions;this.actionEmbeddings=actions.map(a=>actionVector(a,this.actionDim,this.compiledActionFields));if(this.targetNet)this.targetNet.setActions(actions);return this}
+  setActions(actions){
+    this.actions=actions;
+    this.actionEmbeddings=actions.map(a=>actionVector(a,this.actionDim,this.compiledActionFields));
+    this.historyActionEmbeddings=actions.map(a=>actionVector(a,this.hashDim,this.compiledHistoryActionFields||[]));
+    if(this.targetNet)this.targetNet.setActions(actions);return this
+  }
   parameterCount(){return this.layers.reduce((n,l)=>n+l.count(),0)}
   exportCheckpoint(){
     return{
@@ -216,10 +229,25 @@ export class NeuralSetResidualQ{
   applyLayers(layers,lr=this.lr){for(const layer of layers)layer.step(lr,this.l2)}
   apply(lr=this.lr){this.applyLayers(this.layers,lr)}
 
-  encodeState(observation,{cache=false,temporal=null}={}){
+  encodeState(observation,{cache=false,temporal=null,history=null}={}){
     const globalRaw=vectorFromCompiled(this.compiledGlobals,observation,this.hashDim,this.compiledGlobalPrefix,this.compiledGlobalSemantic),globalCache=this.globalLayer.forward(globalRaw);
     const temporalRaw=new Float32Array(this.hashDim);addSparse(temporalRaw,this.compiledTemporalPrefix,1);
     if(temporal)for(let i=0;i<this.compiledTemporal.length;i++){const v=Number(temporal[i+1]??0);if(Number.isFinite(v)&&v!==0){const x=clamp(v,-1,1);addSparse(temporalRaw,this.compiledTemporal[i].valueSparse,x);addDense(temporalRaw,this.compiledTemporal[i].semanticDense,x*.9)}}
+    const trace=Array.isArray(history)?history:(history?[history]:[]);
+    if(trace.length){
+      addSparse(temporalRaw,this.historyPrefix,1);
+      for(let hi=0;hi<Math.min(4,trace.length);hi++){
+        const item=trace[hi]||{},decay=Math.pow(.55,hi),actionIndex=Number(item.actionIndex);
+        if(Number.isInteger(actionIndex)&&actionIndex>=0&&actionIndex<this.historyActionEmbeddings.length)addDense(temporalRaw,this.historyActionEmbeddings[actionIndex],.9*decay);
+        const reward=Number(item.reward||0);if(Number.isFinite(reward)&&reward!==0)addSparse(temporalRaw,this.historyRewardSparse,Math.tanh(reward)*decay);
+        if(item.done)addSparse(temporalRaw,this.historyDoneSparse,decay);
+        for(const [key,raw] of Object.entries(item.outcome||{})){
+          const value=typeof raw==="boolean"?(raw?1:0):Number(raw);if(!Number.isFinite(value)||value===0)continue;
+          let sparse=this.historyOutcomeSparse.get(key);if(!sparse){sparse=compileSparse("recent outcome "+key,this.hashDim,.35);this.historyOutcomeSparse.set(key,sparse)}
+          addSparse(temporalRaw,sparse,Math.tanh(value/4)*decay);
+        }
+      }
+    }
     const temporalCache=this.temporalLayer.forward(temporalRaw);
     const mean=new Float32Array(this.entityDim),max=new Float32Array(this.entityDim),maxIndex=new Int32Array(this.entityDim),latents=[],records=[],recordCaches=cache?[]:null;
     max.fill(-Infinity);maxIndex.fill(-1);let collectionCount=0;
@@ -257,17 +285,17 @@ export class NeuralSetResidualQ{
     const memberScores=valueMemberScores.map(value=>semanticScore+this.valueWeight*value),score=semanticScore+this.valueWeight*valueScore;
     return{score,semanticScore,valueScore,memberScores,valueMemberScores,input,h,semanticOut,semanticAdapterOut,valueHead,valueResidual,valueHidden,valueOuts,state,actionIndex,...attn};
   }
-  scoreStatsObservation(observation,{temporal=null}={}){
-    const state=this.encodeState(observation,{temporal}),scores=new Array(this.actions.length),semanticScores=new Array(this.actions.length),valueScores=new Array(this.actions.length),memberScores=new Array(this.actions.length),valueMemberScores=new Array(this.actions.length);
+  scoreStatsObservation(observation,{temporal=null,history=null}={}){
+    const state=this.encodeState(observation,{temporal,history}),scores=new Array(this.actions.length),semanticScores=new Array(this.actions.length),valueScores=new Array(this.actions.length),memberScores=new Array(this.actions.length),valueMemberScores=new Array(this.actions.length);
     for(let i=0;i<scores.length;i++){
       const f=this.actionForward(state,i);scores[i]=f.score;semanticScores[i]=f.semanticScore;valueScores[i]=f.valueScore;memberScores[i]=f.memberScores;valueMemberScores[i]=f.valueMemberScores;
     }
     return{scores,semanticScores,valueScores,memberScores,valueMemberScores};
   }
-  scoresObservation(observation,{temporal=null}={}){return this.scoreStatsObservation(observation,{temporal}).scores}
-  valueScoresObservation(observation,{temporal=null}={}){return this.scoreStatsObservation(observation,{temporal}).valueScores}
-  inspectAttention(observation,actionIndex,{topK=8,temporal=null}={}){
-    const state=this.encodeState(observation,{temporal}),forward=this.actionForward(state,actionIndex);
+  scoresObservation(observation,{temporal=null,history=null}={}){return this.scoreStatsObservation(observation,{temporal,history}).scores}
+  valueScoresObservation(observation,{temporal=null,history=null}={}){return this.scoreStatsObservation(observation,{temporal,history}).valueScores}
+  inspectAttention(observation,actionIndex,{topK=8,temporal=null,history=null}={}){
+    const state=this.encodeState(observation,{temporal,history}),forward=this.actionForward(state,actionIndex);
     return state.records.map((meta,i)=>({...meta,weight:forward.weights[i]||0})).sort((a,b)=>b.weight-a.weight).slice(0,topK);
   }
 
@@ -290,7 +318,7 @@ export class NeuralSetResidualQ{
     const n=this.headDim+1,matrix=new Float64Array(n*n),vector=new Float64Array(n);let rows=0;
     for(const example of examples){
       if(!example?.scores||example.scores.length!==this.actions.length)continue;
-      const state=this.encodeState(example.observation,{cache:false,temporal:example.temporal||null}),mean=example.scores.reduce((a,b)=>a+Number(b||0),0)/example.scores.length;
+      const state=this.encodeState(example.observation,{cache:false,temporal:example.temporal||null,history:example.history||null}),mean=example.scores.reduce((a,b)=>a+Number(b||0),0)/example.scores.length;
       for(let ai=0;ai<this.actions.length;ai++){
         const f=this.actionForward(state,ai),x=new Float64Array(n);for(let d=0;d<this.headDim;d++)x[d]=f.h.out[d];x[this.headDim]=1;
         const y=Number(example.scores[ai]||0)-mean-Number(f.semanticAdapterOut?.out?.[0]||0);
@@ -351,14 +379,14 @@ export class NeuralSetResidualQ{
       const g1=this.entityLayer2.backward(cache.recordCaches[r].c2,g);this.entityLayer1.backward(cache.recordCaches[r].c1,g1);
     }
   }
-  updateTransition({observation,temporal=null,actionIndex,reward,nextObservation,nextTemporal=null,done=false,bootstrapDiscount=null}){
-    const current=this.encodeState(observation,{cache:false,temporal}),chosen=this.actionForward(current,actionIndex);
+  updateTransition({observation,temporal=null,history=null,actionIndex,reward,nextObservation,nextTemporal=null,nextHistory=null,done=false,bootstrapDiscount=null}){
+    const current=this.encodeState(observation,{cache:false,temporal,history}),chosen=this.actionForward(current,actionIndex);
     const bootstrapModel=this.targetNet||this,discount=bootstrapDiscount==null?this.gamma:Number(bootstrapDiscount);
     let bootstrapActionIndex=-1,bootstrapValue=0;
     if(!done){
-      const onlineNext=this.valueScoresObservation(nextObservation,{temporal:nextTemporal});
+      const onlineNext=this.valueScoresObservation(nextObservation,{temporal:nextTemporal,history:nextHistory});
       bootstrapActionIndex=0;for(let i=1;i<onlineNext.length;i++)if(Number(onlineNext[i])>Number(onlineNext[bootstrapActionIndex]))bootstrapActionIndex=i;
-      const targetNext=bootstrapModel.valueScoresObservation(nextObservation,{temporal:nextTemporal});
+      const targetNext=bootstrapModel.valueScoresObservation(nextObservation,{temporal:nextTemporal,history:nextHistory});
       bootstrapValue=Number(targetNext[bootstrapActionIndex]||0);
     }
     const target=reward+(done?0:discount*bootstrapValue),td=clamp(target-chosen.valueScore,-4,4);
@@ -366,9 +394,9 @@ export class NeuralSetResidualQ{
     if(this.targetNet&&this.updates%this.targetSyncInterval===0)this.syncTarget();
     return{td,target,q:chosen.valueScore,combined:chosen.score,semantic:chosen.semanticScore,targetNetwork:!!this.targetNet,targetSyncs:this.targetSyncs,bootstrapActionIndex,bootstrapValue,doubleDqn:!!this.targetNet};
   }
-  distill(observation,teacherScores,{strength=.35,temporal=null}={}){
+  distill(observation,teacherScores,{strength=.35,temporal=null,history=null}={}){
     if(!teacherScores||teacherScores.length!==this.actions.length)return null;
-    const state=this.encodeState(observation,{cache:true,temporal}),forwards=this.actions.map((_,i)=>this.actionForward(state,i)),student=softmax(forwards.map(x=>x.semanticScore),1),teacher=softmax(teacherScores,1);
+    const state=this.encodeState(observation,{cache:true,temporal,history}),forwards=this.actions.map((_,i)=>this.actionForward(state,i)),student=softmax(forwards.map(x=>x.semanticScore),1),teacher=softmax(teacherScores,1);
     const gradContext=new Float32Array(this.contextDim),entityExtra=zeroEntityGrads(state.latents.length,this.entityDim);this.zeroGrad();let loss=0;
     for(let i=0;i<this.actions.length;i++){
       loss-=teacher[i]*Math.log(Math.max(1e-8,student[i]));
@@ -376,11 +404,11 @@ export class NeuralSetResidualQ{
     }
     this.backwardState(state,gradContext,entityExtra);this.applyLayers(this.semanticLayers,this.lr*strength);this.distillUpdates++;return{loss,student,teacher};
   }
-  superviseDistribution(observation,targetDistribution,{strength=.35,temporal=null}={}){
+  superviseDistribution(observation,targetDistribution,{strength=.35,temporal=null,history=null}={}){
     if(!targetDistribution||targetDistribution.length!==this.actions.length)return null;
     const raw=Array.from(targetDistribution,v=>Math.max(0,Number(v)||0)),sum=raw.reduce((a,b)=>a+b,0);
     if(sum<=0)return null;
-    const target=raw.map(v=>v/sum),state=this.encodeState(observation,{cache:true,temporal}),forwards=this.actions.map((_,i)=>this.actionForward(state,i)),student=softmax(forwards.map(x=>x.semanticScore),1);
+    const target=raw.map(v=>v/sum),state=this.encodeState(observation,{cache:true,temporal,history}),forwards=this.actions.map((_,i)=>this.actionForward(state,i)),student=softmax(forwards.map(x=>x.semanticScore),1);
     const gradContext=new Float32Array(this.contextDim),entityExtra=zeroEntityGrads(state.latents.length,this.entityDim);this.zeroGrad();let loss=0,brier=0;
     for(let i=0;i<this.actions.length;i++){
       loss-=target[i]*Math.log(Math.max(1e-8,student[i]));brier+=(student[i]-target[i])**2;
