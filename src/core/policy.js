@@ -141,17 +141,17 @@ export class SemanticResidualPolicy{
     const result=this.q.fitDecisionDistributions(examples,{ridge});
     if(!result)return null;
     if(refineSteps>0&&this.q?.superviseDistribution){
-      for(let step=0;step<Math.floor(refineSteps);step++)for(const example of examples||[])this.q.superviseDistribution(example.observation,example.target||example.distribution,{strength,temporal:example.temporal||null});
+      for(let step=0;step<Math.floor(refineSteps);step++)for(const example of examples||[])this.q.superviseDistribution(example.observation,example.target||example.distribution,{strength,temporal:example.temporal||null,history:example.history||null});
     }
     this.q.syncTarget?.({value:false});this.clearProbabilityCalibration();
     return{...result,refineSteps:Math.max(0,Math.floor(refineSteps))};
   }
-  superviseDecisionDistribution(observation,targetDistribution,{steps=1,strength=.5,temporal=null}={}){
+  superviseDecisionDistribution(observation,targetDistribution,{steps=1,strength=.5,temporal=null,history=null}={}){
     if(!this.q?.superviseDistribution)throw new Error("Residual model does not support probability supervision");
     let result=null,totalLoss=0,totalBrier=0,used=0;
     const count=Math.max(1,Math.floor(steps));
     for(let i=0;i<count;i++){
-      result=this.q.superviseDistribution(observation,targetDistribution,{strength,temporal});
+      result=this.q.superviseDistribution(observation,targetDistribution,{strength,temporal,history});
       if(!result)break;used++;totalLoss+=Number(result.loss||0);totalBrier+=Number(result.brier||0);
     }
     if(used){this.q.syncTarget?.({value:false});this.clearProbabilityCalibration()}
