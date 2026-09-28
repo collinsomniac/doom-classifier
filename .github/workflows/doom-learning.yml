@@ -8,6 +8,7 @@ on:
       - src/core/neural-set-residual.js
       - src/core/policy.js
       - src/core/controller.js
+      - src/core/measured-fork-training.js
       - src/env/doom-wasm.js
       - .github/workflows/doom-learning.yml
   workflow_dispatch:
