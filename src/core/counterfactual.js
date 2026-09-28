@@ -41,6 +41,7 @@ export async function probeCounterfactualActions({
   horizon=1,
   discount=.96,
   continuation=null,
+  stepper=null,
   temperature=.7,
   priorStrength=1
 }={}){
@@ -71,7 +72,9 @@ export async function probeCounterfactualActions({
           else if(next?.id)actionId=next.id;
           if(!actionId)break;
         }
-        const step=await environment.step(actionId);
+        const step=await (typeof stepper==="function"
+          ? stepper(actionId,{depth,actionIndex,action:actions[actionIndex],environment})
+          : environment.step(actionId));
         const reward=Number(step?.reward||0);
         total+=weight*reward;weight*=gamma;done=!!step?.done;lastStep=step;
       }

@@ -44,6 +44,14 @@ const sharp=await probeCounterfactualActions({environment:env,prior,horizon:1,te
 assert.equal(sharp.target.indexOf(Math.max(...sharp.target)),0,"low-temperature improvement should let clear measured advantage override the prior");
 assert.ok(sharp.target[0]>probe.target[0]);
 
+let deterministicCalls=0;
+const deterministic=await probeCounterfactualActions({
+  environment:env,prior,candidateIndices:[0,1],temperature:.5,
+  stepper:async id=>{deterministicCalls++;return env.step(id)}
+});
+assert.equal(deterministicCalls,2);
+assert.deepEqual(deterministic.returns.slice(0,2).map(v=>Number(v.toFixed(2))),[.35,.24]);
+
 const subset=await probeCounterfactualActions({environment:env,prior,candidateIndices:[0,1],temperature:.6});
 assert.equal(subset.target[2],0);
 assert.ok(Math.abs(subset.target[0]+subset.target[1]-1)<1e-9);
