@@ -431,15 +431,18 @@ export class NeuralSetResidualQ{
       return raw.length===this.actions.length&&raw.reduce((a,b)=>a+b,0)>0;
     });
     if(!valid.length)return null;
-    let last=null,totalLoss=0,totalBrier=0,updates=0;
+    const updateBase=this.updates;let last=null,totalLoss=0,totalBrier=0,gradientSteps=0;
     for(let step=0;step<Math.max(1,Math.floor(steps));step++){
       for(const example of valid){
         last=this.superviseValueDistribution(example.observation,example.target||example.distribution,{strength,temporal:example.temporal||null});
-        if(last){totalLoss+=last.loss;totalBrier+=last.brier;updates++}
+        if(last){totalLoss+=last.loss;totalBrier+=last.brier;gradientSteps++}
       }
     }
+    // Trust should reflect independent measured states, not how many optimizer passes
+    // we chose to make over the same target.
+    this.updates=updateBase+valid.length;
     this.syncTarget?.();
-    return last?{rows:valid.length*this.actions.length,examples:valid.length,steps:Math.max(1,Math.floor(steps)),updates,meanLoss:totalLoss/updates,meanBrier:totalBrier/updates}:null;
+    return last?{rows:valid.length*this.actions.length,examples:valid.length,steps:Math.max(1,Math.floor(steps)),updates:gradientSteps,trustUpdates:valid.length,meanLoss:totalLoss/gradientSteps,meanBrier:totalBrier/gradientSteps}:null;
   }
 
   superviseDistribution(observation,targetDistribution,{strength=.35,temporal=null}={}){
