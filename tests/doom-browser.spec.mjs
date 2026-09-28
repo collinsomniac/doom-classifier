@@ -115,6 +115,6 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   expect(inspectLayout.flowWidth).toBeLessThanOrEqual(inspectLayout.viewport);
   expect(inspectLayout.stateTop).toBeGreaterThan(inspectLayout.envTop);
   expect(inspectLayout.controlsTop).toBeGreaterThanOrEqual(0);
-  expect(inspectLayout.architectureTop).toBeGreaterThan(inspectLayout.controlsTop);
+  expect(inspectLayout.controlsTop).toBeGreaterThan(inspectLayout.architectureTop);
   if(consoleErrors.length)throw new Error("Browser errors after successful prepared-model step: "+consoleErrors.join(" | "));
 });
