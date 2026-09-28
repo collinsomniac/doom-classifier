@@ -296,3 +296,22 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
 @media(max-width:650px){
   .circuit-performance{display:grid;gap:1px;text-align:right}.circuit-grid{grid-template-columns:72px minmax(0,1fr) 46px 82px;gap:4px}.circuit-node{padding:5px}.circuit-node>small{display:none}.circuit-merge{width:44px;height:44px}.circuit-rail{grid-template-columns:30px minmax(0,1fr);gap:5px;padding:3px 4px}.circuit-rail>div{grid-template-columns:1fr}.circuit-rail span{font-size:6px}.circuit-rail b{font-size:8px}.circuit-rail small{font-size:7px}.circuit-output>b{font-size:20px}.circuit-footer{display:grid;gap:2px;white-space:normal}
 }
+
+
+/* Primary Play / Inspect split. Keep the live game dominant; diagnostics stay one tap away. */
+.lab-tabs{position:sticky;top:0;z-index:20;display:flex;gap:6px;margin:0 0 14px;padding:5px;border:1px solid var(--line);border-radius:14px;background:#0b0f14e8;backdrop-filter:blur(14px)}
+.lab-tab-btn{flex:0 1 180px;background:transparent;color:var(--muted);border:1px solid transparent;padding:.62rem .9rem}
+.lab-tab-btn:hover{filter:none;background:#151b22;color:var(--text)}
+.lab-tab-btn.active{background:var(--accent);color:#10140a;border-color:var(--accent)}
+.lab-tab-panel[hidden]{display:none!important}
+.lab-tab-panel.active{display:block}
+#playTab .lab-grid{grid-template-columns:1fr}
+#playTab .arena-panel{grid-column:1/-1;grid-row:auto}
+.doom-stage{display:grid;place-items:center;width:100%;overflow:hidden;border-radius:12px;background:#000}
+#doomCanvas{display:block;width:100%;height:auto!important;max-width:1120px;max-height:min(70vh,700px);aspect-ratio:auto;background:#000;border:1px solid #242c36;border-radius:12px;image-rendering:pixelated;object-fit:contain}
+.inspect-grid>.engine-controls-panel{align-self:start}
+@media(max-width:650px){
+  .lab-tabs{top:env(safe-area-inset-top);margin-inline:-2px}
+  .lab-tab-btn{flex:1 1 0}
+  #doomCanvas{max-width:100%;max-height:none}
+}
