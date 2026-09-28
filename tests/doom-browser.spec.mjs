@@ -42,6 +42,12 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   await expect(page.locator("#chosenAction")).not.toHaveText("—");await expect(page.locator("#eventLog")).toContainText("s0001");
   await expect(page.locator("#attentionList .attention-row").first()).toBeVisible();
   await expect(page.locator("#trainingOutput")).toContainText("s0001");
+  expect(await page.evaluate(()=>window.__doomLab.env.supportsSnapshots()&&window.__doomLab.env.supportsExactTics())).toBe(true);
+  await page.selectOption("#counterfactualTics","6");
+  await page.click("#counterfactualProbeBtn");
+  await expect(page.locator("#counterfactualResults .counterfactual-row")).toHaveCount(15);
+  await expect(page.locator("#counterfactualStatus")).toContainText("state restored");
+  expect(await page.evaluate(()=>window.__doomLab.counterfactual?.trials?.length)).toBe(15);
   await expect(page.locator('[data-arch="actions"]')).toHaveClass(/hot/);
   await expect(page.locator("#architectureFlow")).toHaveClass(/tick-pulse/);
   const pulseAnimation=await page.evaluate(()=>getComputedStyle(document.querySelector('[data-arch="actions"]')).animationName);

@@ -4,6 +4,8 @@ import {SemanticResidualPolicy} from "./core/policy.js";
 import {ExperimentController} from "./core/controller.js";
 import {TransformersNLIAdapter,NLI_PRESETS} from "./model-adapters/transformers-nli.js";
 import {MiniLMSchemaCompiler,SCHEMA_EMBEDDING_PRESET} from "./model-adapters/schema-embedding-compiler.js";
+import {probeCounterfactualActions} from "./core/counterfactual.js";
+import {softmax} from "./core/math.js";
 
 const OWNED_RUNTIME_BASE="https://raw.githubusercontent.com/collinsomniac/doom-classifier/engine-runtime";
 const STARTER_MODEL_BASE="https://raw.githubusercontent.com/collinsomniac/doom-classifier/model-runtime";
@@ -14,6 +16,7 @@ const ui={
   iwad:$("iwadInput"),iwadStatus:$("iwadStatus"),engineChip:$("engineChip"),schemaChip:$("schemaChip"),teacherChip:$("teacherChip"),policyChip:$("policyChip"),prepareStatus:$("prepareStatus"),
   profile:$("profileSelect"),applyProfile:$("applyProfileBtn"),profileHint:$("profileHint"),teacherMode:$("teacherModeSelect"),useNeural:$("useNeuralToggle"),learn:$("learnToggle"),memory:$("memoryToggle"),explore:$("exploreToggle"),
   tune:$("tuneBtn"),eval:$("evalBtn"),evalResults:$("evalResults"),tuneSteps:$("tuneSteps"),tuneProgress:$("tuneProgress"),tuneStatus:$("tuneStatus"),tuneBadge:$("tuneBadge"),loadStarter:$("loadStarterBtn"),loadSaved:$("loadSavedBtn"),saveCheckpoint:$("saveCheckpointBtn"),exportCheckpoint:$("exportCheckpointBtn"),checkpointStatus:$("checkpointStatus"),
+  cfProbe:$("counterfactualProbeBtn"),cfFit:$("counterfactualFitBtn"),cfClear:$("counterfactualClearBtn"),cfTics:$("counterfactualTics"),cfBadge:$("counterfactualBadge"),cfStatus:$("counterfactualStatus"),cfResults:$("counterfactualResults"),cfExamples:$("counterfactualExamples"),cfSpread:$("counterfactualSpread"),cfPriorTop:$("counterfactualPriorTop"),cfMeasuredTop:$("counterfactualMeasuredTop"),cfTargetTop:$("counterfactualTargetTop"),
   actionMs:$("actionMs"),actionMsOut:$("actionMsOut"),manualAction:$("manualActionSelect"),manual:$("manualBtn"),manualStatus:$("manualStatus"),weaponState:$("weaponState"),
   bars:$("actionBars"),chosen:$("chosenAction"),chosenSemantic:$("chosenSemantic"),chosenValue:$("chosenValue"),chosenScore:$("chosenScore"),probabilityCalibration:$("probabilityCalibration"),intentFire:$("intentFire"),intentStrafe:$("intentStrafe"),intentTurn:$("intentTurn"),intentForward:$("intentForward"),intentBack:$("intentBack"),intentUse:$("intentUse"),entropy:$("entropy"),margin:$("margin"),epistemic:$("epistemic"),novelty:$("novelty"),latLast:$("latLast"),latSemantic:$("latSemantic"),latP95:$("latP95"),
   attention:$("attentionList"),attentionCount:$("attentionCount"),teacherCalls:$("teacherCalls"),decodeTemp:$("decodeTemp"),replaySize:$("replaySize"),teacherReplaySize:$("teacherReplaySize"),valueBeta:$("valueBeta"),priorKL:$("priorKL"),klUtilization:$("klUtilization"),backbone:$("backboneName"),modelSelect:$("modelSelect"),loadModel:$("loadModelBtn"),modelProgress:$("modelProgress"),modelStatus:$("modelStatus"),
@@ -24,6 +27,7 @@ const ui={
 let env=null,policy=null,controller=null,hashSemantic=null;
 let engineReady=false,schemaCompiled=false,teacherReady=false,checkpointReady=false,busy=false,prepared=false,checkpointInfo=null;
 let lastArchPulseDecision=-1;
+let lastCounterfactualProbe=null,counterfactualExamples=[],counterfactualBusy=false,lastCounterfactualFit=null;
 
 const PROFILES={
   assisted:{label:"Adaptive assisted",teacher:"adaptive",neural:true,learning:false,memory:true,explore:false,hint:"Fast neural decisions every tick; MobileBERT is scheduled only when uncertainty/novelty warrants it."},
@@ -47,6 +51,7 @@ function updateReadiness(){
   ui.prepare.disabled=lock;ui.loadModel.disabled=lock;ui.schemaCompile.disabled=lock;ui.manual.disabled=lock;ui.manualAction.disabled=lock;ui.reset.disabled=lock;ui.export.disabled=lock;
   if(ui.loadStarter)ui.loadStarter.disabled=lock;if(ui.loadSaved)ui.loadSaved.disabled=lock||!localStorage.getItem("doom-classifier-checkpoint-v1");
   if(ui.saveCheckpoint)ui.saveCheckpoint.disabled=busy||!prepared;if(ui.exportCheckpoint)ui.exportCheckpoint.disabled=busy||!prepared;
+  const forkReady=!!env?.supportsSnapshots?.()&&!!env?.supportsExactTics?.();if(ui.cfProbe)ui.cfProbe.disabled=busy||!prepared||!forkReady;if(ui.cfTics)ui.cfTics.disabled=busy||!forkReady;if(ui.cfFit)ui.cfFit.disabled=busy||!prepared||!counterfactualExamples.length;if(ui.cfClear)ui.cfClear.disabled=busy||!counterfactualExamples.length;
   for(const element of [ui.profile,ui.applyProfile,ui.teacherMode,ui.useNeural,ui.learn,ui.memory,ui.explore,ui.tune,ui.eval,ui.tuneSteps,ui.start,ui.step])element.disabled=busy||!prepared;
   if(controller?.state==="RUNNING")ui.start.disabled=false;
 }
@@ -159,6 +164,9 @@ function renderArchitecture(obs,d,outcome){
   setArchNode("teacher",{active:isLearnedTeacher(),hot:!!d?.teacherUsed||teacherFresh,pending:!!d?.teacherPending,value:isLearnedTeacher()?(policy.semantic.name+(teacherTop?" → "+teacherTop.id+" "+(teacherTop.probability*100).toFixed(0)+"%":"")+" · "+Number(policy.lastTeacherLatencyMs||0).toFixed(0)+" ms"):"off"});
   setArchNode("semantic",{active:prepared||!!d,hot:!!d?.semanticUsed||teacherFresh,value:semanticTop>=0?("prior → "+policy.actions[semanticTop].id+" · "+Number(d.semanticPriorScores[semanticTop]||0).toFixed(3)):"unprepared"});
   setArchNode("replay",{active:(policy?.replay?.length||0)>0||learning,hot:learning,learning,value:(policy?.replay?.length||0)+" transitions · H"+Number(learnInfo?.nStepHorizon||policy?.nStep||1)+(learnInfo?" · TD "+Number(learnInfo.td||0).toFixed(3):"")});
+  const cfSupport=!!env?.supportsSnapshots?.()&&!!env?.supportsExactTics?.(),cfSpread=Number(lastCounterfactualProbe?.spread||0);
+  setArchNode("counterfactual",{active:cfSupport,hot:counterfactualBusy,value:counterfactualBusy?"branching exact state…":lastCounterfactualProbe?(lastCounterfactualProbe.trials.length+" actions · "+lastCounterfactualProbe.tics+" tics · ΔR "+cfSpread.toFixed(3)):cfSupport?"exact fork ready":"unavailable"});
+  setArchNode("properfit",{active:counterfactualExamples.length>0||!!lastCounterfactualFit,hot:!!lastCounterfactualFit&&Date.now()-lastCounterfactualFit.t<1800,value:lastCounterfactualFit?("fit "+lastCounterfactualFit.examples+" states · "+lastCounterfactualFit.rows+" rows"):(counterfactualExamples.length+" collected targets")});
   const rankedValues=d?.valueScores?.length?[...d.valueScores].sort((a,b)=>b-a):[],valueGap=Number(d?.criticGap??(rankedValues.length>1?rankedValues[0]-rankedValues[1]:0));
   setArchNode("value",{active:(policy?.q?.updates||0)>0||!!d,hot:learning,learning,value:valueTop>=0?("value → "+policy.actions[valueTop].id+" · ΔQ "+valueGap.toFixed(4)+" ("+(Number(d?.criticGapShare||0)*100).toFixed(0)+"% spread) · heads "+(Number(d?.criticTopAgreement||0)*100).toFixed(0)+"% · SNR "+Number(d?.criticMarginSnr||0).toFixed(1)):"untrained"});
   setArchNode("fusion",{active:!!d,hot:!!d&&Number(d.valueBeta||0)>0,value:d?("β "+Number(d.valueBeta||0).toFixed(2)+" · conf "+(Number(d.criticRankingConfidence||0)*100).toFixed(0)+"% · gate "+(Number(d.criticKlGate??1)*100).toFixed(0)+"% · KL "+Number(d.basePriorKlBudget||0).toFixed(3)+"→"+Number(d.priorKlBudget||0).toFixed(3)+" · used "+(Number(d.klUtilization||0)*100).toFixed(0)+"% · → "+d.action.id):"β 0 · critic gate waiting"});
@@ -193,6 +201,61 @@ function renderTeacherTranscript(){
     return '<article class="teacher-item '+(index===0?"latest":"")+'"><div class="teacher-item-head"><strong>'+escapeHtml(item.model)+' · '+escapeHtml(item.kind)+'</strong><span>s'+String(item.step).padStart(4,"0")+' · '+Number(item.ms||0).toFixed(0)+' ms</span></div><div class="teacher-reason">'+escapeHtml(item.reason)+'</div><div class="teacher-actions">'+actions+'</div><div class="teacher-meta">'+fit+calibration+'</div><details><summary>state sent to teacher</summary><pre class="teacher-state">'+escapeHtml(item.stateText||"state serializer unavailable")+'</pre></details></article>';
   }).join("");
 }
+function semanticPriorAtState(observation){
+  const stats=policy.q.scoreStatsObservation(observation,{temporal:null});
+  return softmax(stats.semanticScores,Math.max(.05,Number(policy.temperature)||1));
+}
+function renderCounterfactual(){
+  if(!ui.cfResults)return;
+  const count=counterfactualExamples.length;ui.cfExamples.textContent=String(count);
+  if(!lastCounterfactualProbe){
+    ui.cfBadge.textContent=counterfactualBusy?"probing":"idle";ui.cfSpread.textContent="—";ui.cfPriorTop.textContent="—";ui.cfMeasuredTop.textContent="—";ui.cfTargetTop.textContent="—";
+    if(!counterfactualBusy)ui.cfResults.innerHTML='<div class="counterfactual-empty">Run a probe to compare the current semantic prior against outcomes measured from an identical state.</div>';
+    return;
+  }
+  const p=lastCounterfactualProbe,priorTop=p.prior.indexOf(Math.max(...p.prior)),measuredTop=p.returns.reduce((best,v,i,a)=>v>a[best]?i:best,0),targetTop=p.target.indexOf(Math.max(...p.target));
+  ui.cfBadge.textContent=counterfactualBusy?"probing":"state restored";ui.cfSpread.textContent=Number(p.spread||0).toFixed(3);ui.cfPriorTop.textContent=policy.actions[priorTop]?.id||"—";ui.cfMeasuredTop.textContent=policy.actions[measuredTop]?.id||"—";ui.cfTargetTop.textContent=policy.actions[targetTop]?.id||"—";
+  const rows=p.trials.map((trial,i)=>({trial,index:trial.actionIndex,prior:p.prior[trial.actionIndex]||0,target:p.target[trial.actionIndex]||0,ret:p.returns[trial.actionIndex]})).sort((a,b)=>b.ret-a.ret);
+  ui.cfResults.innerHTML=rows.map((row,rank)=>{
+    const o=row.trial.outcome||{},bits=[];if(Number(o.damageDealt||0)>0)bits.push("dmg+"+Number(o.damageDealt).toFixed(0));if(Number(o.playerKillDelta||0)>0)bits.push("kill+"+Number(o.playerKillDelta).toFixed(0));if(Number(o.playerPickupDelta||0)>0)bits.push("pickup+"+Number(o.playerPickupDelta).toFixed(0));if(Number(o.healthDelta||0)<0)bits.push("hp"+Number(o.healthDelta).toFixed(0));
+    return '<div class="counterfactual-row '+(rank===0?"top-measured":"")+'"><strong>'+(rank+1)+'. '+escapeHtml(row.trial.label||row.trial.id)+'</strong><div class="counterfactual-cell"><span>prior</span><b>'+(row.prior*100).toFixed(1)+'%</b></div><div class="counterfactual-cell"><span>return</span><b>'+Number(row.ret||0).toFixed(3)+'</b></div><div class="counterfactual-cell"><span>target</span><b>'+(row.target*100).toFixed(1)+'%</b></div><div class="counterfactual-outcome">'+(bits.join(" · ")||"no causal event")+'</div></div>';
+  }).join("");
+}
+async function probeSameState(){
+  if(!prepared||!env?.supportsSnapshots?.()||!env?.supportsExactTics?.())return;
+  controller.pause();counterfactualBusy=true;setBusy(true);ui.cfStatus.textContent="Forking one exact state across all typed actions…";renderCounterfactual();renderArchitecture(env.lastObservation||env.observe(),controller.lastDecision,env.lastOutcome);await Promise.resolve();
+  const started=performance.now();
+  try{
+    const observation=env.lastObservation||env.observe(),prior=semanticPriorAtState(observation),tics=Math.max(1,Number(ui.cfTics.value)||24);
+    const probe=await probeCounterfactualActions({
+      environment:env,actions:policy.actions,prior,horizon:1,temperature:.45,priorStrength:1,
+      stepper:id=>env.stepTics(id,tics)
+    });
+    lastCounterfactualProbe={...probe,prior,tics,ms:performance.now()-started,t:Date.now()};
+    if(Number(probe.spread||0)>1e-9){
+      counterfactualExamples.push({observation:probe.observation,target:probe.target,temporal:null,meta:{tics,spread:probe.spread}});
+      if(counterfactualExamples.length>12)counterfactualExamples.shift();
+    }
+    const best=probe.returns.reduce((bi,v,i,a)=>v>a[bi]?i:bi,0);
+    ui.cfStatus.textContent="PROBE COMPLETE · "+probe.trials.length+" exact branches × "+tics+" tics · "+(performance.now()-started).toFixed(1)+" ms · best "+policy.actions[best].id+" · state restored"+(probe.spread<=1e-9?" · no return separation, not collected":"");
+  }catch(error){ui.cfStatus.textContent="probe failed · "+String(error?.message||error)}
+  finally{counterfactualBusy=false;setBusy(false);render()}
+}
+function fitCounterfactualTargets(){
+  if(!prepared||!counterfactualExamples.length)return;
+  controller.pause();setBusy(true);
+  try{
+    const teacherBefore=policy.teacherCalls,result=policy.fitDecisionDistributions(counterfactualExamples,{ridge:.04,refineSteps:2,strength:.04});
+    if(!result)throw new Error("No valid counterfactual targets to fit");
+    lastCounterfactualFit={...result,t:Date.now(),examples:counterfactualExamples.length};
+    ui.cfStatus.textContent="MEASURED TARGET FIT · "+counterfactualExamples.length+" states · "+Number(result.rows||0)+" action rows · "+Number(result.refineSteps||0)+" refinement passes · teacher calls "+(policy.teacherCalls-teacherBefore);
+    checkpointReady=false;checkpointInfo=null;setRuntime("COUNTERFACTUAL FIT · FROZEN READY");
+  }catch(error){ui.cfStatus.textContent="counterfactual fit failed · "+String(error?.message||error)}
+  finally{setBusy(false);render()}
+}
+function clearCounterfactualTargets(){
+  counterfactualExamples=[];lastCounterfactualProbe=null;lastCounterfactualFit=null;ui.cfStatus.textContent="Collected same-state supervision cleared; model weights unchanged.";render();
+}
 function render(){
   if(!env||!controller||!policy)return;
   const obs=env.lastObservation||env.observe();ui.objective.textContent=policy.schema.objective||env.schema.objective;ui.weaponState.textContent=weaponLabel(obs);
@@ -223,7 +286,7 @@ function render(){
     [...ui.bars.children].forEach((row,i)=>{row.querySelector(".bar-fill").style.width=(d.probs[i]*100).toFixed(1)+"%";row.lastElementChild.textContent=d.probs[i].toFixed(3)});
     ui.log.textContent=controller.trace.slice(-14).reverse().map(t=>"s"+String(t.step).padStart(4,"0")+" "+(t.teacherUsed?"Q":t.teacherPending?"…":"·")+" "+t.action.padEnd(19)+" p="+Math.max(...Object.values(t.probabilities)).toFixed(3)+" r="+t.reward.toFixed(3)+" dmg="+Number(t.outcome?.damageDealt||0).toFixed(0)+" "+t.residualLatencyMs.toFixed(1)+"ms").join("\n");
   }
-  renderArchitecture(obs,d,outcome);renderTypedFields(d);renderTrainingStream();renderTeacherTranscript();
+  renderArchitecture(obs,d,outcome);renderTypedFields(d);renderTrainingStream();renderTeacherTranscript();renderCounterfactual();
   updateReadiness();
 }
 function bindController(){
@@ -275,7 +338,7 @@ async function boot(){
     bindController();buildBars();engineReady=true;ui.runtimeTitle.textContent=(env.runtime?.owned?"Owned ":"")+"Chocolate Doom · "+env.contentName;
     const counts=env.lastObservation?._collections||{};ui.bootStatus.textContent=DOOM_RUNTIME_PROVENANCE.engine+" · "+env.contentName+" · "+policy.q.parameterCount()+" params · "+(counts.entities?.length||0)+" entities · "+(counts.geometry?.length||0)+" lines";
     ui.prepareStatus.textContent="Engine ready. Prepare Recommended before model-controlled play.";ui.schemaStatus.textContent="Lexical feature hash only.";ui.modelStatus.textContent="No learned teacher loaded.";
-    applyProfile("assisted");setRuntime("ENGINE READY");window.__doomLab={get env(){return env},get policy(){return policy},get controller(){return controller}};render();
+    applyProfile("assisted");setRuntime("ENGINE READY");window.__doomLab={get env(){return env},get policy(){return policy},get controller(){return controller},get counterfactual(){return lastCounterfactualProbe},get counterfactualExamples(){return counterfactualExamples}};render();
     if(starterMode==="auto")void maybeAutoLoadStarter();
   }catch(error){ui.boot.disabled=false;setRuntime("BOOT FAILED",true);ui.bootStatus.textContent=String(error?.message||error);ui.log.textContent=String(error?.stack||error)}
   finally{setBusy(false)}
@@ -444,7 +507,7 @@ async function manualPrimitive(){
 }
 
 ui.iwad.addEventListener("change",()=>{const file=ui.iwad.files?.[0];ui.iwadStatus.textContent=file?"Selected local IWAD: "+file.name+" · "+(file.size/1048576).toFixed(1)+" MB":"Default: Freedoom 0.13.0"});
-ui.boot.addEventListener("click",boot);ui.prepare.addEventListener("click",prepareRecommended);ui.tune.addEventListener("click",tuneAgent);ui.eval.addEventListener("click",evaluateFrozen);ui.manual.addEventListener("click",manualPrimitive);ui.loadStarter.addEventListener("click",loadBundledCheckpoint);ui.loadSaved.addEventListener("click",loadBrowserCheckpoint);ui.saveCheckpoint.addEventListener("click",saveBrowserCheckpoint);ui.exportCheckpoint.addEventListener("click",exportPortableCheckpoint);
+ui.boot.addEventListener("click",boot);ui.prepare.addEventListener("click",prepareRecommended);ui.tune.addEventListener("click",tuneAgent);ui.eval.addEventListener("click",evaluateFrozen);ui.manual.addEventListener("click",manualPrimitive);ui.cfProbe.addEventListener("click",probeSameState);ui.cfFit.addEventListener("click",fitCounterfactualTargets);ui.cfClear.addEventListener("click",clearCounterfactualTargets);ui.loadStarter.addEventListener("click",loadBundledCheckpoint);ui.loadSaved.addEventListener("click",loadBrowserCheckpoint);ui.saveCheckpoint.addEventListener("click",saveBrowserCheckpoint);ui.exportCheckpoint.addEventListener("click",exportPortableCheckpoint);
 ui.start.addEventListener("click",()=>{if(!controller)return;if(controller.state==="RUNNING")controller.pause();else{syncRuntimeConfig();controller.start()}});
 ui.step.addEventListener("click",async()=>{if(!controller||!prepared)return;if(controller.state==="RUNNING")controller.pause();syncRuntimeConfig();await controller.tick()});
 ui.reset.addEventListener("click",async()=>{if(controller){await controller.reset({learning:false});render()}});
