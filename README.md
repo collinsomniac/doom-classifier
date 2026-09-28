@@ -32,7 +32,7 @@ The controller contains:
 
 - compiled lexical + optional MiniLM schema semantics;
 - scalar/global-state encoder;
-- learned temporal-delta channel;
+- learned temporal-delta channel plus a decayed previous-action / observed-consequence trace;
 - shared variable-record encoder;
 - permutation-invariant mean/max set summary;
 - action + state + temporal-conditioned record attention;
@@ -67,7 +67,7 @@ The action set contains literal player inputs, including simultaneous button com
 - wait;
 - forward+fire, back+fire, strafe+fire, turn+fire variants.
 
-Every compound action is also represented as typed primitive fields such as `fire=1`, `strafe_left=1`. The UI therefore reports both exact compound-action probabilities and primitive marginals such as **P(fire)** and **P(strafe)**.
+Every compound action now has a four-axis typed representation—**movement**, **view**, **trigger**, and **interaction**—while retaining literal button facts for actuation and UI diagnostics. The UI therefore reports both exact compound-action probabilities and primitive marginals such as **P(fire)** and **P(strafe)**.
 
 There is deliberately no `MOVE_TO_ENEMY`, `RETREAT`, `FACE_ENEMY`, pathfinder policy, or “enemy visible → fire” rule.
 
@@ -199,7 +199,7 @@ The live lab includes a real-time architecture view and inspectable teacher/trai
 
 - multi-seed, multi-episode real-DOOM training/evaluation;
 - better decision-specialized semantic teacher or generic decision fine-tune;
-- previous-action and identity-aware record memory;
+- replace the new causal action/outcome trace with a trainable recurrent belief state and identity-aware record memory;
 - calibration metrics: Brier, log score, ECE / reliability;
 - additional non-DOOM environment adapters to test the same typed learner without architectural changes;
 - multi-seed / multi-map causal-reward DOOM evaluation;
