@@ -77,7 +77,7 @@ export async function trainWithMeasuredForks({
 
   const creditFlush=policy.flushLearning?.()||null;await policy.awaitTeacher?.();
   return{
-    requested:total,completed,reward,updates:policy.q.updates,actionDiversity:Object.keys(counts).length,actionCounts:counts,
-    measuredFits,measuredProbes,meanMeasuredSpread:measuredFits?spreadSum/measuredFits:0,rolloutRestarts,creditFlush,lastProbe
+    requested:total,completed,reward,return:reward,updates:policy.q.updates,actionDiversity:Object.keys(counts).length,actionCounts:counts,
+    measuredFits,measuredProbes,meanMeasuredSpread:measuredFits?spreadSum/measuredFits:0,rolloutHorizon:resetEvery,rolloutRestarts,creditFlush,lastProbe
   };
 }
