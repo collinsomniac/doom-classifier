@@ -16,14 +16,20 @@ function numericFeatures(schema,obs){
 class NoveltyTracker{
   constructor(size){this.n=0;this.mean=new Float32Array(size);this.m2=new Float32Array(size)}
   reset(){this.n=0;this.mean.fill(0);this.m2.fill(0)}
-  observe(x){
-    if(this.n<4){this.n++;for(let i=0;i<x.length;i++){const d=x[i]-this.mean[i];this.mean[i]+=d/this.n;this.m2[i]+=d*(x[i]-this.mean[i])}return 1}
-    let z=0;
-    for(let i=0;i<x.length;i++){const variance=this.m2[i]/Math.max(1,this.n-1)+.02,d=x[i]-this.mean[i];z+=Math.min(9,d*d/variance)}
-    const score=Math.tanh(Math.sqrt(z/x.length)/2);this.n++;
-    for(let i=0;i<x.length;i++){const d=x[i]-this.mean[i];this.mean[i]+=d/this.n;this.m2[i]+=d*(x[i]-this.mean[i])}
+  score(x,{commit=true}={}){
+    let score=1;
+    if(this.n>=4){
+      let z=0;
+      for(let i=0;i<x.length;i++){const variance=this.m2[i]/Math.max(1,this.n-1)+.02,d=x[i]-this.mean[i];z+=Math.min(9,d*d/variance)}
+      score=Math.tanh(Math.sqrt(z/x.length)/2);
+    }
+    if(commit){
+      this.n++;
+      for(let i=0;i<x.length;i++){const d=x[i]-this.mean[i];this.mean[i]+=d/this.n;this.m2[i]+=d*(x[i]-this.mean[i])}
+    }
     return score;
   }
+  observe(x){return this.score(x,{commit:true})}
 }
 function ensembleDisagreement(memberScores,temperature=1){
   if(!memberScores||!memberScores.length)return 0;
@@ -258,15 +264,17 @@ export class SemanticResidualPolicy{
   teacherTriggerReason(provisional,novelty){
     if(this.teacherPromise)return null;
     const gap=this.decisionCount-this.lastTeacherStep;
-    if(this.teacherCalls===0)return "initial supervision";
-    if(gap>=this.teacherInterval)return "scheduled refresh";
     if(gap<this.teacherMinGap)return null;
+
+    // Adaptive teachers are an uncertainty fallback, not a timer. A slow
+    // teacher should never be invoked merely because N decisions elapsed.
     const reasons=[];
     if(provisional.entropy>=this.teacherEntropy)reasons.push("high entropy");
     if(provisional.margin<=this.teacherMargin)reasons.push("small margin");
-    if(novelty>=this.teacherNovelty)reasons.push("novel state");
     if(provisional.epistemic>=this.teacherEpistemic)reasons.push("value disagreement");
-    return reasons.length?reasons.join(" + "):null;
+    if(!reasons.length)return null;
+    if(novelty>=this.teacherNovelty)reasons.push("novel state");
+    return reasons.join(" + ");
   }
   shouldTeacher(provisional,novelty){return !!this.teacherTriggerReason(provisional,novelty)}
   recordTeacherResult(obs,scores,{kind="supervision",reason="teacher call",ms=0,distillation=null,calibration=null,step=this.decisionCount}={}){
@@ -367,8 +375,8 @@ export class SemanticResidualPolicy{
   }
   async awaitTeacher(){return this.teacherPromise?this.teacherPromise:null}
 
-  async decide(obs,{useResidual=true,memory=true,explore=false}={}){
-    const t0=performance.now(),encoded=this.encode(obs,memory,true),novelty=this.novelty.observe(encoded.base),history=this.snapshotActionOutcomeHistory();
+  async decide(obs,{useResidual=true,memory=true,explore=false,allowTeacher=true,commit=true}={}){
+    const t0=performance.now(),encoded=this.encode(obs,memory,commit),novelty=this.novelty.score(encoded.base,{commit}),history=this.snapshotActionOutcomeHistory();
     const residualStart=performance.now(),residualEval=this.residualEvaluation(obs,encoded.features,encoded.temporal,history);let q=residualEval.scores,residualMs=performance.now()-residualStart;
     let activeFusion=residualEval,epistemic=ensembleDisagreement(residualEval.memberScores,this.temperature);
     let sem=new Array(this.actions.length).fill(0),semanticMs=0,teacherUsed=false,semanticUsed=false,logits;
@@ -383,7 +391,7 @@ export class SemanticResidualPolicy{
         activeFusion={...residualEval,...direct};logits=direct.scores;epistemic=ensembleDisagreement(direct.memberScores,this.temperature);
       }else logits=useResidual?sem.map((v,i)=>v+this.residualWeight*q[i]):sem;
     }else if(mode==="adaptive"){
-      const provisional={...confidenceStats(softmax(q,this.temperature)),epistemic},teacherReason=this.teacherTriggerReason(provisional,novelty);
+      const provisional={...confidenceStats(softmax(q,this.temperature)),epistemic},teacherReason=allowTeacher?this.teacherTriggerReason(provisional,novelty):null;
       teacherUsed=teacherReason?this.scheduleTeacher(obs,encoded.temporal,teacherReason):false;
       logits=q;
     }else{
@@ -403,13 +411,13 @@ export class SemanticResidualPolicy{
         chosen=sampleCategorical(sampling,()=>this.nextDecodeRandom());decisionRule="confidence-mixture";explorationStrategy=chosen===argmax(probs)?"confidence-resample-same":"confidence-mixture";
       }else decisionRule="confidence-greedy";
     }
-    this.decisionCount++;
+    if(commit)this.decisionCount++;
     return{
       actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:logits,semanticPriorScores:activeFusion.semanticScores||residualEval.semanticScores||null,valueScores:residualEval.valueScores||null,features:encoded.features,temporal:encoded.temporal,history,
       valueBeta:Number(activeFusion.valueBeta||0),priorKL:Number(activeFusion.priorKL||0),valueTrust:Number(activeFusion.valueTrust||0),basePriorKlBudget:Number(activeFusion.basePriorKlBudget||0),priorKlBudget:Number(activeFusion.priorKlBudget||0),klUtilization:Number(activeFusion.klUtilization||0),valueEpistemic:Number(activeFusion.valueEpistemic||0),valueEpistemicBudget:Number(activeFusion.valueEpistemicBudget??this.valueEpistemicBudget),epistemicUtilization:Number(activeFusion.epistemicUtilization||0),valueBetaSaturated:!!activeFusion.valueBetaSaturated,typedValueScores:activeFusion.typedValueScores||null,typedValueFit:Number(activeFusion.typedValueFit||0),typedValueBlendUsed:Number(activeFusion.typedValueBlendUsed||0),typedFieldCoefficients:activeFusion.typedFieldCoefficients||null,criticTopIndex:Number(activeFusion.criticTopIndex??-1),criticRunnerIndex:Number(activeFusion.criticRunnerIndex??-1),criticGap:Number(activeFusion.criticGap||0),criticSpread:Number(activeFusion.criticSpread||0),criticGapShare:Number(activeFusion.criticGapShare||0),criticTopAgreement:Number(activeFusion.criticTopAgreement||0),criticMarginMean:Number(activeFusion.criticMarginMean||0),criticMarginStd:Number(activeFusion.criticMarginStd||0),criticMarginSnr:Number(activeFusion.criticMarginSnr||0),criticRankingConfidence:Number(activeFusion.criticRankingConfidence||0),criticAuthority:Number(activeFusion.criticAuthority||0),criticKlGate:Number(activeFusion.criticKlGate??1),criticKlMultiplier:Number(activeFusion.criticKlMultiplier||1),
       probabilityCalibrated:!!this.probabilityCalibrator?.fitted,probabilityCalibrationTemperature:Number(this.probabilityCalibrator?.temperature||1),probabilityTemperature,
       uncertainty:{...stats,novelty,epistemic},latencyMs:performance.now()-t0,semanticLatencyMs:semanticMs,residualLatencyMs:residualMs,
-      teacherUsed,teacherPending:!!this.teacherPromise,semanticUsed,inferenceMode:mode,explorationStrategy,decisionRule,uncertaintySampleChance,teacherCalls:this.teacherCalls,teacherScheduled:this.teacherScheduled,lastTeacherLatencyMs:this.lastTeacherLatencyMs
+      teacherUsed,teacherPending:!!this.teacherPromise,teacherReason:teacherUsed?(this.teacherHistory.at(-1)?.reason||null):null,semanticUsed,inferenceMode:mode,explorationStrategy,decisionRule,uncertaintySampleChance,teacherCalls:this.teacherCalls,teacherScheduled:this.teacherScheduled,lastTeacherLatencyMs:this.lastTeacherLatencyMs
     };
   }
   aggregateNStep(count=Math.min(this.nStep,this.nStepBuffer.length)){
