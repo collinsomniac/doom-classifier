@@ -10,6 +10,7 @@ on:
       - src/core/policy.js
       - src/core/neural-set-residual.js
       - src/env/doom-wasm.js
+      - "engine/**"
       - doom.html
       - styles.css
       - .github/workflows/causal-combat-model.yml
