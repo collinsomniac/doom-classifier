@@ -7,6 +7,7 @@ on:
       - doom.html
       - src/doom-main.js
       - src/env/doom-wasm.js
+      - runtime/engine-runtime.json
       - src/core/**
       - src/model-adapters/**
       - tests/doom-browser.spec.mjs
