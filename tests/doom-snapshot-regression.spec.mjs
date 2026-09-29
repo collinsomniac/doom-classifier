@@ -63,10 +63,36 @@ test("generic and combat exact-tic sequences are identical after snapshot restor
       };
     };
 
+    const checkObservationParity=async sequence=>{
+      await env.reset();
+      const snap=env.saveSnapshot();
+
+      const run=withPolicyObservation=>{
+        env.restoreSnapshot(snap);
+        const rows=[];
+        for(let i=0;i<sequence.length;i++){
+          if(withPolicyObservation)env.observe();
+          const step=env.stepTics(sequence[i],4),after=simplify(env.readRaw());
+          rows.push({i,action:sequence[i],after,reward:Number(step.reward||0),outcome:step.info?.outcome||null});
+        }
+        return rows;
+      };
+
+      const observed=run(true),actionOnly=run(false);let first=-1;
+      for(let i=0;i<observed.length;i++){
+        if(JSON.stringify(observed[i])!==JSON.stringify(actionOnly[i])){first=i;break}
+      }
+      return{
+        first,length:sequence.length,
+        diff:first<0?null:{first,action:sequence[first],observed:observed[first],actionOnly:actionOnly[first],previous:first>0?{observed:observed[first-1],actionOnly:actionOnly[first-1]}:null}
+      };
+    };
+
     return{
       generic:await check(genericSequence),
       combat:await check(combatSequence),
       combatAfterForkPressure:await check(combatSequence,{precondition:true}),
+      observationParity:await checkObservationParity(combatSequence),
       runtime:env.runtime
     };
   },{genericSequence,combatSequence});
@@ -75,4 +101,5 @@ test("generic and combat exact-tic sequences are identical after snapshot restor
   expect(result.generic.first).toBe(-1);
   expect(result.combat.first).toBe(-1);
   expect(result.combatAfterForkPressure.first).toBe(-1);
+  expect(result.observationParity.first).toBe(-1);
 });
