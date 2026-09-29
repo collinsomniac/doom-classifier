@@ -101,6 +101,7 @@ jobs:
             x.evaluation.totalSwitches>=gate.minSwitches*x.evaluation.rollouts &&
             x.evaluation.maxStreak<=gate.maxStreakLimit &&
             x.replay.sameStartSnapshot===true &&
+            x.replay.canonicalStart===true &&
             x.replay.exact===true &&
             x.replay.totalKills===x.evaluation.totalKills &&
             x.replay.totalDamage===x.evaluation.totalDamage;
