@@ -327,27 +327,35 @@ static int PromptFPS_CaptureSnapshotLinks(void)
 
     if (numsectors > promptfps_snapshot_sector_capacity)
     {
-        int *soundtargets = realloc(promptfps_snapshot_sector_soundtarget_index,
-                                    sizeof(int) * (size_t) numsectors);
-        int *sector_valid = realloc(promptfps_snapshot_sector_validcount,
-                                    sizeof(int) * (size_t) numsectors);
-        int *soundtraversed = realloc(promptfps_snapshot_sector_soundtraversed,
-                                      sizeof(int) * (size_t) numsectors);
-        if (soundtargets == NULL || sector_valid == NULL || soundtraversed == NULL)
+        int *next;
+
+        next = realloc(promptfps_snapshot_sector_soundtarget_index,
+                       sizeof(int) * (size_t) numsectors);
+        if (next == NULL)
             return 0;
-        promptfps_snapshot_sector_soundtarget_index = soundtargets;
-        promptfps_snapshot_sector_validcount = sector_valid;
-        promptfps_snapshot_sector_soundtraversed = soundtraversed;
+        promptfps_snapshot_sector_soundtarget_index = next;
+
+        next = realloc(promptfps_snapshot_sector_validcount,
+                       sizeof(int) * (size_t) numsectors);
+        if (next == NULL)
+            return 0;
+        promptfps_snapshot_sector_validcount = next;
+
+        next = realloc(promptfps_snapshot_sector_soundtraversed,
+                       sizeof(int) * (size_t) numsectors);
+        if (next == NULL)
+            return 0;
+        promptfps_snapshot_sector_soundtraversed = next;
         promptfps_snapshot_sector_capacity = numsectors;
     }
 
     if (numlines > promptfps_snapshot_line_capacity)
     {
-        int *line_valid = realloc(promptfps_snapshot_line_validcount,
-                                  sizeof(int) * (size_t) numlines);
-        if (line_valid == NULL)
+        int *next = realloc(promptfps_snapshot_line_validcount,
+                            sizeof(int) * (size_t) numlines);
+        if (next == NULL)
             return 0;
-        promptfps_snapshot_line_validcount = line_valid;
+        promptfps_snapshot_line_validcount = next;
         promptfps_snapshot_line_capacity = numlines;
     }
 
