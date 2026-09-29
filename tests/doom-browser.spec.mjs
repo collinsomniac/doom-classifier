@@ -36,6 +36,19 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   });
   expect(fire.mask).toBe(64);expect(fire.combo).toBe(80);expect(fire.ammoAfter<fire.ammoBefore||fire.damage>0).toBeTruthy();
 
+  const turnSign=await page.evaluate(async()=>{
+    const {env}=window.__doomLab;
+    await env.reset();
+    const before=Number(env.readRaw()?.player?.angle||0)>>>0;
+    env.stepTics("turn_left",2);
+    const after=Number(env.readRaw()?.player?.angle||0)>>>0;
+    const signedDelta=(((after-before+0x80000000)>>>0)-0x80000000);
+    await env.reset();
+    return{before,after,signedDelta};
+  });
+  console.log("DOOM_NATIVE_TURN_SIGN "+JSON.stringify(turnSign));
+  expect(turnSign.signedDelta).toBeGreaterThan(0);
+
   await page.locator("#prepareBtn").click();
   await page.waitForFunction(()=>{const text=document.querySelector("#prepareStatus")?.textContent||"";return text.includes("READY TO PLAY")||text.includes("Preparation failed")},null,{timeout:300000});
   const prepare=(await page.locator("#prepareStatus").textContent())||"";
@@ -94,6 +107,37 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
     return out;
   });
   console.log("SEMANTIC_DOOM_PROBES "+JSON.stringify(semanticProbes));
+
+  const teacherFreeze=await page.evaluate(async()=>{
+    const {env,policy,controller}=window.__doomLab;
+    controller.pause();
+    const previousMode=policy.inferenceMode,events=[];
+    const handler=event=>{
+      const detail=event.detail||{},raw=env.readRaw();
+      events.push({
+        active:!!detail.active,
+        simulationFrozen:!!detail.simulationFrozen,
+        gametic:Number(raw?.engine_state?.gametic??-1),
+        enginePaused:!!raw?.engine_state?.paused,
+        overlayHidden:!!document.querySelector("#teacherPauseOverlay")?.hidden
+      });
+    };
+    controller.addEventListener("teacherwait",handler);
+    policy.setInferenceMode("hybrid");
+    const ok=await controller.tick();
+    policy.setInferenceMode(previousMode);
+    controller.removeEventListener("teacherwait",handler);
+    return{ok,events};
+  });
+  console.log("TEACHER_FREEZE_PROBE "+JSON.stringify(teacherFreeze));
+  const teacherFreezeOn=teacherFreeze.events.find(x=>x.active),teacherFreezeOff=teacherFreeze.events.find(x=>!x.active);
+  expect(teacherFreeze.ok).toBe(true);
+  expect(teacherFreezeOn?.simulationFrozen).toBe(true);
+  expect(teacherFreezeOn?.enginePaused).toBe(true);
+  expect(teacherFreezeOn?.overlayHidden).toBe(false);
+  expect(teacherFreezeOff?.enginePaused).toBe(false);
+  expect(teacherFreezeOff?.overlayHidden).toBe(true);
+  expect(teacherFreezeOn?.gametic).toBe(teacherFreezeOff?.gametic);
 
   await page.setViewportSize({width:390,height:844});
   await page.locator("#playTabBtn").click();
