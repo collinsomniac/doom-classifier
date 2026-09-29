@@ -1,0 +1,111 @@
+name: feature-validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - doom.html
+      - styles.css
+      - "src/**"
+      - "tests/**"
+      - "engine/**"
+      - "runtime/**"
+      - ".github/workflows/feature-validation.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: feature-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check JavaScript
+        run: find src tests -name '*.js' -o -name '*.mjs' | xargs -n1 node --check
+      - name: Deterministic core tests
+        run: |
+          node tests/smoke.mjs
+          node tests/doom-adapter.mjs
+          node tests/neural-set.mjs
+          node tests/neural-temporal.mjs
+          node tests/action-factorization.mjs
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Chromium tooling
+        run: |
+          npm install --no-save --no-package-lock @playwright/test@1.55.0
+          npx playwright install chromium
+      - name: Start static server
+        run: python3 -m http.server 8000 --bind 127.0.0.1 > /tmp/feature-browser-http.log 2>&1 &
+      - name: Browser integration
+        run: npx playwright test tests/doom-browser.spec.mjs tests/causal-starter-load.spec.mjs --reporter=line
+
+  grounded-combat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      CAUSAL_TRAIN_STEPS: "768"
+      CAUSAL_REPLAY_ROLLOUTS: "16"
+      CAUSAL_REPLAY_STEPS: "64"
+      CAUSAL_KILL_TARGET: "20"
+      CAUSAL_MIN_DIVERSITY: "4"
+      CAUSAL_MIN_SWITCHES: "8"
+      CAUSAL_MAX_STREAK: "24"
+      CAUSAL_OUTPUT_DIR: artifacts/causal-combat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Chromium tooling
+        run: |
+          npm install --no-save --no-package-lock @playwright/test@1.55.0
+          npx playwright install chromium
+      - name: Start static server
+        run: python3 -m http.server 8000 --bind 127.0.0.1 > /tmp/feature-causal-http.log 2>&1 &
+      - name: Train and evaluate grounded causal policy
+        run: npx playwright test tests/doom-causal-combat.spec.mjs --reporter=line
+      - name: Show grounded combat metrics
+        if: always()
+        run: |
+          test -s artifacts/causal-combat/combat-report.json
+          node - <<'NODE'
+          const x=require("./artifacts/causal-combat/combat-report.json");
+          console.log(JSON.stringify({
+            training:{
+              kills:x.training.kills,damage:x.training.damage,examples:x.training.examples,
+              informative:x.training.informative,typedFit:x.training.meanTypedTargetFit,
+              typedBlend:x.training.meanTypedTargetBlend
+            },
+            evaluation:{
+              kills:x.evaluation.totalKills,damage:x.evaluation.totalDamage,reward:x.evaluation.totalReward,
+              diversity:x.evaluation.actionDiversity,minRunDiversity:x.evaluation.minRunDiversity,
+              switches:x.evaluation.totalSwitches,maxStreak:x.evaluation.maxStreak
+            },
+            grounding:x.grounding,
+            fiveMinute:x.fiveMinute
+          },null,2));
+          NODE
+      - name: Upload feature benchmark
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grounded-combat-feature-benchmark
+          path: artifacts/causal-combat/
+          if-no-files-found: error
+          retention-days: 30
