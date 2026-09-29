@@ -92,10 +92,20 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   const semanticProbes=await page.evaluate(async()=>{
     const {env,policy}=window.__doomLab,base=env.observe(),actions=policy.actions;
     const mkEntity=(overrides={})=>({engine_record_id:99,type:1,x:base.player_x+128,y:base.player_y,z:base.player_z,relative_x:128,relative_y:0,relative_z:0,velocity_x:0,velocity_y:0,radius:20,height:56,health:40,distance:128,relative_angle:0,visible:1,countkill:1,pickup:0,targeting_player:1,...overrides});
+    const relation=(bearing=null,distance=4096)=>({
+      visible_hostile_count:bearing===null?0:1,targeting_hostile_count:bearing===null?0:1,
+      nearest_hostile_distance:bearing===null?4096:distance,nearest_hostile_bearing:bearing??0,
+      nearest_visible_hostile_distance:bearing===null?4096:distance,nearest_visible_hostile_bearing:bearing??0,nearest_visible_hostile_health:bearing===null?0:40,
+      visible_hostile_bearing_zone:bearing===null?0:Math.abs(bearing)<=.06?1:bearing>0?2:3,
+      visible_hostile_distance_zone:bearing===null?0:distance<256?1:distance<768?2:3,
+      aim_alignment:bearing===null?0:1-Math.min(1,Math.abs(bearing)*8),
+      nearest_targeting_hostile_distance:bearing===null?4096:distance,nearest_targeting_hostile_bearing:bearing??0,
+      visible_projectile_count:0,nearest_projectile_distance:4096,nearest_projectile_bearing:0
+    });
     const cases={
-      enemy_ahead:{...base,health:100,recent_damage:0,recent_hostile_hp_loss:0,under_fire:0,bullets:50,_collections:{entities:[mkEntity()],geometry:[]}},
-      under_fire_side:{...base,health:35,recent_damage:20,recent_hostile_hp_loss:0,under_fire:1,bullets:50,_collections:{entities:[mkEntity({relative_x:64,relative_y:96,distance:116,relative_angle:.22})],geometry:[]}},
-      quiet_room:{...base,health:100,recent_damage:0,recent_hostile_hp_loss:0,under_fire:0,bullets:50,_collections:{entities:[],geometry:[]}}
+      enemy_ahead:{...base,...relation(0,128),health:100,recent_damage:0,recent_hostile_hp_loss:0,under_fire:0,bullets:50,_collections:{entities:[mkEntity()],geometry:[]}},
+      under_fire_side:{...base,...relation(.22,116),health:35,recent_damage:20,recent_hostile_hp_loss:0,under_fire:1,bullets:50,_collections:{entities:[mkEntity({relative_x:64,relative_y:96,distance:116,relative_angle:.22})],geometry:[]}},
+      quiet_room:{...base,...relation(null),health:100,recent_damage:0,recent_hostile_hp_loss:0,under_fire:0,bullets:50,_collections:{entities:[],geometry:[]}}
     };
     const out={};
     for(const [name,obs] of Object.entries(cases)){
