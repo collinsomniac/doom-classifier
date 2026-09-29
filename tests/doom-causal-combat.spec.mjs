@@ -114,7 +114,7 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
 
   const checkpoint=await page.evaluate(()=>window.__doomLab.policy.exportCheckpoint());
   checkpoint.build={
-    selection:"exact-state causal policy curriculum",
+    selection:"canonical exact-state causal policy curriculum",
     causalSteps,probeTics:24,actionTics:4,rolloutHorizon:64,
     training:{kills:training.kills,damage:training.damage,return:training.return,examples:training.examples,informative:training.informative}
   };
@@ -128,7 +128,7 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
   const evaluated=await evaluateExact(page,{rollouts:replayRollouts,stepsPerRollout:replaySteps,actionTics:4,verifyReplay:true});
   const {replay,...evaluation}=evaluated;
   const report={
-    version:"causal-policy-v2-gradient-replay",
+    version:"causal-policy-v3-canonical-replay",
     gate:{killTarget,minDiversity,minSwitches,maxStreakLimit},
     runtime,baseline,training,evaluation,replay,
     checkpoint:{params:checkpoint.q?.params,bytes:JSON.stringify(checkpoint).length}
