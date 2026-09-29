@@ -229,8 +229,8 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
     const canonical=c.environment.saveSnapshot();c.environment.restoreSnapshot(canonical);p.resetEpisode();
     p.setInferenceMode("neural");
     return c.trainCausalPolicy({
-      steps,probeTics:8,actionTics:4,plannerDepth:2,continuationTics:8,continuationCandidates:4,rolloutHorizon:128,
-      targetTemperature:.28,priorStrength:.02,superviseSteps:3,superviseStrength:.58,
+      steps,probeTics:24,actionTics:4,plannerDepth:1,continuationTics:8,continuationCandidates:4,rolloutHorizon:128,
+      targetTemperature:.28,priorStrength:0,superviseSteps:3,superviseStrength:.58,
       supervisionReplay:2,replayStrength:.20,behaviorCoverage:.55,
       batchRefitEvery:0,batchWindow:steps,finalRefit:false,ridge:.02
     });
@@ -250,7 +250,7 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
 
   checkpoint.build={
     selection:"canonical exact-state typed causal curriculum",
-    causalSteps,probeTics:8,actionTics:4,plannerDepth:2,continuationTics:8,continuationCandidates:4,rolloutHorizon:128,
+    causalSteps,probeTics:24,actionTics:4,plannerDepth:1,continuationTics:8,continuationCandidates:4,rolloutHorizon:128,
     training:{
       kills:training.kills,damage:training.damage,return:training.return,examples:training.examples,informative:training.informative,
       meanTypedTargetFit:training.meanTypedTargetFit,meanTypedTargetBlend:training.meanTypedTargetBlend,
@@ -264,7 +264,7 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
   writeFileSync(resolve(outputDir,"doom-causal-checkpoint.json"),JSON.stringify(checkpoint));
 
   const report={
-    version:"causal-policy-v5-factorized-lookahead",
+    version:"causal-policy-v6-factorized-prior-free",
     gate:{killTarget,minDiversity,minSwitches,maxStreakLimit},
     runtime,baseline,training,evaluation,replay,grounding,fiveMinute,
     checkpoint:{params:checkpoint.q?.params,bytes:JSON.stringify(checkpoint).length}
@@ -283,8 +283,8 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
     params:checkpoint.q?.params
   }));
 
-  expect(training.examples).toBe(causalSteps);
-  expect(training.informative).toBeGreaterThan(causalSteps*.15);
+  expect(training.examples).toBe(training.informative);
+  expect(training.informative).toBeGreaterThan(causalSteps*.55);
   expect(replay.sameStartSnapshot).toBe(true);
   expect(replay.exact).toBe(true);
   expect(replay.totalKills).toBe(evaluation.totalKills);
