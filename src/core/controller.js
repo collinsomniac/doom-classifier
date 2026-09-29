@@ -5,7 +5,7 @@ export const ControllerState=Object.freeze({READY:"READY",RUNNING:"RUNNING",PAUS
 export class ExperimentController extends EventTarget{
   constructor({environment,policy,hz=20}){
     super();this.environment=environment;this.policy=policy;this.hz=hz;this.state=ControllerState.READY;
-    this.useResidual=true;this.training=false;this.memory=true;this.explore=false;this.timer=null;this.loopVersion=0;this.inFlight=false;
+    this.useResidual=true;this.training=false;this.memory=true;this.explore=false;this.freezeOnTeacher=true;this.timer=null;this.loopVersion=0;this.inFlight=false;this.teacherWaiting=false;
     this.trace=[];this.latencies=[];this.steps=0;this.episodes=0;this.episodeReturn=0;this.returns=[];this.lastDecision=null;
   }
   setState(next){this.state=next;this.dispatchEvent(new CustomEvent("state",{detail:next}))}
@@ -19,6 +19,19 @@ export class ExperimentController extends EventTarget{
     return true;
   }
   schedule(token,delay){if(this.state!==ControllerState.RUNNING||token!==this.loopVersion)return;this.timer=setTimeout(async()=>{const started=performance.now();await this.tick();const remaining=Math.max(0,1000/this.hz-(performance.now()-started));this.schedule(token,remaining)},delay)}
+  async withTeacherFreeze(reason,work){
+    const canFreeze=this.freezeOnTeacher&&typeof this.environment?.setPaused==="function";
+    const started=performance.now();
+    if(canFreeze)this.environment.setPaused(true);
+    this.teacherWaiting=true;
+    this.dispatchEvent(new CustomEvent("teacherwait",{detail:{active:true,reason:String(reason||"low confidence"),started,simulationFrozen:canFreeze}}));
+    try{return await work()}
+    finally{
+      if(canFreeze)this.environment.setPaused(false);
+      this.teacherWaiting=false;
+      this.dispatchEvent(new CustomEvent("teacherwait",{detail:{active:false,reason:String(reason||"low confidence"),elapsedMs:performance.now()-started,simulationFrozen:canFreeze}}));
+    }
+  }
   async reset({learning=false}={}){
     await this.quiesce({teacher:true});this.setState(ControllerState.RESETTING);
     await this.environment.reset();this.policy.resetEpisode();if(learning)this.policy.resetLearning();
@@ -27,7 +40,23 @@ export class ExperimentController extends EventTarget{
   async tick(){
     if(this.inFlight)return false;this.inFlight=true;
     try{
-      const obs=await this.environment.observe(),decision=await this.policy.decide(obs,{useResidual:this.useResidual,memory:this.memory,explore:this.training&&this.explore});
+      const obs=await this.environment.observe(),decisionOptions={useResidual:this.useResidual,memory:this.memory,explore:this.training&&this.explore};
+      let decision;
+
+      if(this.policy.inferenceMode==="hybrid"&&this.freezeOnTeacher){
+        decision=await this.withTeacherFreeze("teacher in decode path",()=>this.policy.decide(obs,decisionOptions));
+      }else{
+        decision=await this.policy.decide(obs,decisionOptions);
+        if(decision.teacherUsed&&this.freezeOnTeacher&&this.policy.awaitTeacher){
+          const trigger=decision.teacherReason||"low confidence";
+          await this.withTeacherFreeze(trigger,()=>this.policy.awaitTeacher());
+          // Re-score the exact same observation after distillation. Do not
+          // advance temporal/novelty state or schedule another teacher.
+          const resolved=await this.policy.decide(obs,{...decisionOptions,allowTeacher:false,commit:false});
+          decision={...resolved,teacherUsed:true,teacherPending:false,teacherResolved:true,teacherReason:trigger,teacherWaitMs:this.policy.lastTeacherLatencyMs};
+        }
+      }
+
       const step=await this.environment.step(decision.action.id),outcome=step.info?.outcome||null;
       const nextHistory=this.policy.previewActionOutcome?.({actionIndex:decision.actionIndex,reward:step.reward,outcome,done:step.done})||null;
       const nextEncoded=this.policy.encode(step.observation,this.memory,false);
@@ -38,7 +67,7 @@ export class ExperimentController extends EventTarget{
       this.trace.push({
         t:Date.now(),step:this.steps,observation:obs,action:decision.action.id,probabilities:Object.fromEntries(this.policy.actions.map((a,i)=>[a.id,decision.probs[i]])),reward:step.reward,outcome:step.info?.outcome||null,
         uncertainty:decision.uncertainty,valueBeta:decision.valueBeta??0,priorKL:decision.priorKL??0,valueTrust:decision.valueTrust??0,basePriorKlBudget:decision.basePriorKlBudget??0,priorKlBudget:decision.priorKlBudget??0,klUtilization:decision.klUtilization??0,valueEpistemic:decision.valueEpistemic??0,valueEpistemicBudget:decision.valueEpistemicBudget??0,epistemicUtilization:decision.epistemicUtilization??0,typedValueFit:decision.typedValueFit??0,typedValueBlendUsed:decision.typedValueBlendUsed??0,criticGap:decision.criticGap??0,criticGapShare:decision.criticGapShare??0,criticTopAgreement:decision.criticTopAgreement??0,criticMarginSnr:decision.criticMarginSnr??0,criticRankingConfidence:decision.criticRankingConfidence??0,criticAuthority:decision.criticAuthority??0,criticKlGate:decision.criticKlGate??1,criticKlMultiplier:decision.criticKlMultiplier??1,probabilityCalibrated:!!decision.probabilityCalibrated,probabilityCalibrationTemperature:Number(decision.probabilityCalibrationTemperature||1),probabilityTemperature:Number(decision.probabilityTemperature||0),valueBetaSaturated:!!decision.valueBetaSaturated,semanticPrior:decision.semanticPriorScores?.[decision.actionIndex]??null,learnedValue:decision.valueScores?.[decision.actionIndex]??null,combinedScore:decision.qScores?.[decision.actionIndex]??null,latencyMs:decision.latencyMs,semanticLatencyMs:decision.semanticLatencyMs,residualLatencyMs:decision.residualLatencyMs,
-        teacherUsed:decision.teacherUsed,teacherPending:decision.teacherPending,semanticUsed:decision.semanticUsed,inferenceMode:decision.inferenceMode,explorationStrategy:decision.explorationStrategy,decisionRule:decision.decisionRule||"argmax",uncertaintySampleChance:Number(decision.uncertaintySampleChance||0),teacherCalls:this.policy.teacherCalls,teacherScheduled:this.policy.teacherScheduled,lastTeacherLatencyMs:this.policy.lastTeacherLatencyMs,
+        teacherUsed:decision.teacherUsed,teacherPending:decision.teacherPending,teacherResolved:!!decision.teacherResolved,teacherReason:decision.teacherReason||null,teacherWaitMs:Number(decision.teacherWaitMs||0),semanticUsed:decision.semanticUsed,inferenceMode:decision.inferenceMode,explorationStrategy:decision.explorationStrategy,decisionRule:decision.decisionRule||"argmax",uncertaintySampleChance:Number(decision.uncertaintySampleChance||0),teacherCalls:this.policy.teacherCalls,teacherScheduled:this.policy.teacherScheduled,lastTeacherLatencyMs:this.policy.lastTeacherLatencyMs,
         learning:learningInfo?{td:Number(learningInfo.td||0),target:Number(learningInfo.target||0),q:Number(learningInfo.q||0),combined:Number(learningInfo.combined||0),bootstrapActionIndex:Number(learningInfo.bootstrapActionIndex??-1),bootstrapValue:Number(learningInfo.bootstrapValue||0),doubleDqn:!!learningInfo.doubleDqn,replayUpdates:Number(learningInfo.replayUpdates||0),replayMeanAbsTd:Number(learningInfo.replayMeanAbsTd||0),replaySize:Number(learningInfo.replaySize||0),nStepHorizon:Number(learningInfo.nStepHorizon||0),primaryUpdates:Number(learningInfo.primaryUpdates||0)}:null,
         backbone:this.policy.semantic.name,residual:this.policy.q.name||this.policy.q.constructor.name,backend:this.policy.semantic.backend||"local-js",
         mode:{useResidual:this.useResidual,training:this.training,memory:this.memory,explore:this.explore}
@@ -46,8 +75,11 @@ export class ExperimentController extends EventTarget{
       if(this.trace.length>5000)this.trace.shift();
       if(step.done){this.episodes++;this.returns.push(this.episodeReturn);if(this.returns.length>200)this.returns.shift();this.episodeReturn=0;await this.environment.reset();this.policy.resetEpisode()}
       this.dispatchEvent(new Event("tick"));return true;
-    }catch(err){console.error(err);this.loopVersion++;if(this.timer)clearTimeout(this.timer);this.timer=null;this.setState(ControllerState.ERROR);this.dispatchEvent(new CustomEvent("error",{detail:err}));return false}
-    finally{this.inFlight=false}
+    }catch(err){
+      if(this.teacherWaiting&&typeof this.environment?.setPaused==="function")this.environment.setPaused(false);
+      this.teacherWaiting=false;
+      console.error(err);this.loopVersion++;if(this.timer)clearTimeout(this.timer);this.timer=null;this.setState(ControllerState.ERROR);this.dispatchEvent(new CustomEvent("error",{detail:err}));return false
+    }finally{this.inFlight=false}
   }
   async trainBurst({steps=128,epsilon=.16,rolloutHorizon=0,onProgress=()=>{}}={}){
     const previous={training:this.training,explore:this.explore,epsilon:this.policy.epsilon};
