@@ -117,7 +117,9 @@ export class ExperimentController extends EventTarget{
     steps=512,probeTics=24,actionTics=4,rolloutHorizon=128,
     targetTemperature=.30,priorStrength=.08,superviseSteps=3,superviseStrength=.55,
     supervisionReplay=2,replayStrength=.24,batchRefitEvery=0,batchWindow=192,
-    finalRefit=false,ridge=.025,factorizedTargetBlend=.70,behaviorCoverage=.35,seed=0x51a9e,onProgress=()=>{}
+    finalRefit=false,ridge=.025,factorizedTargetBlend=.70,behaviorCoverage=.35,
+    anchorExamples=null,anchorReplay=0,anchorStrength=.12,
+    seed=0x51a9e,onProgress=()=>{}
   }={}){
     if(!this.environment?.supportsSnapshots?.()||!this.environment?.supportsExactTics?.())throw new Error("Causal policy training requires exact snapshots and tic stepping");
     if(!this.policy?.superviseDecisionDistribution||!this.policy?.fitDecisionDistributions)throw new Error("Policy does not support proper-score supervision");
@@ -126,7 +128,9 @@ export class ExperimentController extends EventTarget{
     this.training=false;this.explore=false;this.memory=true;this.policy.setInferenceMode("neural");this.setState(ControllerState.TUNING);
     const examples=[],curriculumTrace=[],counts={},behaviorCounts={},startStep=this.steps,replayRng=mulberry32(Number(seed)>>>0);
     const coverage=Math.max(0,Math.min(1,Number(behaviorCoverage)||0));
-    let totalReward=0,totalDamage=0,totalKills=0,totalPickups=0,totalSpread=0,informative=0,resets=0,fitPasses=0,supervisionUpdates=0,replaySupervisionUpdates=0,coverageActions=0;
+    const anchors=Array.isArray(anchorExamples)?anchorExamples.filter(ex=>Array.isArray(ex?.target)&&ex.target.length===this.policy.actions.length):[];
+    const anchorPerStep=Math.max(0,Math.floor(Number(anchorReplay)||0)),anchorWeight=Math.max(0,Number(anchorStrength)||0);
+    let totalReward=0,totalDamage=0,totalKills=0,totalPickups=0,totalSpread=0,informative=0,resets=0,fitPasses=0,supervisionUpdates=0,replaySupervisionUpdates=0,anchorSupervisionUpdates=0,coverageActions=0;
     const canonicalize=()=>{
       const snapshot=this.environment.saveSnapshot();
       this.environment.restoreSnapshot(snapshot);
@@ -170,6 +174,15 @@ export class ExperimentController extends EventTarget{
           });
           replaySupervisionUpdates+=Number(replayed?.stepsUsed||0);
         }
+        if(anchors.length&&anchorPerStep>0&&anchorWeight>0){
+          for(let ai=0;ai<anchorPerStep;ai++){
+            const ex=anchors[Math.floor(replayRng()*anchors.length)];
+            const replayed=this.policy.superviseDecisionDistribution(ex.observation,ex.target,{
+              steps:1,strength:anchorWeight,temporal:ex.temporal||null,history:ex.history||null
+            });
+            anchorSupervisionUpdates+=Number(replayed?.stepsUsed||0);
+          }
+        }
         if(probe.spread>1e-9){informative++;totalSpread+=probe.spread}
 
         // Supervision and state collection are intentionally decoupled.
@@ -211,7 +224,7 @@ export class ExperimentController extends EventTarget{
         }
         if(i===0||(i+1)%8===0||i+1===steps)onProgress({
           completed:i+1,total:steps,ratio:(i+1)/steps,kills:totalKills,damage:totalDamage,
-          examples:examples.length,informative,resets,replaySupervisionUpdates,coverageActions,
+          examples:examples.length,informative,resets,replaySupervisionUpdates,anchorSupervisionUpdates,coverageActions,
           behaviorDiversity:Object.keys(behaviorCounts).length
         });
         await Promise.resolve();
@@ -227,7 +240,7 @@ export class ExperimentController extends EventTarget{
         examples:examples.length,informative,meanInformativeSpread:informative?totalSpread/informative:0,
         meanTypedTargetFit:examples.length?examples.reduce((sum,ex)=>sum+Number(ex.typedFit||0),0)/examples.length:0,
         meanTypedTargetBlend:examples.length?examples.reduce((sum,ex)=>sum+Number(ex.typedBlend||0),0)/examples.length:0,
-        supervisionUpdates,replaySupervisionUpdates,fitPasses,finalRefit:!!finalRefit,resets,coverageActions,
+        supervisionUpdates,replaySupervisionUpdates,anchorSupervisionUpdates,anchorExamples:anchors.length,anchorReplay:anchorPerStep,anchorStrength:anchorWeight,fitPasses,finalRefit:!!finalRefit,resets,coverageActions,
         return:totalReward,damage:totalDamage,kills:totalKills,pickups:totalPickups,
         actionDiversity:Object.keys(counts).length,actionCounts:counts,
         behaviorDiversity:Object.keys(behaviorCounts).length,behaviorActionCounts:behaviorCounts,trace:curriculumTrace
