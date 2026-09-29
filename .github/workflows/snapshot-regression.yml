@@ -2,7 +2,7 @@ name: snapshot-regression
 
 on:
   push:
-    branches: [main, fix/canonical-snapshot-determinism]
+    branches: [main]
     paths:
       - tests/doom-snapshot-regression.spec.mjs
       - .github/workflows/snapshot-regression.yml
