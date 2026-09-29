@@ -63,6 +63,46 @@ test("generic and combat exact-tic sequences are identical after snapshot restor
       };
     };
 
+    const checkLiveVsRestored=async(sequence,{precondition=false,observeBeforeAction=true}={})=>{
+      await env.reset();
+      if(precondition){
+        const branchActions=["forward_fire","strafe_left_fire","back_fire","turn_left_fire","strafe_right_fire","fire"];
+        for(let i=0;i<72;i++){
+          const branch=env.saveSnapshot();
+          env.stepTics(branchActions[i%branchActions.length],24);
+          env.restoreSnapshot(branch);
+        }
+      }
+
+      const snap=env.saveSnapshot();
+      const startLive=simplify(env.readRaw());
+      const live=[];
+      for(let i=0;i<sequence.length;i++){
+        if(observeBeforeAction)env.observe();
+        const before=simplify(env.readRaw()),step=env.stepTics(sequence[i],4),after=simplify(env.readRaw());
+        live.push({i,action:sequence[i],before,after,reward:Number(step.reward||0),outcome:step.info?.outcome||null});
+      }
+
+      env.restoreSnapshot(snap);
+      const startRestored=simplify(env.readRaw());
+      const replay=[];
+      for(let i=0;i<sequence.length;i++){
+        if(observeBeforeAction)env.observe();
+        const before=simplify(env.readRaw()),step=env.stepTics(sequence[i],4),after=simplify(env.readRaw());
+        replay.push({i,action:sequence[i],before,after,reward:Number(step.reward||0),outcome:step.info?.outcome||null});
+      }
+
+      let first=-1;
+      for(let i=0;i<live.length;i++){
+        if(JSON.stringify(live[i])!==JSON.stringify(replay[i])){first=i;break}
+      }
+      return{
+        first,length:sequence.length,startEqual:JSON.stringify(startLive)===JSON.stringify(startRestored),
+        startLive,startRestored,
+        diff:first<0?null:{first,action:sequence[first],live:live[first],restored:replay[first],previous:first>0?{live:live[first-1],restored:replay[first-1]}:null}
+      };
+    };
+
     const checkObservationParity=async sequence=>{
       await env.reset();
       const snap=env.saveSnapshot();
@@ -93,6 +133,8 @@ test("generic and combat exact-tic sequences are identical after snapshot restor
       combat:await check(combatSequence),
       combatAfterForkPressure:await check(combatSequence,{precondition:true}),
       observationParity:await checkObservationParity(combatSequence),
+      liveVsRestored:await checkLiveVsRestored(combatSequence),
+      liveVsRestoredAfterForkPressure:await checkLiveVsRestored(combatSequence,{precondition:true}),
       runtime:env.runtime
     };
   },{genericSequence,combatSequence});
@@ -102,4 +144,6 @@ test("generic and combat exact-tic sequences are identical after snapshot restor
   expect(result.combat.first).toBe(-1);
   expect(result.combatAfterForkPressure.first).toBe(-1);
   expect(result.observationParity.first).toBe(-1);
+  expect(result.liveVsRestored.first).toBe(-1);
+  expect(result.liveVsRestoredAfterForkPressure.first).toBe(-1);
 });
