@@ -147,8 +147,8 @@ export class ExperimentController extends EventTarget{
     }
   }
   async trainCausalPolicy({
-    steps=512,probeTics=8,actionTics=4,plannerDepth=2,continuationTics=8,continuationCandidates=4,rolloutHorizon=128,
-    targetTemperature=.30,priorStrength=.08,superviseSteps=3,superviseStrength=.55,
+    steps=512,probeTics=24,actionTics=4,plannerDepth=1,continuationTics=8,continuationCandidates=4,rolloutHorizon=128,
+    targetTemperature=.30,priorStrength=0,superviseSteps=3,superviseStrength=.55,
     supervisionReplay=2,replayStrength=.24,batchRefitEvery=0,batchWindow=192,
     finalRefit=false,ridge=.025,factorizedTargetBlend=.70,behaviorCoverage=.35,seed=0x51a9e,onProgress=()=>{}
   }={}){
@@ -173,9 +173,13 @@ export class ExperimentController extends EventTarget{
         const obs=await this.environment.observe();
         const decision=await this.policy.decide(obs,{useResidual:true,memory:true,explore:false});
         const planningDepth=Math.max(1,Math.min(2,Math.floor(plannerDepth||1)));
+        // Causal supervision must come from measured consequences, not from
+        // the student's current policy. A uniform label prior prevents
+        // zero-spread probes from silently self-distilling an attractor.
+        const causalPrior=new Array(this.policy.actions.length).fill(1/this.policy.actions.length);
         const probe=await probeCounterfactualActions({
-          environment:this.environment,actions:this.policy.actions,prior:decision.probs,horizon:planningDepth,
-          temperature:targetTemperature,priorStrength,discount:.96,
+          environment:this.environment,actions:this.policy.actions,prior:causalPrior,horizon:planningDepth,
+          temperature:targetTemperature,priorStrength:0,discount:.96,
           continuation:planningDepth>1?async({environment})=>{
             const nextObs=await environment.observe();
             const nextDecision=await this.policy.decide(nextObs,{useResidual:true,memory:true,explore:false,allowTeacher:false,commit:false});
@@ -195,29 +199,32 @@ export class ExperimentController extends EventTarget{
         const logTarget=measuredTarget.map(p=>Math.log(Math.max(1e-8,Number(p)||0)));
         const typedProjection=projectValueToActionFields(this.policy.schema,this.policy.actions,logTarget,{ridge:.035,maxBlend:factorizedTargetBlend});
         const target=softmax(typedProjection.scores,1);
-        const example={
-          observation:globalThis.structuredClone?globalThis.structuredClone(obs):JSON.parse(JSON.stringify(obs)),
-          target,measuredTarget,typedFit:Number(typedProjection.fitQuality||0),typedBlend:Number(typedProjection.blendUsed||0),
-          temporal:decision.temporal?new Float32Array(decision.temporal):null,
-          history:decision.history?JSON.parse(JSON.stringify(decision.history)):null
-        };
-        examples.push(example);
-        const supervised=this.policy.superviseDecisionDistribution(obs,target,{
-          steps:superviseSteps,strength:superviseStrength,temporal:decision.temporal,history:decision.history
-        });
-        supervisionUpdates+=Number(supervised?.stepsUsed||0);
-
-        // Proper-score replay prevents the sequential curriculum from collapsing
-        // onto the globally frequent action at the expense of earlier state distinctions.
-        const replayCount=Math.min(Math.max(0,Math.floor(supervisionReplay)),Math.max(0,examples.length-1));
-        for(let ri=0;ri<replayCount;ri++){
-          const ex=examples[Math.floor(replayRng()*(examples.length-1))];
-          const replayed=this.policy.superviseDecisionDistribution(ex.observation,ex.target,{
-            steps:1,strength:replayStrength,temporal:ex.temporal,history:ex.history
+        const isInformative=probe.spread>1e-9;
+        if(isInformative){
+          const example={
+            observation:globalThis.structuredClone?globalThis.structuredClone(obs):JSON.parse(JSON.stringify(obs)),
+            target,measuredTarget,typedFit:Number(typedProjection.fitQuality||0),typedBlend:Number(typedProjection.blendUsed||0),
+            temporal:decision.temporal?new Float32Array(decision.temporal):null,
+            history:decision.history?JSON.parse(JSON.stringify(decision.history)):null
+          };
+          examples.push(example);
+          const supervised=this.policy.superviseDecisionDistribution(obs,target,{
+            steps:superviseSteps,strength:superviseStrength,temporal:decision.temporal,history:decision.history
           });
-          replaySupervisionUpdates+=Number(replayed?.stepsUsed||0);
+          supervisionUpdates+=Number(supervised?.stepsUsed||0);
+
+          // Replay only measured-informative labels. Exact ties carry no
+          // action preference and must not consume the supervision budget.
+          const replayCount=Math.min(Math.max(0,Math.floor(supervisionReplay)),Math.max(0,examples.length-1));
+          for(let ri=0;ri<replayCount;ri++){
+            const ex=examples[Math.floor(replayRng()*(examples.length-1))];
+            const replayed=this.policy.superviseDecisionDistribution(ex.observation,ex.target,{
+              steps:1,strength:replayStrength,temporal:ex.temporal,history:ex.history
+            });
+            replaySupervisionUpdates+=Number(replayed?.stepsUsed||0);
+          }
+          informative++;totalSpread+=probe.spread;
         }
-        if(probe.spread>1e-9){informative++;totalSpread+=probe.spread}
 
         // Supervision and state collection are intentionally decoupled.
         // The exact-state probe supplies the label, while a coverage behavior
@@ -270,8 +277,8 @@ export class ExperimentController extends EventTarget{
       }
       this.policy.q.syncTarget?.({value:false});
       return{
-        requested:steps,completed:this.steps-startStep,probeTics,actionTics,plannerDepth:Math.max(1,Math.min(2,Math.floor(plannerDepth||1))),continuationTics,continuationCandidates,rolloutHorizon,factorizedTargetBlend,behaviorCoverage:coverage,
-        examples:examples.length,informative,meanInformativeSpread:informative?totalSpread/informative:0,
+        requested:steps,completed:this.steps-startStep,visitedStates:this.steps-startStep,probeTics,actionTics,plannerDepth:Math.max(1,Math.min(2,Math.floor(plannerDepth||1))),continuationTics,continuationCandidates,rolloutHorizon,factorizedTargetBlend,behaviorCoverage:coverage,
+        examples:examples.length,informative,uninformative:Math.max(0,(this.steps-startStep)-informative),meanInformativeSpread:informative?totalSpread/informative:0,
         meanTypedTargetFit:examples.length?examples.reduce((sum,ex)=>sum+Number(ex.typedFit||0),0)/examples.length:0,
         meanTypedTargetBlend:examples.length?examples.reduce((sum,ex)=>sum+Number(ex.typedBlend||0),0)/examples.length:0,
         supervisionUpdates,replaySupervisionUpdates,fitPasses,finalRefit:!!finalRefit,resets,coverageActions,
