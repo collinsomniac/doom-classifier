@@ -10,6 +10,7 @@ import {softmax} from "./core/math.js";
 const OWNED_RUNTIME_POINTER="./runtime/engine-runtime.json";
 const OWNED_RUNTIME_RAW_ROOT="https://raw.githubusercontent.com/collinsomniac/doom-classifier";
 const STARTER_MODEL_BASE="https://raw.githubusercontent.com/collinsomniac/doom-classifier/model-runtime";
+const GENERIC_STARTER_BASE="https://raw.githubusercontent.com/collinsomniac/doom-classifier/starter-runtime";
 const query=new URLSearchParams(globalThis.location?.search||""),requestedRuntime=query.get("runtime")||"owned",starterMode=query.get("starter")||"auto";
 async function resolveOwnedRuntime(){
   const response=await fetch(OWNED_RUNTIME_POINTER,{cache:"no-store"});
@@ -515,7 +516,7 @@ function installReplayBundle(bundle){
   updateReadiness();
 }
 async function fetchStarterCheckpoint(){
-  const urls=[STARTER_MODEL_BASE+"/doom-starter.json","./models/doom-starter.json"];
+  const urls=[STARTER_MODEL_BASE+"/doom-starter.json",GENERIC_STARTER_BASE+"/doom-starter.json","./models/doom-starter.json"];
   let last=null;
   for(const url of urls){
     try{
@@ -547,7 +548,7 @@ async function loadBundledCheckpoint({silent=false}={}){
     if(!silent)ui.checkpointStatus.textContent="Fetching validated starter…";
     const {checkpoint,url}=await fetchStarterCheckpoint();
     await importPortableCheckpoint(checkpoint,"validated starter");
-    const summary=checkpointSummary(checkpointInfo);ui.checkpointStatus.textContent=(summary?("Validated starter · "+(summary.kind==="causal"?"causal policy":"stage "+summary.stage)+" / "+summary.decisions+" decisions · "+summary.damage.toFixed(0)+" damage · "+summary.kills.toFixed(0)+" kills · return "+summary.reward.toFixed(3)):"Validated starter loaded")+" · "+policy.q.parameterCount()+" params · source "+(url.includes("model-runtime")?"model-runtime snapshot":"local bundle");
+    const summary=checkpointSummary(checkpointInfo);ui.checkpointStatus.textContent=(summary?("Validated starter · "+(summary.kind==="causal"?"causal policy":"stage "+summary.stage)+" / "+summary.decisions+" decisions · "+summary.damage.toFixed(0)+" damage · "+summary.kills.toFixed(0)+" kills · return "+summary.reward.toFixed(3)):"Validated starter loaded")+" · "+policy.q.parameterCount()+" params · source "+(url.includes("model-runtime")?"model-runtime causal snapshot":url.includes("starter-runtime")?"starter-runtime staged snapshot":"local bundle");
     if(url.includes("model-runtime"))try{installReplayBundle(await fetchPublishedReplayBundle())}catch(error){if(ui.publishedReplayStatus)ui.publishedReplayStatus.textContent="Replay bundle unavailable · "+String(error?.message||error)}
     return true;
   }catch(error){
