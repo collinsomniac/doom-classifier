@@ -109,6 +109,13 @@ static void PromptFPS_ResetEvents(void)
     )
     replace_once(
         bridge,
+        "#include <stdio.h>\n",
+        "#include <stdio.h>\n#include <stdlib.h>\n",
+        "observation purity allocation include",
+    )
+
+    replace_once(
+        bridge,
         """EMSCRIPTEN_KEEPALIVE void PromptFPS_SetPaused(int should_pause)
 {
     paused = should_pause != 0;
@@ -117,6 +124,39 @@ static void PromptFPS_ResetEvents(void)
         """EMSCRIPTEN_KEEPALIVE void PromptFPS_SetPaused(int should_pause)
 {
     paused = should_pause != 0;
+}
+
+static int *promptfps_observation_line_validcount;
+static int promptfps_observation_line_capacity;
+
+static boolean PromptFPS_CheckSightPure(mobj_t *from, mobj_t *to)
+{
+    int *next;
+    int saved_validcount;
+    int result;
+    int i;
+
+    if (numlines > promptfps_observation_line_capacity)
+    {
+        next = realloc(promptfps_observation_line_validcount,
+                       sizeof(int) * (size_t) numlines);
+        if (next == NULL)
+            return P_CheckSight(from, to);
+        promptfps_observation_line_validcount = next;
+        promptfps_observation_line_capacity = numlines;
+    }
+
+    saved_validcount = validcount;
+    for (i = 0; i < numlines; ++i)
+        promptfps_observation_line_validcount[i] = lines[i].validcount;
+
+    result = P_CheckSight(from, to);
+
+    validcount = saved_validcount;
+    for (i = 0; i < numlines; ++i)
+        lines[i].validcount = promptfps_observation_line_validcount[i];
+
+    return result;
 }
 
 extern void G_PromptFPSSaveSnapshot(void);
@@ -176,6 +216,25 @@ EMSCRIPTEN_KEEPALIVE int PromptFPS_HasSnapshot(void)
 }
 """,
         "snapshot bridge exports",
+    )
+
+    replace_once(
+        bridge,
+        'P_CheckSight(player, mo) ? "true" : "false"',
+        'PromptFPS_CheckSightPure(player, mo) ? "true" : "false"',
+        "pure entity visibility query",
+    )
+    replace_once(
+        bridge,
+        '!P_CheckSight(p->mo, mo)',
+        '!PromptFPS_CheckSightPure(p->mo, mo)',
+        "pure enemy visibility filter",
+    )
+    replace_once(
+        bridge,
+        '!P_CheckSight(p->mo, mo)',
+        '!PromptFPS_CheckSightPure(p->mo, mo)',
+        "pure pickup visibility filter",
     )
 
     replace_once(
