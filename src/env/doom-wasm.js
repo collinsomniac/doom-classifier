@@ -118,11 +118,24 @@ export class DoomWasmArena{
         {id:"kills",label:"intermission kill count",description:"single-player Chocolate Doom kill statistic; may include monster deaths caused by other monsters and is therefore telemetry, not player-attributed reward",min:0,max:100},
         {id:"visited_cells",label:"visited spatial cells",description:"number of distinct coarse player-position cells visited this episode",min:0,max:500},
         {id:"cell_visits",label:"current cell visits",description:"number of control transitions ending in the current coarse spatial cell",scale:16},
-        {id:"exploration_novelty",label:"exploration novelty",description:"inverse revisit count of the current spatial cell; higher means less familiar",min:0,max:1}
+        {id:"exploration_novelty",label:"exploration novelty",description:"inverse revisit count of the current spatial cell; higher means less familiar",min:0,max:1},
+        {id:"visible_hostile_count",label:"visible hostile count",description:"number of living hostile actors with direct line of sight to the player",min:0,max:32},
+        {id:"targeting_hostile_count",label:"targeting hostile count",description:"number of living hostile actors currently targeting the player",min:0,max:32},
+        {id:"nearest_hostile_distance",label:"nearest hostile distance",description:"distance to the nearest living hostile actor; large sentinel when none exist",scale:1024},
+        {id:"nearest_hostile_bearing",label:"nearest hostile bearing",description:"signed normalized bearing to the nearest living hostile; negative is left and positive is right relative to current view",min:-1,max:1},
+        {id:"nearest_visible_hostile_distance",label:"nearest visible hostile distance",description:"distance to the nearest living hostile with line of sight; large sentinel when none are visible",scale:1024},
+        {id:"nearest_visible_hostile_bearing",label:"nearest visible hostile bearing",description:"signed normalized bearing to the nearest visible hostile; negative is left, zero is centered, positive is right",min:-1,max:1},
+        {id:"nearest_visible_hostile_health",label:"nearest visible hostile health",description:"remaining health of the nearest visible hostile",scale:256},
+        {id:"aim_alignment",label:"aim alignment",description:"how closely the current view is aligned with the nearest visible hostile; one is centered and zero is substantially off-axis",min:0,max:1},
+        {id:"nearest_targeting_hostile_distance",label:"nearest targeting hostile distance",description:"distance to the nearest living hostile actively targeting the player",scale:1024},
+        {id:"nearest_targeting_hostile_bearing",label:"nearest targeting hostile bearing",description:"signed normalized bearing to the nearest hostile actively targeting the player",min:-1,max:1},
+        {id:"visible_projectile_count",label:"visible projectile count",description:"number of visible projectile or attack-effect records",min:0,max:32},
+        {id:"nearest_projectile_distance",label:"nearest projectile distance",description:"distance to the nearest projectile or attack effect; large sentinel when none are present",scale:1024},
+        {id:"nearest_projectile_bearing",label:"nearest projectile bearing",description:"signed normalized bearing to the nearest projectile or attack effect",min:-1,max:1}
       ],
       collections:[
         {
-          id:"entities",label:"world entities",description:"dynamic actors, objects and pickups represented with absolute and player-relative state",
+          id:"entities",label:"world entities",description:"dynamic actors, objects and pickups represented with absolute and player-relative state",attentionWeight:4,
           fields:[
             {id:"engine_record_id",label:"engine record id",description:"numeric record identifier supplied by the engine",scale:128},
             {id:"type",label:"entity type",description:"engine object category",enum:ENTITY_TYPES,scale:128},
@@ -147,7 +160,7 @@ export class DoomWasmArena{
           ]
         },
         {
-          id:"geometry",label:"world geometry",description:"map line segments represented relative to the player",
+          id:"geometry",label:"world geometry",description:"map line segments represented relative to the player",attentionWeight:1,
           fields:[
             {id:"line_id",label:"line id",description:"numeric map line identifier",scale:2048},
             {id:"x1",label:"line endpoint one x",description:"first endpoint x displacement from player",scale:1024},
@@ -200,6 +213,11 @@ export class DoomWasmArena{
   }
 
   setActionMs(ms){this.actionMs=clamp(Number(ms)||110,35,1000);this.schema.controlHorizonMs=this.actionMs}
+  setPaused(paused){
+    this.module.ccall("PromptFPS_SetPaused",null,["number"],[paused?1:0]);
+    this.simulationPaused=!!paused;
+    return this.simulationPaused;
+  }
   readRaw(){
     const json=this.module.ccall("PromptFPS_Observation","string",[],[]);
     const raw=JSON.parse(String(json));if(!raw.ready)throw new Error("Doom telemetry bridge is not ready");return raw;
@@ -268,6 +286,18 @@ export class DoomWasmArena{
       line_id:Number(line.id||0),x1:Number(line.x1||0)-Number(p.x||0),y1:Number(line.y1||0)-Number(p.y||0),x2:Number(line.x2||0)-Number(p.x||0),y2:Number(line.y2||0)-Number(p.y||0),
       flags:Number(line.flags||0),blocking:line.blocking?1:0,special:Number(line.special||0),tag:Number(line.tag||0)
     }));
+
+    // Environment adapters may expose compact relational summaries alongside
+    // raw records. These are factual projections, not policy rules: the model
+    // still learns what "left", "aligned", "near", etc. imply for each task.
+    const livingHostiles=entities.filter(e=>e.countkill>0&&e.health>0);
+    const visibleHostiles=livingHostiles.filter(e=>e.visible>0);
+    const targetingHostiles=livingHostiles.filter(e=>e.targeting_player>0);
+    const projectiles=entities.filter(e=>e.kind===2&&e.distance>=0);
+    const nearest=list=>list.reduce((best,e)=>!best||e.distance<best.distance?e:best,null);
+    const nearestHostile=nearest(livingHostiles),nearestVisible=nearest(visibleHostiles),nearestTargeting=nearest(targetingHostiles),nearestProjectile=nearest(projectiles);
+    const sentinel=4096,bearing=e=>Number(e?.relative_angle||0),distance=e=>e?Number(e.distance||0):sentinel;
+
     return{
       health:Number(p.health||0),armor:Number(p.armor||0),bullets:Number(p.ammo?.bullets||0),shells:Number(p.ammo?.shells||0),rockets:Number(p.ammo?.rockets||0),cells:Number(p.ammo?.cells||0),
       recent_damage:Number(p.recent_damage||0),recent_hostile_hp_loss:Number(this.lastHostileHpLoss||0),
@@ -276,6 +306,12 @@ export class DoomWasmArena{
       under_fire:p.under_fire?1:0,weapon:Number(p.weapon||0),
       player_x:Number(p.x||0),player_y:Number(p.y||0),player_z:Number(p.z||0),velocity_x:Number(p.vx||0),velocity_y:Number(p.vy||0),heading,kills:Number(p.kills||0),
       visited_cells:Number(this.lastExploration?.visitedCells||0),cell_visits:Number(this.lastExploration?.cellVisits||0),exploration_novelty:Number(this.lastExploration?.novelty??1),
+      visible_hostile_count:visibleHostiles.length,targeting_hostile_count:targetingHostiles.length,
+      nearest_hostile_distance:distance(nearestHostile),nearest_hostile_bearing:bearing(nearestHostile),
+      nearest_visible_hostile_distance:distance(nearestVisible),nearest_visible_hostile_bearing:bearing(nearestVisible),nearest_visible_hostile_health:Number(nearestVisible?.health||0),
+      aim_alignment:nearestVisible?1-clamp(Math.abs(bearing(nearestVisible))*8,0,1):0,
+      nearest_targeting_hostile_distance:distance(nearestTargeting),nearest_targeting_hostile_bearing:bearing(nearestTargeting),
+      visible_projectile_count:projectiles.filter(e=>e.visible>0).length,nearest_projectile_distance:distance(nearestProjectile),nearest_projectile_bearing:bearing(nearestProjectile),
       _collections:{entities,geometry}
     };
   }
