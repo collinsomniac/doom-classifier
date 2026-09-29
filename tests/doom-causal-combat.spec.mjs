@@ -113,19 +113,24 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
   };
   writeFileSync(resolve(outputDir,"doom-causal-checkpoint.json"),JSON.stringify(checkpoint));
 
+  const runtime=await page.evaluate(()=>({
+    commit:window.__doomLab.env.runtime?.commit||null,
+    sourceCommit:window.__doomLab.env.runtime?.sourceCommit||null,
+    base:window.__doomLab.env.runtime?.base||null
+  }));
   const evaluated=await evaluateExact(page,{rollouts:replayRollouts,stepsPerRollout:replaySteps,actionTics:4,verifyReplay:true});
   const {replay,...evaluation}=evaluated;
   const report={
     version:"causal-policy-v2-gradient-replay",
     gate:{killTarget,minDiversity,minSwitches,maxStreakLimit},
-    baseline,training,evaluation,replay,
+    runtime,baseline,training,evaluation,replay,
     checkpoint:{params:checkpoint.q?.params,bytes:JSON.stringify(checkpoint).length}
   };
   writeFileSync(resolve(outputDir,"combat-report.json"),JSON.stringify(report,null,2));
   writeFileSync(resolve(outputDir,"combat-replays.json"),JSON.stringify({version:2,actionTics:4,verification:"same native start snapshot",runs:evaluation.runs},null,2));
 
   console.log("CAUSAL_COMBAT_RESULT "+JSON.stringify({
-    target:killTarget,
+    target:killTarget,runtime,
     baseline:{kills:baseline.totalKills,damage:baseline.totalDamage,reward:baseline.totalReward,diversity:baseline.actionDiversity,maxStreak:baseline.maxStreak},
     training:{kills:training.kills,damage:training.damage,reward:training.return,examples:training.examples,informative:training.informative,diversity:training.actionDiversity,replaySupervisionUpdates:training.replaySupervisionUpdates,fitPasses:training.fitPasses},
     evaluation:{kills:evaluation.totalKills,damage:evaluation.totalDamage,reward:evaluation.totalReward,decisions:evaluation.totalDecisions,diversity:evaluation.actionDiversity,minRunDiversity:evaluation.minRunDiversity,switches:evaluation.totalSwitches,maxStreak:evaluation.maxStreak,counts:evaluation.actionCounts},
