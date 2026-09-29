@@ -150,7 +150,7 @@ export class ExperimentController extends EventTarget{
     steps=512,probeTics=24,actionTics=4,plannerDepth=1,continuationTics=8,continuationCandidates=4,rolloutHorizon=128,
     targetTemperature=.30,priorStrength=0,superviseSteps=3,superviseStrength=.55,
     supervisionReplay=2,replayStrength=.24,batchRefitEvery=0,batchWindow=192,
-    finalRefit=false,ridge=.025,factorizedTargetBlend=0,probeContinuations=null,behaviorCoverage=.35,seed=0x51a9e,onProgress=()=>{}
+    finalRefit=false,ridge=.025,factorizedTargetBlend=0,behaviorCoverage=.35,seed=0x51a9e,onProgress=()=>{}
   }={}){
     if(!this.environment?.supportsSnapshots?.()||!this.environment?.supportsExactTics?.())throw new Error("Causal policy training requires exact snapshots and tic stepping");
     if(!this.policy?.superviseDecisionDistribution||!this.policy?.fitDecisionDistributions)throw new Error("Policy does not support proper-score supervision");
@@ -170,26 +170,11 @@ export class ExperimentController extends EventTarget{
     const neutralIndex=this.policy.actions.findIndex(a=>Object.values(a.params||{}).every(v=>Number(v)===0));
     const neutralId=neutralIndex>=0?this.policy.actions[neutralIndex].id:null;
     const tail=Math.max(0,Math.floor(probeTics)-Math.floor(actionTics));
-    // Optional shared continuation SET: each branch is valued by its best
-    // continuation (a one-level option value). The set is identical across
-    // branches, so differences stay attributable to the first action, but an
-    // action whose value is realized by a later primitive (orient, then fire)
-    // is no longer invisible. The native engine has ONE snapshot slot, so
-    // branches re-fork from the probe's own start token (probeStart) rather
-    // than nesting a new snapshot.
-    const continuationIds=(Array.isArray(probeContinuations)&&probeContinuations.length?probeContinuations:[neutralId]).filter(id=>id&&this.policy.actions.some(a=>a.id===id));
-    let probeStart=null;
     const probeStep=id=>{
-      if(!tail||!continuationIds.length)return this.environment.stepTics(id,actionTics);
-      let best=null;
-      for(let ci=0;ci<continuationIds.length;ci++){
-        if(ci>0)this.environment.restoreSnapshot(probeStart);
-        const first=this.environment.stepTics(id,actionTics);
-        const total=first.done?first:(()=>{const rest=this.environment.stepTics(continuationIds[ci],tail);return{...rest,reward:Number(first.reward||0)+Number(rest.reward||0)}})();
-        if(!best||Number(total.reward)>Number(best.reward))best={...total,continuation:continuationIds[ci]};
-        if(first.done)break;
-      }
-      return best;
+      const first=this.environment.stepTics(id,actionTics);
+      if(!tail||first.done||!neutralId)return first;
+      const rest=this.environment.stepTics(neutralId,tail);
+      return{...rest,reward:Number(first.reward||0)+Number(rest.reward||0)};
     };
     const regimeOf=obs=>{
       const visible=Number(obs?.visible_hostile_count||0)>0,b=Number(obs?.nearest_visible_hostile_bearing||0);
@@ -213,7 +198,6 @@ export class ExperimentController extends EventTarget{
         // the student's current policy. A uniform label prior prevents
         // zero-spread probes from silently self-distilling an attractor.
         const causalPrior=new Array(this.policy.actions.length).fill(1/this.policy.actions.length);
-        probeStart=continuationIds.length>1&&tail?this.environment.saveSnapshot():null;
         const probe=await probeCounterfactualActions({
           environment:this.environment,actions:this.policy.actions,prior:causalPrior,horizon:planningDepth,
           temperature:targetTemperature,priorStrength:0,discount:.96,
@@ -327,7 +311,7 @@ export class ExperimentController extends EventTarget{
       this.policy.q.syncTarget?.({value:false});
       return{
         requested:steps,completed:this.steps-startStep,visitedStates:this.steps-startStep,probeTics,actionTics,plannerDepth:Math.max(1,Math.min(2,Math.floor(plannerDepth||1))),continuationTics,continuationCandidates,rolloutHorizon,factorizedTargetBlend,behaviorCoverage:coverage,
-        regimeCoverage:regimeCounts,regimeTargets,probeContinuations:continuationIds,examples:examples.length,informative,uninformative:Math.max(0,(this.steps-startStep)-informative),meanInformativeSpread:informative?totalSpread/informative:0,
+        regimeCoverage:regimeCounts,regimeTargets,examples:examples.length,informative,uninformative:Math.max(0,(this.steps-startStep)-informative),meanInformativeSpread:informative?totalSpread/informative:0,
         meanTypedTargetFit:examples.length?examples.reduce((sum,ex)=>sum+Number(ex.typedFit||0),0)/examples.length:0,
         meanTypedTargetBlend:examples.length?examples.reduce((sum,ex)=>sum+Number(ex.typedBlend||0),0)/examples.length:0,
         supervisionUpdates,replaySupervisionUpdates,fitPasses,finalRefit:!!finalRefit,resets,coverageActions,
