@@ -58,7 +58,7 @@ export class SemanticResidualPolicy{
     criticKlExpansion=1,criticKlFloor=.10,criticAgreementFloor=.67,criticSnrFloor=.75,criticSnrTarget=2,criticGapShareTarget=.25,
     neuralUncertaintySample=.30,neuralSampleTemperature=.60,neuralEntropyThreshold=.75,neuralMarginThreshold=.15
   }){
-    this.schema=schema;this.actions=actions;this.residualWeight=residualWeight;this.baseTemperature=temperature;this.temperature=temperature;this.epsilon=epsilon;this.seed=seed;this.rng=mulberry32(seed);
+    this.schema=schema;this.actions=actions;this.residualWeight=residualWeight;this.baseTemperature=temperature;this.temperature=temperature;this.epsilon=epsilon;this.seed=seed;this.rng=mulberry32(seed);this.decodeRngState=(Number(seed)^0x9e3779b9)>>>0;
     this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;
     if(typeof residual==="object")this.q=residual;
     else if(residual==="neural-set")this.q=new NeuralSetResidualQ(schema,actions,{seed});
@@ -78,6 +78,11 @@ export class SemanticResidualPolicy{
   setInferenceMode(mode){
     if(!["hybrid","adaptive","neural"].includes(mode))throw new Error("Unknown inference mode: "+mode);
     this.inferenceMode=mode;
+  }
+  nextDecodeRandom(){
+    let a=this.decodeRngState|0;a=a+0x6D2B79F5|0;this.decodeRngState=a>>>0;
+    let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;
+    return((t^t>>>14)>>>0)/4294967296;
   }
   reconfigure({schema=this.schema,actions=this.actions}={}){
     this.teacherGeneration++;this.teacherPromise=null;
@@ -104,7 +109,7 @@ export class SemanticResidualPolicy{
     return this.snapshotActionOutcomeHistory();
   }
   resetLearning(){
-    this.teacherGeneration++;this.teacherPromise=null;this.q.reset();this.novelty.reset();this.rng=mulberry32(this.seed);this.replayRng=mulberry32((this.seed^0x517cc1b7)>>>0);this.teacherReplayRng=mulberry32((this.seed^0xa341316c)>>>0);this.replay=[];this.teacherReplay=[];this.nStepBuffer=[];this.temperature=this.baseTemperature;
+    this.teacherGeneration++;this.teacherPromise=null;this.q.reset();this.novelty.reset();this.rng=mulberry32(this.seed);this.decodeRngState=(Number(this.seed)^0x9e3779b9)>>>0;this.replayRng=mulberry32((this.seed^0x517cc1b7)>>>0);this.teacherReplayRng=mulberry32((this.seed^0xa341316c)>>>0);this.replay=[];this.teacherReplay=[];this.nStepBuffer=[];this.temperature=this.baseTemperature;
     this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];this.actionOutcomeHistory=[];this.probabilityCalibrator=new TemperatureCalibrator();
   }
   exportCheckpoint(){
@@ -114,7 +119,7 @@ export class SemanticResidualPolicy{
       format:"doom-classifier-policy",version:1,createdAt:new Date().toISOString(),
       schema:clone(this.schema),actions:clone(this.actions),temperature:this.temperature,baseTemperature:this.baseTemperature,
       probabilityCalibration:this.probabilityCalibrator?.export?.()||null,inferenceMode:"neural",
-      decode:{strategy:"confidence-mixture",sample:Number(this.neuralUncertaintySample),sampleTemperature:Number(this.neuralSampleTemperature),entropyThreshold:Number(this.neuralEntropyThreshold),marginThreshold:Number(this.neuralMarginThreshold),seed:Number(this.seed)},
+      decode:{strategy:"confidence-mixture",sample:Number(this.neuralUncertaintySample),sampleTemperature:Number(this.neuralSampleTemperature),entropyThreshold:Number(this.neuralEntropyThreshold),marginThreshold:Number(this.neuralMarginThreshold),seed:Number(this.seed),rngState:Number(this.decodeRngState>>>0)},
       q:this.q.exportCheckpoint()
     };
   }
@@ -132,7 +137,8 @@ export class SemanticResidualPolicy{
       this.neuralEntropyThreshold=clamp(Number(checkpoint.decode.entropyThreshold??this.neuralEntropyThreshold),0,1);
       this.neuralMarginThreshold=clamp(Number(checkpoint.decode.marginThreshold??this.neuralMarginThreshold),0,1);
       this.seed=Number(checkpoint.decode.seed??this.seed)>>>0;
-    }
+      this.decodeRngState=Number(checkpoint.decode.rngState??((this.seed^0x9e3779b9)>>>0))>>>0;
+    }else this.decodeRngState=(Number(this.seed)^0x9e3779b9)>>>0;
     this.rng=mulberry32(this.seed);
     this.probabilityCalibrator=new TemperatureCalibrator();if(checkpoint.probabilityCalibration)this.probabilityCalibrator.import(checkpoint.probabilityCalibration);
     this.inferenceMode="neural";this.teacherGeneration++;this.teacherPromise=null;this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];
@@ -392,9 +398,9 @@ export class SemanticResidualPolicy{
       chosen=sampleCategorical(sampling,this.rng);explorationStrategy="policy-proportional";decisionRule="training-sample";
     }else if(mode==="neural"&&this.neuralUncertaintySample>0&&stats.entropy>=this.neuralEntropyThreshold&&stats.margin<=this.neuralMarginThreshold){
       uncertaintySampleChance=this.neuralUncertaintySample;
-      if(this.rng()<uncertaintySampleChance){
+      if(this.nextDecodeRandom()<uncertaintySampleChance){
         const sampling=softmax(probs.map(p=>Math.log(Math.max(1e-12,p))),this.neuralSampleTemperature);
-        chosen=sampleCategorical(sampling,this.rng);decisionRule="confidence-mixture";explorationStrategy=chosen===argmax(probs)?"confidence-resample-same":"confidence-mixture";
+        chosen=sampleCategorical(sampling,()=>this.nextDecodeRandom());decisionRule="confidence-mixture";explorationStrategy=chosen===argmax(probs)?"confidence-resample-same":"confidence-mixture";
       }else decisionRule="confidence-greedy";
     }
     this.decisionCount++;
