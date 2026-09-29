@@ -122,16 +122,16 @@ export class DoomWasmArena{
         {id:"visible_hostile_count",label:"visible hostile count",description:"number of living hostile actors with direct line of sight to the player",min:0,max:32},
         {id:"targeting_hostile_count",label:"targeting hostile count",description:"number of living hostile actors currently targeting the player",min:0,max:32},
         {id:"nearest_hostile_distance",label:"nearest hostile distance",description:"distance to the nearest living hostile actor; large sentinel when none exist",scale:1024},
-        {id:"nearest_hostile_bearing",label:"nearest hostile bearing",description:"signed normalized bearing to the nearest living hostile; negative is left and positive is right relative to current view",min:-1,max:1},
+        {id:"nearest_hostile_bearing",label:"nearest hostile bearing",description:"signed normalized bearing to the nearest living hostile; positive is left and negative is right relative to current view",min:-1,max:1},
         {id:"nearest_visible_hostile_distance",label:"nearest visible hostile distance",description:"distance to the nearest living hostile with line of sight; large sentinel when none are visible",scale:1024},
-        {id:"nearest_visible_hostile_bearing",label:"nearest visible hostile bearing",description:"signed normalized bearing to the nearest visible hostile; negative is left, zero is centered, positive is right",min:-1,max:1},
+        {id:"nearest_visible_hostile_bearing",label:"nearest visible hostile bearing",description:"signed normalized bearing to the nearest visible hostile; positive is left, zero is centered, negative is right",min:-1,max:1},
         {id:"nearest_visible_hostile_health",label:"nearest visible hostile health",description:"remaining health of the nearest visible hostile",scale:256},
         {id:"aim_alignment",label:"aim alignment",description:"how closely the current view is aligned with the nearest visible hostile; one is centered and zero is substantially off-axis",min:0,max:1},
         {id:"nearest_targeting_hostile_distance",label:"nearest targeting hostile distance",description:"distance to the nearest living hostile actively targeting the player",scale:1024},
-        {id:"nearest_targeting_hostile_bearing",label:"nearest targeting hostile bearing",description:"signed normalized bearing to the nearest hostile actively targeting the player",min:-1,max:1},
+        {id:"nearest_targeting_hostile_bearing",label:"nearest targeting hostile bearing",description:"signed normalized bearing to the nearest hostile actively targeting the player; positive is left and negative is right",min:-1,max:1},
         {id:"visible_projectile_count",label:"visible projectile count",description:"number of visible projectile or attack-effect records",min:0,max:32},
         {id:"nearest_projectile_distance",label:"nearest projectile distance",description:"distance to the nearest projectile or attack effect; large sentinel when none are present",scale:1024},
-        {id:"nearest_projectile_bearing",label:"nearest projectile bearing",description:"signed normalized bearing to the nearest projectile or attack effect",min:-1,max:1}
+        {id:"nearest_projectile_bearing",label:"nearest projectile bearing",description:"signed normalized bearing to the nearest projectile or attack effect; positive is left and negative is right",min:-1,max:1}
       ],
       collections:[
         {
