@@ -570,6 +570,11 @@ async function replayPublishedRun(){
     if(!run?.actions?.length)throw new Error("selected replay has no actions");
     replayBusy=true;controller.pause();await controller.quiesce({teacher:true});updateReadiness();
     await env.reset();policy.resetEpisode();
+    const canonicalStart=Number(publishedReplayBundle?.version||0)>=3||/canonical/i.test(String(publishedReplayBundle?.verification||""));
+    if(canonicalStart&&env.supportsSnapshots?.()){
+      const startSnapshot=env.saveSnapshot();
+      env.restoreSnapshot(startSnapshot);policy.resetEpisode();
+    }
     if(ui.publishedReplayStatus)ui.publishedReplayStatus.textContent="Replaying run "+(index+1)+" · 0 / "+run.actions.length;
     let kills=0,damage=0;
     for(let i=0;i<run.actions.length;i++){
