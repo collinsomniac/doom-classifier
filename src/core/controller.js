@@ -93,7 +93,15 @@ export class ExperimentController extends EventTarget{
     this.training=false;this.explore=false;this.memory=true;this.policy.setInferenceMode("neural");this.setState(ControllerState.TUNING);
     const examples=[],curriculumTrace=[],counts={},startStep=this.steps,replayRng=mulberry32(Number(seed)>>>0);
     let totalReward=0,totalDamage=0,totalKills=0,totalPickups=0,totalSpread=0,informative=0,resets=0,fitPasses=0,supervisionUpdates=0,replaySupervisionUpdates=0;
+    const canonicalize=()=>{
+      const snapshot=this.environment.saveSnapshot();
+      this.environment.restoreSnapshot(snapshot);
+      return snapshot;
+    };
     try{
+      // From here on, every causal label and executed action evolves from
+      // the same canonical snapshot semantics used by the fork probes.
+      canonicalize();
       for(let i=0;i<Math.max(1,Math.floor(steps));i++){
         const obs=await this.environment.observe();
         const decision=await this.policy.decide(obs,{useResidual:true,memory:true,explore:false});
@@ -149,7 +157,7 @@ export class ExperimentController extends EventTarget{
         }
         const shouldReset=step.done||(rolloutHorizon>0&&i+1<steps&&(i+1)%rolloutHorizon===0);
         if(shouldReset){
-          await this.environment.reset();this.policy.resetEpisode();this.episodeReturn=0;resets++;
+          await this.environment.reset();this.policy.resetEpisode();this.episodeReturn=0;canonicalize();resets++;
         }
         if(i===0||(i+1)%8===0||i+1===steps)onProgress({
           completed:i+1,total:steps,ratio:(i+1)/steps,kills:totalKills,damage:totalDamage,

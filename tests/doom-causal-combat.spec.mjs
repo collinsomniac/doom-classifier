@@ -30,7 +30,12 @@ async function evaluateExact(page,{rollouts=replayRollouts,stepsPerRollout=repla
     let replayKills=0,replayDamage=0,replayReward=0;
     for(let r=0;r<rollouts;r++){
       await env.reset();p.resetEpisode();
-      const startSnapshot=verifyReplay?env.saveSnapshot():null;
+      // A DOOM savegame is a deterministic canonicalization boundary, not a
+      // byte-for-byte continuation of every transient engine cache. Capture
+      // and restore once before the measured run so evaluation and replay
+      // begin from the same complete simulator state (including RNG cursors).
+      const startSnapshot=env.saveSnapshot();
+      env.restoreSnapshot(startSnapshot);p.resetEpisode();
       let kills=0,damage=0,reward=0,pickups=0;const actions=[];
       for(let i=0;i<stepsPerRollout;i++){
         const obs=env.observe(),d=await p.decide(obs,{useResidual:true,memory:true,explore:false});
@@ -82,7 +87,7 @@ async function evaluateExact(page,{rollouts=replayRollouts,stepsPerRollout=repla
       actionCounts,actionDiversity:Object.keys(actionCounts).length,minRunDiversity:Number.isFinite(minRunDiversity)?minRunDiversity:0,
       totalSwitches,maxStreak,
       replay:verifyReplay?{
-        sameStartSnapshot:true,totalKills:replayKills,totalDamage:replayDamage,totalReward:replayReward,runs:replayRuns,
+        sameStartSnapshot:true,canonicalStart:true,totalKills:replayKills,totalDamage:replayDamage,totalReward:replayReward,runs:replayRuns,
         exact:replayRuns.length===runs.length&&replayRuns.every(x=>x.exact)
       }:null
     };
@@ -96,6 +101,8 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
   const baseline=await evaluateExact(page,{rollouts:4,stepsPerRollout:64,actionTics:4});
   const training=await page.evaluate(async steps=>{
     const {controller:c,policy:p}=window.__doomLab;
+    await c.reset({learning:false});
+    const canonical=c.environment.saveSnapshot();c.environment.restoreSnapshot(canonical);p.resetEpisode();
     p.setInferenceMode("neural");
     return c.trainCausalPolicy({
       steps,probeTics:24,actionTics:4,rolloutHorizon:128,
@@ -107,7 +114,7 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
 
   const checkpoint=await page.evaluate(()=>window.__doomLab.policy.exportCheckpoint());
   checkpoint.build={
-    selection:"exact-state causal policy curriculum",
+    selection:"canonical exact-state causal policy curriculum",
     causalSteps,probeTics:24,actionTics:4,rolloutHorizon:64,
     training:{kills:training.kills,damage:training.damage,return:training.return,examples:training.examples,informative:training.informative}
   };
@@ -121,13 +128,13 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
   const evaluated=await evaluateExact(page,{rollouts:replayRollouts,stepsPerRollout:replaySteps,actionTics:4,verifyReplay:true});
   const {replay,...evaluation}=evaluated;
   const report={
-    version:"causal-policy-v2-gradient-replay",
+    version:"causal-policy-v3-canonical-replay",
     gate:{killTarget,minDiversity,minSwitches,maxStreakLimit},
     runtime,baseline,training,evaluation,replay,
     checkpoint:{params:checkpoint.q?.params,bytes:JSON.stringify(checkpoint).length}
   };
   writeFileSync(resolve(outputDir,"combat-report.json"),JSON.stringify(report,null,2));
-  writeFileSync(resolve(outputDir,"combat-replays.json"),JSON.stringify({version:2,actionTics:4,verification:"same native start snapshot",runs:evaluation.runs},null,2));
+  writeFileSync(resolve(outputDir,"combat-replays.json"),JSON.stringify({version:3,actionTics:4,verification:"same canonical native start snapshot with restored RNG state",runs:evaluation.runs},null,2));
 
   console.log("CAUSAL_COMBAT_RESULT "+JSON.stringify({
     target:killTarget,runtime,
