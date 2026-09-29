@@ -2,7 +2,7 @@ name: starter-model
 
 on:
   push:
-    branches: [main, fix/separate-starter-runtime]
+    branches: [main]
     paths:
       - "tests/build-starter.spec.mjs"
       - "src/core/policy.js"
