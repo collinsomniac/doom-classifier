@@ -40,7 +40,7 @@ export class FactorizedControlHead{
   }
   configure(schema,actions){
     this.schema=schema;this.actions=actions||[];this.features=featureSpec(schema);this.axes=axisSpecs(schema,this.actions);this.inputDim=this.features.length+1;
-    this.weights=this.axes.map(axis=>zeros(axis.values.length,this.inputDim));this.updates=0;return this;
+    this.weights=this.axes.map(axis=>zeros(axis.values.length,this.inputDim));this._avi=null;this.updates=0;return this;
   }
   reset(){return this.configure(this.schema,this.actions)}
   encode(observation){
@@ -54,36 +54,50 @@ export class FactorizedControlHead{
       let s=0;for(let j=0;j<this.inputDim;j++)s+=row[j]*x[j];return s;
     }));
   }
+  // Index of each action's value on each axis (null when the axis is unset).
+  actionValueIndex(){
+    if(!this._avi)this._avi=this.actions.map(action=>this.axes.map(axis=>axis.index.get(String(action?.params?.[axis.id]??"__unset"))??null));
+    return this._avi;
+  }
+  // Joint energy of every *valid* composite action: sum of its axis logits.
+  // The distribution is normalized over the composites that actually exist
+  // (log-linear product of experts), NOT a product of independent marginals.
+  jointScores(logits){
+    return this.actionValueIndex().map(values=>{
+      let s=0;for(let ai=0;ai<values.length;ai++)if(values[ai]!=null)s+=logits[ai][values[ai]];return s;
+    });
+  }
   evaluate(observation){
     if(!this.axes.length||!this.actions.length)return{scores:new Array(this.actions.length).fill(0),axis:[],updates:this.updates,trust:0};
-    const logits=this.axisLogits(observation),scores=this.actions.map(action=>{
-      let sum=0,used=0;
-      for(let ai=0;ai<this.axes.length;ai++){
-        const axis=this.axes[ai],vi=axis.index.get(String(action?.params?.[axis.id]??"__unset"));
-        if(vi==null)continue;sum+=logits[ai][vi];used++;
-      }
-      return used?sum/Math.sqrt(used):0;
+    const logits=this.axisLogits(observation),scores=this.jointScores(logits),joint=softmax(scores,1),avi=this.actionValueIndex();
+    // Axis probabilities are marginals of the normalized joint, so diagnostics
+    // describe the distribution the policy actually decodes.
+    const axis=this.axes.map((a,ai)=>{
+      const probs=new Array(a.values.length).fill(0);
+      for(let k=0;k<joint.length;k++){const vi=avi[k][ai];if(vi!=null)probs[vi]+=joint[k]}
+      return{id:a.id,values:a.values,logits:Array.from(logits[ai]),probs};
     });
-    return{scores:centered(scores),axis:this.axes.map((axis,i)=>({id:axis.id,values:axis.values,logits:Array.from(logits[i]),probs:softmax(Array.from(logits[i]),1)})),updates:this.updates,trust:clamp(this.updates/96,0,1)};
+    return{scores:centered(scores),joint,axis,updates:this.updates,trust:clamp(this.updates/96,0,1)};
   }
+  // Proper joint cross-entropy over valid composites. Earlier versions fitted
+  // each axis marginal independently; composing marginals then made the
+  // all-neutral composite ("wait") the mode whenever the label mass was split
+  // across e.g. {turn_left, strafe_left}. See tests/factor-grounding.mjs.
   supervise(observation,targetDistribution,{strength=1}={}){
     const raw=Array.from(targetDistribution||[],v=>Math.max(0,Number(v)||0)),sum=raw.reduce((a,b)=>a+b,0);
     if(raw.length!==this.actions.length||sum<=0||!this.axes.length)return null;
-    const target=raw.map(v=>v/sum),x=this.encode(observation),logits=this.axisLogits(observation);
+    const target=raw.map(v=>v/sum),x=this.encode(observation),logits=this.axisLogits(observation),pred=softmax(this.jointScores(logits),1),avi=this.actionValueIndex();
     let loss=0,brier=0;
-    for(let ai=0;ai<this.axes.length;ai++){
-      const axis=this.axes[ai],marginal=new Array(axis.values.length).fill(0);
-      for(let a=0;a<this.actions.length;a++){
-        const vi=axis.index.get(String(this.actions[a]?.params?.[axis.id]??"__unset"));if(vi!=null)marginal[vi]+=target[a];
-      }
-      const z=marginal.reduce((a,b)=>a+b,0)||1;for(let i=0;i<marginal.length;i++)marginal[i]/=z;
-      const pred=softmax(Array.from(logits[ai]),1);
-      for(let vi=0;vi<axis.values.length;vi++){
-        loss-=marginal[vi]*Math.log(Math.max(1e-9,pred[vi]));brier+=(pred[vi]-marginal[vi])**2;
-        const grad=(pred[vi]-marginal[vi])*Number(strength||1);
-        const row=this.weights[ai][vi];
-        for(let j=0;j<this.inputDim;j++)row[j]-=this.lr*(grad*x[j]+this.l2*row[j]);
-      }
+    const grads=this.axes.map(a=>new Float64Array(a.values.length));
+    for(let k=0;k<pred.length;k++){
+      if(target[k]>0)loss-=target[k]*Math.log(Math.max(1e-12,pred[k]));brier+=(pred[k]-target[k])**2;
+      const g=pred[k]-target[k];
+      for(let ai=0;ai<this.axes.length;ai++){const vi=avi[k][ai];if(vi!=null)grads[ai][vi]+=g}
+    }
+    const s=Number(strength||1);
+    for(let ai=0;ai<this.axes.length;ai++)for(let vi=0;vi<this.axes[ai].values.length;vi++){
+      const grad=grads[ai][vi]*s,row=this.weights[ai][vi];
+      for(let j=0;j<this.inputDim;j++)row[j]-=this.lr*(grad*x[j]+this.l2*row[j]);
     }
     this.updates++;return{loss,brier,updates:this.updates};
   }

@@ -160,6 +160,27 @@ export class ExperimentController extends EventTarget{
     const examples=[],curriculumTrace=[],counts={},behaviorCounts={},startStep=this.steps,replayRng=mulberry32(Number(seed)>>>0);
     const coverage=Math.max(0,Math.min(1,Number(behaviorCoverage)||0));
     let totalReward=0,totalDamage=0,totalKills=0,totalPickups=0,totalSpread=0,informative=0,resets=0,fitPasses=0,supervisionUpdates=0,replaySupervisionUpdates=0,coverageActions=0;
+    // Causal credit window. Consequences in DOOM lag the input (a pistol shot
+    // registers damage in the NEXT 4-tic interval), so a label measured over
+    // only actionTics cannot see why firing mattered. Each branch applies its
+    // candidate for actionTics, then a shared schema-neutral continuation
+    // (the action whose typed params are all at their resting value) until
+    // probeTics elapse. The continuation is identical across branches, so any
+    // return difference is attributable to the first action alone.
+    const neutralIndex=this.policy.actions.findIndex(a=>Object.values(a.params||{}).every(v=>Number(v)===0));
+    const neutralId=neutralIndex>=0?this.policy.actions[neutralIndex].id:null;
+    const tail=Math.max(0,Math.floor(probeTics)-Math.floor(actionTics));
+    const probeStep=id=>{
+      const first=this.environment.stepTics(id,actionTics);
+      if(!tail||first.done||!neutralId)return first;
+      const rest=this.environment.stepTics(neutralId,tail);
+      return{...rest,reward:Number(first.reward||0)+Number(rest.reward||0)};
+    };
+    const regimeOf=obs=>{
+      const visible=Number(obs?.visible_hostile_count||0)>0,b=Number(obs?.nearest_visible_hostile_bearing||0);
+      return !visible?"none":Math.abs(b)<=.06?"center":b>0?"left":"right";
+    };
+    const regimeCounts={none:0,center:0,left:0,right:0},regimeTargets={none:{},center:{},left:{},right:{}};
     const canonicalize=()=>{
       const snapshot=this.environment.saveSnapshot();
       this.environment.restoreSnapshot(snapshot);
@@ -193,7 +214,7 @@ export class ExperimentController extends EventTarget{
             for(const index of candidates)if(Number(continuationProbe.returns[index])>Number(continuationProbe.returns[best]))best=index;
             return best;
           }:null,
-          stepper:(id,{depth})=>this.environment.stepTics(id,depth===0?actionTics:continuationTics)
+          stepper:(id,{depth})=>depth===0?probeStep(id):this.environment.stepTics(id,continuationTics)
         });
         const measuredTarget=[...probe.target],oracleIndex=argmax(measuredTarget),oracle=this.policy.actions[oracleIndex];
         const logTarget=measuredTarget.map(p=>Math.log(Math.max(1e-8,Number(p)||0)));
@@ -213,11 +234,17 @@ export class ExperimentController extends EventTarget{
           });
           supervisionUpdates+=Number(supervised?.stepsUsed||0);
 
-          // Replay only measured-informative labels. Exact ties carry no
-          // action preference and must not consume the supervision budget.
+          // Replay only measured-informative labels, stratified by relational
+          // regime (none/center/left/right) so the most frequent regime
+          // cannot monopolize the supervision budget.
+          const regime=regimeOf(obs);example.regime=regime;regimeCounts[regime]++;
+          const oracleId=this.policy.actions[argmax(target)].id;regimeTargets[regime][oracleId]=(regimeTargets[regime][oracleId]||0)+1;
           const replayCount=Math.min(Math.max(0,Math.floor(supervisionReplay)),Math.max(0,examples.length-1));
+          const populated=Object.keys(regimeCounts).filter(k=>examples.some((ex,j)=>j<examples.length-1&&ex.regime===k));
           for(let ri=0;ri<replayCount;ri++){
-            const ex=examples[Math.floor(replayRng()*(examples.length-1))];
+            const want=populated[Math.floor(replayRng()*populated.length)];
+            const pool=examples.slice(0,-1).filter(ex=>ex.regime===want);
+            const ex=pool.length?pool[Math.floor(replayRng()*pool.length)]:examples[Math.floor(replayRng()*(examples.length-1))];
             const replayed=this.policy.superviseDecisionDistribution(ex.observation,ex.target,{
               steps:1,strength:replayStrength,temporal:ex.temporal,history:ex.history
             });
@@ -279,7 +306,7 @@ export class ExperimentController extends EventTarget{
       this.policy.q.syncTarget?.({value:false});
       return{
         requested:steps,completed:this.steps-startStep,visitedStates:this.steps-startStep,probeTics,actionTics,plannerDepth:Math.max(1,Math.min(2,Math.floor(plannerDepth||1))),continuationTics,continuationCandidates,rolloutHorizon,factorizedTargetBlend,behaviorCoverage:coverage,
-        examples:examples.length,informative,uninformative:Math.max(0,(this.steps-startStep)-informative),meanInformativeSpread:informative?totalSpread/informative:0,
+        regimeCoverage:regimeCounts,regimeTargets,examples:examples.length,informative,uninformative:Math.max(0,(this.steps-startStep)-informative),meanInformativeSpread:informative?totalSpread/informative:0,
         meanTypedTargetFit:examples.length?examples.reduce((sum,ex)=>sum+Number(ex.typedFit||0),0)/examples.length:0,
         meanTypedTargetBlend:examples.length?examples.reduce((sum,ex)=>sum+Number(ex.typedBlend||0),0)/examples.length:0,
         supervisionUpdates,replaySupervisionUpdates,fitPasses,finalRefit:!!finalRefit,resets,coverageActions,

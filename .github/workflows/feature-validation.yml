@@ -38,6 +38,7 @@ jobs:
           node tests/neural-temporal.mjs
           node tests/action-factorization.mjs
           node tests/factorized-control-head.mjs
+          node tests/factor-grounding.mjs
 
   browser:
     runs-on: ubuntu-latest

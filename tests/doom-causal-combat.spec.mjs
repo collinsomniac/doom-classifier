@@ -11,6 +11,10 @@ const killTarget=Number(process.env.CAUSAL_KILL_TARGET||20);
 const minDiversity=Number(process.env.CAUSAL_MIN_DIVERSITY||4);
 const minSwitches=Number(process.env.CAUSAL_MIN_SWITCHES||8);
 const maxStreakLimit=Number(process.env.CAUSAL_MAX_STREAK||24);
+const minRegimeLabels=Number(process.env.CAUSAL_MIN_REGIME_LABELS||8);
+const minTurnMargin=Number(process.env.CAUSAL_MIN_TURN_MARGIN||.20);
+const minFireContrast=Number(process.env.CAUSAL_MIN_FIRE_CONTRAST||.15);
+const minStateActionMI=Number(process.env.CAUSAL_MIN_STATE_ACTION_MI||.08);
 const outputDir=resolve(process.env.CAUSAL_OUTPUT_DIR||"artifacts/causal-combat");
 
 async function bootAndPrepare(page){
@@ -164,7 +168,7 @@ async function fiveMinuteBenchmark(page,{totalTics=10500,actionTics=4}={}){
     c.pause();c.training=false;c.explore=false;c.memory=true;c.useResidual=true;await c.quiesce({teacher:true});p.setInferenceMode("neural");
     const started=performance.now(),actions={},bearingAction={left:{},center:{},right:{},none:{}};
     let tics=0,decisions=0,kills=0,damage=0,reward=0,deaths=0,resets=0;
-    let visible=0,aligned=0,alignedFire=0,offAxis=0,correctTurn=0,noVisible=0,noVisibleFire=0;
+    let visible=0,aligned=0,alignedFire=0,offAxis=0,correctTurn=0,wrongTurn=0,noVisible=0,noVisibleFire=0;
 
     const canonicalReset=async()=>{
       await env.reset();p.resetEpisode();const snap=env.saveSnapshot();env.restoreSnapshot(snap);p.resetEpisode();resets++;
@@ -183,6 +187,7 @@ async function fiveMinuteBenchmark(page,{totalTics=10500,actionTics=4}={}){
         if(Math.abs(bearing)>=.10){
           offAxis++;
           if((bearing>0&&Number(params.view||0)===1)||(bearing<0&&Number(params.view||0)===2))correctTurn++;
+          else if((bearing>0&&Number(params.view||0)===2)||(bearing<0&&Number(params.view||0)===1))wrongTurn++;
         }
       }else{noVisible++;if(fire)noVisibleFire++}
 
@@ -211,7 +216,8 @@ async function fiveMinuteBenchmark(page,{totalTics=10500,actionTics=4}={}){
       simulatedSeconds:tics/35,tics,decisions,kills,damage,reward,deaths,resets,
       wallMs:performance.now()-started,actionCounts:actions,actionDiversity:Object.keys(actions).length,
       visibleDecisions:visible,alignedDecisions:aligned,alignedFireRate:aligned?alignedFire/aligned:0,
-      offAxisDecisions:offAxis,correctTurnRate:offAxis?correctTurn/offAxis:0,
+      offAxisDecisions:offAxis,correctTurnRate:offAxis?correctTurn/offAxis:0,wrongTurnRate:offAxis?wrongTurn/offAxis:0,
+      fireLogOddsAlignedVsNone:(()=>{const lo=(k,n)=>Math.log((k+.5)/(n-k+.5));return lo(alignedFire,aligned)-lo(noVisibleFire,noVisible)})(),
       noVisibleDecisions:noVisible,noVisibleFireRate:noVisible?noVisibleFire/noVisible:0,
       bearingAction,stateActionMutualInformation:mi,normalizedStateActionMI:hState>1e-9?mi/hState:0
     };
@@ -264,7 +270,7 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
   writeFileSync(resolve(outputDir,"doom-causal-checkpoint.json"),JSON.stringify(checkpoint));
 
   const report={
-    version:"causal-policy-v6-factorized-prior-free",
+    version:"causal-policy-v7-joint-factor-delayed-credit",
     gate:{killTarget,minDiversity,minSwitches,maxStreakLimit},
     runtime,baseline,training,evaluation,replay,grounding,fiveMinute,
     checkpoint:{params:checkpoint.q?.params,bytes:JSON.stringify(checkpoint).length}
@@ -275,16 +281,25 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
   console.log("CAUSAL_COMBAT_RESULT "+JSON.stringify({
     target:killTarget,runtime,
     baseline:{kills:baseline.totalKills,damage:baseline.totalDamage,reward:baseline.totalReward,diversity:baseline.actionDiversity,maxStreak:baseline.maxStreak},
-    training:{kills:training.kills,damage:training.damage,reward:training.return,examples:training.examples,informative:training.informative,diversity:training.actionDiversity,replaySupervisionUpdates:training.replaySupervisionUpdates,fitPasses:training.fitPasses,typedFit:training.meanTypedTargetFit,typedBlend:training.meanTypedTargetBlend,behaviorCoverage:training.behaviorCoverage,coverageActions:training.coverageActions,behaviorDiversity:training.behaviorDiversity,behaviorCounts:training.behaviorActionCounts},
+    training:{kills:training.kills,damage:training.damage,reward:training.return,examples:training.examples,informative:training.informative,regimeCoverage:training.regimeCoverage,regimeTargets:training.regimeTargets,diversity:training.actionDiversity,replaySupervisionUpdates:training.replaySupervisionUpdates,fitPasses:training.fitPasses,typedFit:training.meanTypedTargetFit,typedBlend:training.meanTypedTargetBlend,behaviorCoverage:training.behaviorCoverage,coverageActions:training.coverageActions,behaviorDiversity:training.behaviorDiversity,behaviorCounts:training.behaviorActionCounts},
     evaluation:{kills:evaluation.totalKills,damage:evaluation.totalDamage,reward:evaluation.totalReward,decisions:evaluation.totalDecisions,diversity:evaluation.actionDiversity,minRunDiversity:evaluation.minRunDiversity,switches:evaluation.totalSwitches,maxStreak:evaluation.maxStreak,counts:evaluation.actionCounts},
     replay:{kills:replay.totalKills,damage:replay.totalDamage,reward:replay.totalReward},
     grounding,
-    fiveMinute:{kills:fiveMinute.kills,damage:fiveMinute.damage,reward:fiveMinute.reward,deaths:fiveMinute.deaths,decisions:fiveMinute.decisions,wallMs:fiveMinute.wallMs,diversity:fiveMinute.actionDiversity,alignedFireRate:fiveMinute.alignedFireRate,correctTurnRate:fiveMinute.correctTurnRate,noVisibleFireRate:fiveMinute.noVisibleFireRate,normalizedStateActionMI:fiveMinute.normalizedStateActionMI,counts:fiveMinute.actionCounts},
+    fiveMinute:{kills:fiveMinute.kills,damage:fiveMinute.damage,reward:fiveMinute.reward,deaths:fiveMinute.deaths,decisions:fiveMinute.decisions,wallMs:fiveMinute.wallMs,diversity:fiveMinute.actionDiversity,alignedFireRate:fiveMinute.alignedFireRate,correctTurnRate:fiveMinute.correctTurnRate,wrongTurnRate:fiveMinute.wrongTurnRate,fireLogOdds:fiveMinute.fireLogOddsAlignedVsNone,noVisibleFireRate:fiveMinute.noVisibleFireRate,normalizedStateActionMI:fiveMinute.normalizedStateActionMI,counts:fiveMinute.actionCounts},
     params:checkpoint.q?.params
   }));
 
   expect(training.examples).toBe(training.informative);
-  expect(training.informative).toBeGreaterThan(causalSteps*.55);
+  // Coverage replaces the old "informative > 55% of steps" gate: rejecting
+  // tie-valued probes is intended, but every relational regime must still
+  // receive real supervision.
+  for(const regime of ["none","center","left","right"])expect(training.regimeCoverage[regime],"informative labels in regime "+regime).toBeGreaterThanOrEqual(minRegimeLabels);
+  // Deployed relational grounding (mirrored probe + 300-s gameplay).
+  expect(grounding.turnDirectionalPreference).toBeGreaterThan(minTurnMargin);
+  expect(grounding.fireContrastAheadVsQuiet).toBeGreaterThan(minFireContrast);
+  expect(fiveMinute.correctTurnRate).toBeGreaterThan(fiveMinute.wrongTurnRate);
+  expect(fiveMinute.alignedFireRate).toBeGreaterThan(fiveMinute.noVisibleFireRate);
+  expect(fiveMinute.normalizedStateActionMI).toBeGreaterThan(minStateActionMI);
   expect(replay.sameStartSnapshot).toBe(true);
   expect(replay.exact).toBe(true);
   expect(replay.totalKills).toBe(evaluation.totalKills);
