@@ -7,7 +7,8 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   await page.goto("http://127.0.0.1:8000/doom.html?starter=off",{waitUntil:"domcontentloaded"});await page.locator("#bootBtn").click();
   await page.waitForFunction(()=>{const text=document.querySelector("#runtimeStatus")?.textContent;return text==="ENGINE READY"||text==="BOOT FAILED"},null,{timeout:90000});
   if((await page.locator("#runtimeStatus").textContent())!=="ENGINE READY")throw new Error("DOOM boot failed. "+(await page.locator("#bootStatus").textContent()));
-  await expect(page.locator("#stateTable .state-row")).toHaveCount(25);
+  const stateFieldCount=await page.evaluate(()=>window.__doomLab.env.schema.fields.length);
+  await expect(page.locator("#stateTable .state-row")).toHaveCount(stateFieldCount);
   await expect(page.locator("#decisionCircuit")).toBeVisible();
   await expect(page.locator("#doomCanvas")).toBeVisible();
   await expect(page.locator("#architectureFlow")).toBeHidden();
@@ -34,6 +35,19 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
     return{ammoBefore,ammoAfter,damage,pulses,mask:env.actionMasks.fire,combo:env.actionMasks.strafe_left_fire};
   });
   expect(fire.mask).toBe(64);expect(fire.combo).toBe(80);expect(fire.ammoAfter<fire.ammoBefore||fire.damage>0).toBeTruthy();
+
+  const turnSign=await page.evaluate(async()=>{
+    const {env}=window.__doomLab;
+    await env.reset();
+    const before=Number(env.readRaw()?.player?.angle||0)>>>0;
+    env.stepTics("turn_left",2);
+    const after=Number(env.readRaw()?.player?.angle||0)>>>0;
+    const signedDelta=(((after-before+0x80000000)>>>0)-0x80000000);
+    await env.reset();
+    return{before,after,signedDelta};
+  });
+  console.log("DOOM_NATIVE_TURN_SIGN "+JSON.stringify(turnSign));
+  expect(turnSign.signedDelta).toBeGreaterThan(0);
 
   await page.locator("#prepareBtn").click();
   await page.waitForFunction(()=>{const text=document.querySelector("#prepareStatus")?.textContent||"";return text.includes("READY TO PLAY")||text.includes("Preparation failed")},null,{timeout:300000});
@@ -78,10 +92,20 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   const semanticProbes=await page.evaluate(async()=>{
     const {env,policy}=window.__doomLab,base=env.observe(),actions=policy.actions;
     const mkEntity=(overrides={})=>({engine_record_id:99,type:1,x:base.player_x+128,y:base.player_y,z:base.player_z,relative_x:128,relative_y:0,relative_z:0,velocity_x:0,velocity_y:0,radius:20,height:56,health:40,distance:128,relative_angle:0,visible:1,countkill:1,pickup:0,targeting_player:1,...overrides});
+    const relation=(bearing=null,distance=4096)=>({
+      visible_hostile_count:bearing===null?0:1,targeting_hostile_count:bearing===null?0:1,
+      nearest_hostile_distance:bearing===null?4096:distance,nearest_hostile_bearing:bearing??0,
+      nearest_visible_hostile_distance:bearing===null?4096:distance,nearest_visible_hostile_bearing:bearing??0,nearest_visible_hostile_health:bearing===null?0:40,
+      visible_hostile_bearing_zone:bearing===null?0:Math.abs(bearing)<=.06?1:bearing>0?2:3,
+      visible_hostile_distance_zone:bearing===null?0:distance<256?1:distance<768?2:3,
+      aim_alignment:bearing===null?0:1-Math.min(1,Math.abs(bearing)*8),
+      nearest_targeting_hostile_distance:bearing===null?4096:distance,nearest_targeting_hostile_bearing:bearing??0,
+      visible_projectile_count:0,nearest_projectile_distance:4096,nearest_projectile_bearing:0
+    });
     const cases={
-      enemy_ahead:{...base,health:100,recent_damage:0,recent_hostile_hp_loss:0,under_fire:0,bullets:50,_collections:{entities:[mkEntity()],geometry:[]}},
-      under_fire_side:{...base,health:35,recent_damage:20,recent_hostile_hp_loss:0,under_fire:1,bullets:50,_collections:{entities:[mkEntity({relative_x:64,relative_y:96,distance:116,relative_angle:.22})],geometry:[]}},
-      quiet_room:{...base,health:100,recent_damage:0,recent_hostile_hp_loss:0,under_fire:0,bullets:50,_collections:{entities:[],geometry:[]}}
+      enemy_ahead:{...base,...relation(0,128),health:100,recent_damage:0,recent_hostile_hp_loss:0,under_fire:0,bullets:50,_collections:{entities:[mkEntity()],geometry:[]}},
+      under_fire_side:{...base,...relation(.22,116),health:35,recent_damage:20,recent_hostile_hp_loss:0,under_fire:1,bullets:50,_collections:{entities:[mkEntity({relative_x:64,relative_y:96,distance:116,relative_angle:.22})],geometry:[]}},
+      quiet_room:{...base,...relation(null),health:100,recent_damage:0,recent_hostile_hp_loss:0,under_fire:0,bullets:50,_collections:{entities:[],geometry:[]}}
     };
     const out={};
     for(const [name,obs] of Object.entries(cases)){
@@ -93,6 +117,37 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
     return out;
   });
   console.log("SEMANTIC_DOOM_PROBES "+JSON.stringify(semanticProbes));
+
+  const teacherFreeze=await page.evaluate(async()=>{
+    const {env,policy,controller}=window.__doomLab;
+    controller.pause();
+    const previousMode=policy.inferenceMode,events=[];
+    const handler=event=>{
+      const detail=event.detail||{},raw=env.readRaw();
+      events.push({
+        active:!!detail.active,
+        simulationFrozen:!!detail.simulationFrozen,
+        gametic:Number(raw?.engine_state?.gametic??-1),
+        enginePaused:!!raw?.engine_state?.paused,
+        overlayHidden:!!document.querySelector("#teacherPauseOverlay")?.hidden
+      });
+    };
+    controller.addEventListener("teacherwait",handler);
+    policy.setInferenceMode("hybrid");
+    const ok=await controller.tick();
+    policy.setInferenceMode(previousMode);
+    controller.removeEventListener("teacherwait",handler);
+    return{ok,events};
+  });
+  console.log("TEACHER_FREEZE_PROBE "+JSON.stringify(teacherFreeze));
+  const teacherFreezeOn=teacherFreeze.events.find(x=>x.active),teacherFreezeOff=teacherFreeze.events.find(x=>!x.active);
+  expect(teacherFreeze.ok).toBe(true);
+  expect(teacherFreezeOn?.simulationFrozen).toBe(true);
+  expect(teacherFreezeOn?.enginePaused).toBe(true);
+  expect(teacherFreezeOn?.overlayHidden).toBe(false);
+  expect(teacherFreezeOff?.enginePaused).toBe(false);
+  expect(teacherFreezeOff?.overlayHidden).toBe(true);
+  expect(teacherFreezeOn?.gametic).toBe(teacherFreezeOff?.gametic);
 
   await page.setViewportSize({width:390,height:844});
   await page.locator("#playTabBtn").click();

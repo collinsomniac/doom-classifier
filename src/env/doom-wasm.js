@@ -92,20 +92,20 @@ export class DoomWasmArena{
         {id:"interaction",label:"environment interaction",description:"whether to activate a usable line or object this interval",enum:{0:"no use",1:"use"}}
       ],
       fields:[
-        {id:"health",label:"health",description:"remaining player vitality",min:0,max:200},
-        {id:"armor",label:"armor",description:"remaining protective armor",min:0,max:200},
-        {id:"bullets",label:"bullets",description:"available pistol or chaingun ammunition",min:0,max:400},
-        {id:"shells",label:"shells",description:"available shotgun ammunition",min:0,max:100},
+        {id:"health",decisionFeature:true,label:"health",description:"remaining player vitality",min:0,max:200},
+        {id:"armor",decisionFeature:true,label:"armor",description:"remaining protective armor",min:0,max:200},
+        {id:"bullets",decisionFeature:true,label:"bullets",description:"available pistol or chaingun ammunition",min:0,max:400},
+        {id:"shells",decisionFeature:true,label:"shells",description:"available shotgun ammunition",min:0,max:100},
         {id:"rockets",label:"rockets",description:"available rocket launcher ammunition",min:0,max:100},
         {id:"cells",label:"cells",description:"available plasma or BFG energy ammunition",min:0,max:600},
-        {id:"recent_damage",label:"recent damage received",description:"damage registered on the player in the recent engine combat window",min:0,max:100},
+        {id:"recent_damage",decisionFeature:true,label:"recent damage received",description:"damage registered on the player in the recent engine combat window",min:0,max:100},
         {id:"recent_hostile_hp_loss",label:"recent hostile HP loss",description:"hostile hit points removed during the previous control interval from any cause; observational telemetry that may include monster infighting",min:0,max:200},
         {id:"recent_player_damage_dealt",label:"recent player-attributed hostile damage",description:"hostile hit points removed during the previous control interval with the player recorded by the engine as the damage source; zero when attribution telemetry is unavailable",min:0,max:200},
         {id:"recent_player_kills",label:"recent player-attributed kills",description:"hostile kills during the previous control interval with the player recorded by the engine as source; zero when attribution telemetry is unavailable",min:0,max:20},
         {id:"recent_player_pickups",label:"recent player pickups",description:"successful item pickups by the player during the previous control interval",min:0,max:20},
         {id:"level_completed",label:"level completed",description:"whether the engine completed a level during the previous control interval",min:0,max:1},
         {id:"secret_exit",label:"secret exit",description:"whether the completed level used a secret exit during the previous control interval",min:0,max:1},
-        {id:"under_fire",label:"under fire",description:"whether the engine currently reports recent incoming damage",min:0,max:1},
+        {id:"under_fire",decisionFeature:true,label:"under fire",description:"whether the engine currently reports recent incoming damage",min:0,max:1},
         {id:"weapon",label:"equipped weapon",description:"weapon currently equipped by the player",enum:{
           0:"fist",1:"pistol",2:"shotgun",3:"chaingun",4:"rocket launcher",5:"plasma rifle",6:"BFG 9000",7:"chainsaw",8:"super shotgun"
         }},
@@ -118,11 +118,26 @@ export class DoomWasmArena{
         {id:"kills",label:"intermission kill count",description:"single-player Chocolate Doom kill statistic; may include monster deaths caused by other monsters and is therefore telemetry, not player-attributed reward",min:0,max:100},
         {id:"visited_cells",label:"visited spatial cells",description:"number of distinct coarse player-position cells visited this episode",min:0,max:500},
         {id:"cell_visits",label:"current cell visits",description:"number of control transitions ending in the current coarse spatial cell",scale:16},
-        {id:"exploration_novelty",label:"exploration novelty",description:"inverse revisit count of the current spatial cell; higher means less familiar",min:0,max:1}
+        {id:"exploration_novelty",label:"exploration novelty",description:"inverse revisit count of the current spatial cell; higher means less familiar",min:0,max:1},
+        {id:"visible_hostile_count",decisionFeature:true,label:"visible hostile count",description:"number of living hostile actors with direct line of sight to the player",min:0,max:32},
+        {id:"targeting_hostile_count",decisionFeature:true,label:"targeting hostile count",description:"number of living hostile actors currently targeting the player",min:0,max:32},
+        {id:"nearest_hostile_distance",label:"nearest hostile distance",description:"distance to the nearest living hostile actor; large sentinel when none exist",scale:1024},
+        {id:"nearest_hostile_bearing",label:"nearest hostile bearing",description:"signed normalized bearing to the nearest living hostile; positive is left and negative is right relative to current view",min:-1,max:1},
+        {id:"nearest_visible_hostile_distance",decisionFeature:true,label:"nearest visible hostile distance",description:"distance to the nearest living hostile with line of sight; large sentinel when none are visible",scale:1024},
+        {id:"nearest_visible_hostile_bearing",decisionFeature:true,label:"nearest visible hostile bearing",description:"signed normalized bearing to the nearest visible hostile; positive is left, zero is centered, negative is right",min:-1,max:1},
+        {id:"nearest_visible_hostile_health",label:"nearest visible hostile health",description:"remaining health of the nearest visible hostile",scale:256},
+        {id:"visible_hostile_bearing_zone",decisionFeature:true,label:"visible hostile bearing zone",description:"categorical player-relative direction of the nearest visible hostile",enum:{0:"no visible hostile",1:"centered",2:"left of view",3:"right of view"}},
+        {id:"visible_hostile_distance_zone",decisionFeature:true,label:"visible hostile distance zone",description:"categorical distance band of the nearest visible hostile",enum:{0:"no visible hostile",1:"close",2:"medium",3:"far"}},
+        {id:"aim_alignment",decisionFeature:true,label:"aim alignment",description:"how closely the current view is aligned with the nearest visible hostile; one is centered and zero is substantially off-axis",min:0,max:1},
+        {id:"nearest_targeting_hostile_distance",decisionFeature:true,label:"nearest targeting hostile distance",description:"distance to the nearest living hostile actively targeting the player",scale:1024},
+        {id:"nearest_targeting_hostile_bearing",decisionFeature:true,label:"nearest targeting hostile bearing",description:"signed normalized bearing to the nearest hostile actively targeting the player; positive is left and negative is right",min:-1,max:1},
+        {id:"visible_projectile_count",decisionFeature:true,label:"visible projectile count",description:"number of visible projectile or attack-effect records",min:0,max:32},
+        {id:"nearest_projectile_distance",decisionFeature:true,label:"nearest projectile distance",description:"distance to the nearest projectile or attack effect; large sentinel when none are present",scale:1024},
+        {id:"nearest_projectile_bearing",decisionFeature:true,label:"nearest projectile bearing",description:"signed normalized bearing to the nearest projectile or attack effect; positive is left and negative is right",min:-1,max:1}
       ],
       collections:[
         {
-          id:"entities",label:"world entities",description:"dynamic actors, objects and pickups represented with absolute and player-relative state",
+          id:"entities",label:"world entities",description:"dynamic actors, objects and pickups represented with absolute and player-relative state",attentionWeight:4,
           fields:[
             {id:"engine_record_id",label:"engine record id",description:"numeric record identifier supplied by the engine",scale:128},
             {id:"type",label:"entity type",description:"engine object category",enum:ENTITY_TYPES,scale:128},
@@ -147,7 +162,7 @@ export class DoomWasmArena{
           ]
         },
         {
-          id:"geometry",label:"world geometry",description:"map line segments represented relative to the player",
+          id:"geometry",label:"world geometry",description:"map line segments represented relative to the player",attentionWeight:1,
           fields:[
             {id:"line_id",label:"line id",description:"numeric map line identifier",scale:2048},
             {id:"x1",label:"line endpoint one x",description:"first endpoint x displacement from player",scale:1024},
@@ -200,6 +215,11 @@ export class DoomWasmArena{
   }
 
   setActionMs(ms){this.actionMs=clamp(Number(ms)||110,35,1000);this.schema.controlHorizonMs=this.actionMs}
+  setPaused(paused){
+    this.module.ccall("PromptFPS_SetPaused",null,["number"],[paused?1:0]);
+    this.simulationPaused=!!paused;
+    return this.simulationPaused;
+  }
   readRaw(){
     const json=this.module.ccall("PromptFPS_Observation","string",[],[]);
     const raw=JSON.parse(String(json));if(!raw.ready)throw new Error("Doom telemetry bridge is not ready");return raw;
@@ -268,6 +288,23 @@ export class DoomWasmArena{
       line_id:Number(line.id||0),x1:Number(line.x1||0)-Number(p.x||0),y1:Number(line.y1||0)-Number(p.y||0),x2:Number(line.x2||0)-Number(p.x||0),y2:Number(line.y2||0)-Number(p.y||0),
       flags:Number(line.flags||0),blocking:line.blocking?1:0,special:Number(line.special||0),tag:Number(line.tag||0)
     }));
+
+    // Environment adapters may expose compact relational summaries alongside
+    // raw records. These are factual projections, not policy rules: the model
+    // still learns what "left", "aligned", "near", etc. imply for each task.
+    const livingHostiles=entities.filter(e=>e.countkill>0&&e.health>0);
+    const visibleHostiles=livingHostiles.filter(e=>e.visible>0);
+    const targetingHostiles=livingHostiles.filter(e=>e.targeting_player>0);
+    const projectiles=entities.filter(e=>e.kind===2&&e.distance>=0);
+    const nearest=list=>list.reduce((best,e)=>!best||e.distance<best.distance?e:best,null);
+    const nearestHostile=nearest(livingHostiles),nearestVisible=nearest(visibleHostiles),nearestTargeting=nearest(targetingHostiles),nearestProjectile=nearest(projectiles);
+    const sentinel=4096,bearing=e=>Number(e?.relative_angle||0),distance=e=>e?Number(e.distance||0):sentinel;
+    const visibleBearing=bearing(nearestVisible),visibleDistance=distance(nearestVisible);
+    // These buckets are factual semantic projections, analogous to a schema
+    // exposing both a continuous measurement and a human-legible enum.
+    const visibleBearingZone=!nearestVisible?0:Math.abs(visibleBearing)<=.06?1:visibleBearing>0?2:3;
+    const visibleDistanceZone=!nearestVisible?0:visibleDistance<256?1:visibleDistance<768?2:3;
+
     return{
       health:Number(p.health||0),armor:Number(p.armor||0),bullets:Number(p.ammo?.bullets||0),shells:Number(p.ammo?.shells||0),rockets:Number(p.ammo?.rockets||0),cells:Number(p.ammo?.cells||0),
       recent_damage:Number(p.recent_damage||0),recent_hostile_hp_loss:Number(this.lastHostileHpLoss||0),
@@ -276,6 +313,13 @@ export class DoomWasmArena{
       under_fire:p.under_fire?1:0,weapon:Number(p.weapon||0),
       player_x:Number(p.x||0),player_y:Number(p.y||0),player_z:Number(p.z||0),velocity_x:Number(p.vx||0),velocity_y:Number(p.vy||0),heading,kills:Number(p.kills||0),
       visited_cells:Number(this.lastExploration?.visitedCells||0),cell_visits:Number(this.lastExploration?.cellVisits||0),exploration_novelty:Number(this.lastExploration?.novelty??1),
+      visible_hostile_count:visibleHostiles.length,targeting_hostile_count:targetingHostiles.length,
+      nearest_hostile_distance:distance(nearestHostile),nearest_hostile_bearing:bearing(nearestHostile),
+      nearest_visible_hostile_distance:visibleDistance,nearest_visible_hostile_bearing:visibleBearing,nearest_visible_hostile_health:Number(nearestVisible?.health||0),
+      visible_hostile_bearing_zone:visibleBearingZone,visible_hostile_distance_zone:visibleDistanceZone,
+      aim_alignment:nearestVisible?1-clamp(Math.abs(visibleBearing)*8,0,1):0,
+      nearest_targeting_hostile_distance:distance(nearestTargeting),nearest_targeting_hostile_bearing:bearing(nearestTargeting),
+      visible_projectile_count:projectiles.filter(e=>e.visible>0).length,nearest_projectile_distance:distance(nearestProjectile),nearest_projectile_bearing:bearing(nearestProjectile),
       _collections:{entities,geometry}
     };
   }
@@ -289,14 +333,20 @@ export class DoomWasmArena{
     const attributedCombatReward=events.playerDamageDealt*.02+events.playerKills*1.25;
     const pickupReward=events.playerPickups*.03;
     const completionReward=events.levelCompletions*5+events.secretExits*.5;
-    let reward=-.001+explorationBonus+attributedCombatReward+pickupReward+completionReward;
+    // Factual resource consumption: ammunition spent this interval (pickups
+    // excluded by clamping at zero). Without it, trigger choices with no
+    // target are exactly tied with holding fire and the causal label carries
+    // no information about when firing is inappropriate.
+    const ammoOf=pl=>["bullets","shells","rockets","cells"].reduce((s,k)=>s+Number(pl?.ammo?.[k]||0),0);
+    const ammoSpent=Math.max(0,ammoOf(prev)-ammoOf(cur)),ammoCost=ammoSpent*.01;
+    let reward=-.001+explorationBonus+attributedCombatReward+pickupReward+completionReward-ammoCost;
     if(healthDelta<0)reward+=healthDelta*.03;else if(healthDelta>0)reward+=healthDelta*.005;
     if(Number(cur.health||0)<=0)reward-=2;
     return{
       reward,hostileHpLoss,damageDealt:events.playerDamageDealt,damageAttributed:events.available,
       killDelta,playerKillDelta:events.playerKills,killAttributed:events.available,playerPickupDelta:events.playerPickups,
       levelCompletionDelta:events.levelCompletions,secretExitDelta:events.secretExits,
-      combatAttributionAvailable:events.available,attributedCombatReward,pickupReward,completionReward,
+      combatAttributionAvailable:events.available,attributedCombatReward,ammoSpent,ammoCost,pickupReward,completionReward,
       healthDelta,explorationBonus,newCell:!!exploration?.newCell,visitedCells:Number(exploration?.visitedCells||0),
       dead:Number(cur.health||0)<=0,levelCompleted:events.levelCompletions>0
     };

@@ -1,7 +1,7 @@
 import {DoomWasmArena,DOOM_RUNTIME_PROVENANCE} from "./env/doom-wasm.js";
 import {HashSemanticAdapter} from "./core/semantic.js";
 import {SemanticResidualPolicy} from "./core/policy.js";
-import {ExperimentController} from "./core/controller.js";
+import {ExperimentController,ControllerState} from "./core/controller.js";
 import {TransformersNLIAdapter,NLI_PRESETS} from "./model-adapters/transformers-nli.js";
 import {MiniLMSchemaCompiler,SCHEMA_EMBEDDING_PRESET} from "./model-adapters/schema-embedding-compiler.js";
 import {probeCounterfactualActions} from "./core/counterfactual.js";
@@ -29,7 +29,7 @@ async function resolveOwnedRuntime(){
 }
 const $=id=>document.getElementById(id);
 const ui={
-  boot:$("bootBtn"),prepare:$("prepareBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),runtime:$("runtimeStatus"),runtimeTitle:$("runtimeTitle"),bootStatus:$("bootStatus"),
+  boot:$("bootBtn"),prepare:$("prepareBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),stage:$("doomStage"),teacherPause:$("teacherPauseOverlay"),teacherPauseReason:$("teacherPauseReason"),runtime:$("runtimeStatus"),runtimeTitle:$("runtimeTitle"),bootStatus:$("bootStatus"),
   iwad:$("iwadInput"),iwadStatus:$("iwadStatus"),engineChip:$("engineChip"),schemaChip:$("schemaChip"),teacherChip:$("teacherChip"),policyChip:$("policyChip"),prepareStatus:$("prepareStatus"),
   profile:$("profileSelect"),applyProfile:$("applyProfileBtn"),profileHint:$("profileHint"),teacherMode:$("teacherModeSelect"),useNeural:$("useNeuralToggle"),learn:$("learnToggle"),memory:$("memoryToggle"),explore:$("exploreToggle"),
   tune:$("tuneBtn"),eval:$("evalBtn"),evalResults:$("evalResults"),tuneSteps:$("tuneSteps"),tuneProgress:$("tuneProgress"),tuneStatus:$("tuneStatus"),tuneBadge:$("tuneBadge"),loadStarter:$("loadStarterBtn"),loadSaved:$("loadSavedBtn"),saveCheckpoint:$("saveCheckpointBtn"),exportCheckpoint:$("exportCheckpointBtn"),checkpointStatus:$("checkpointStatus"),publishedReplaySelect:$("publishedReplaySelect"),publishedReplayBtn:$("publishedReplayBtn"),publishedReplayStatus:$("publishedReplayStatus"),
@@ -65,8 +65,8 @@ ui.inspectTabBtn?.addEventListener("click",()=>setLabTab("inspect"));
 setLabTab(location.hash==="#inspect"?"inspect":"play",{updateHash:false});
 
 const PROFILES={
-  assisted:{label:"Adaptive assisted",teacher:"adaptive",neural:true,learning:false,memory:true,explore:false,hint:"Fast neural decisions every tick; MobileBERT is scheduled only when uncertainty/novelty warrants it."},
-  teacher:{label:"Teacher-only zero-shot",teacher:"every",neural:false,learning:false,memory:true,explore:false,hint:"MobileBERT scores every decision. Useful semantic baseline, but it pays teacher latency every tick."},
+  assisted:{label:"Adaptive assisted",teacher:"adaptive",neural:true,learning:false,memory:true,explore:false,hint:"Fast neural decisions normally; when confidence is low, the simulator freezes on the exact state while the semantic teacher resolves and distills it."},
+  teacher:{label:"Teacher-only zero-shot",teacher:"every",neural:false,learning:false,memory:true,explore:false,hint:"MobileBERT scores every decision while simulation time is frozen. Useful semantic baseline; wall-clock latency never becomes in-game hesitation."},
   learning:{label:"Online learning",teacher:"adaptive",neural:true,learning:true,memory:true,explore:true,hint:"The neural controller samples from its own uncertainty (with a small uniform floor), learns real consequences, and receives adaptive semantic supervision."},
   frozen:{label:"Frozen neural evaluation",teacher:"off",neural:true,learning:false,memory:true,explore:false,hint:"No teacher calls, no weight updates, no random exploration. This is the clean small-model evaluation mode."}
 };
@@ -403,7 +403,17 @@ function render(){
 function bindController(){
   controller.addEventListener("tick",render);
   controller.addEventListener("state",event=>{ui.start.textContent=event.detail==="RUNNING"?"Pause":"Play";setRuntime(event.detail);updateReadiness()});
-  controller.addEventListener("error",event=>{setRuntime("ERROR",true);ui.log.textContent="ERROR: "+event.detail.message+"\n"+ui.log.textContent});
+  controller.addEventListener("teacherwait",event=>{
+    const detail=event.detail||{},active=!!detail.active;
+    if(ui.teacherPause){
+      ui.teacherPause.hidden=!active;
+      if(ui.teacherPauseReason)ui.teacherPauseReason.textContent=active?(detail.reason||"low confidence"):"resolved";
+    }
+    if(active)setRuntime(detail.simulationFrozen?"TEACHER PAUSE · SIM FROZEN":"TEACHER WAIT");
+    else if(controller.state===ControllerState.RUNNING)setRuntime("RUNNING");
+    renderTeacherTranscript();
+  });
+  controller.addEventListener("error",event=>{if(ui.teacherPause)ui.teacherPause.hidden=true;setRuntime("ERROR",true);ui.log.textContent="ERROR: "+event.detail.message+"\n"+ui.log.textContent});
 }
 async function primeCurrentTeacher(label,steps=12,{converge=false}={}){
   const obs=env.lastObservation||env.observe();ui.modelStatus.textContent=label+" · distilling current state";
@@ -447,7 +457,7 @@ async function boot(){
     hashSemantic=new HashSemanticAdapter();hashSemantic.backend="local-js";
     policy=new SemanticResidualPolicy({schema:env.schema,actions:env.actions,semantic:hashSemantic,residual:"neural-set",seed:1993,inferenceMode:"adaptive"});
     policy.onTeacherResult=()=>{if(env&&controller){const obs=env.lastObservation||env.observe(),d=controller.lastDecision,outcome=d?.outcome||env.lastOutcome;renderTeacherTranscript();renderArchitecture(obs,d,outcome)}};
-    controller=new ExperimentController({environment:env,policy,hz:8});controller.training=false;controller.explore=false;controller.memory=true;controller.useResidual=true;
+    controller=new ExperimentController({environment:env,policy,hz:8});controller.training=false;controller.explore=false;controller.memory=true;controller.useResidual=true;controller.freezeOnTeacher=true;
     bindController();buildBars();engineReady=true;ui.runtimeTitle.textContent=(env.runtime?.owned?"Owned ":"")+"Chocolate Doom · "+env.contentName;
     const counts=env.lastObservation?._collections||{},runtimeId=env.runtime?.commit?(" · runtime "+String(env.runtime.commit).slice(0,8)):"";ui.bootStatus.textContent=DOOM_RUNTIME_PROVENANCE.engine+" · "+env.contentName+runtimeId+" · "+policy.q.parameterCount()+" params · "+(counts.entities?.length||0)+" entities · "+(counts.geometry?.length||0)+" lines";
     ui.prepareStatus.textContent="Engine ready. Prepare Recommended before model-controlled play.";ui.schemaStatus.textContent="Lexical feature hash only.";ui.modelStatus.textContent="No learned teacher loaded.";
@@ -474,7 +484,7 @@ async function importPortableCheckpoint(checkpoint,label="checkpoint"){
 }
 function checkpointSummary(build){
   if(!build)return null;
-  if(build.selection==="exact-state causal policy curriculum"||Number.isFinite(Number(build.causalSteps))){
+  if(build.selection==="exact-state causal policy curriculum"||build.selection==="canonical exact-state causal policy curriculum"||Number.isFinite(Number(build.causalSteps))){
     const validation=build.validation||{},training=build.training||{};
     return{
       kind:"causal",stage:null,decisions:Number(build.causalSteps||0),

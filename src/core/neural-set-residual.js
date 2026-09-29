@@ -186,7 +186,14 @@ export class NeuralSetResidualQ{
   setSchema(schema){
     this.schema=schema;this.compiledGlobals=compileFields(schema.fields,this.hashDim);this.compiledGlobalPrefix=compileSparse("global state objective "+(schema.objective||""),this.hashDim,.25);this.compiledGlobalSemantic=projectSemanticVector(schema.objectiveSemanticVector,this.hashDim);
     this.compiledTemporal=(schema.fields||[]).map(field=>({field,valueSparse:compileSparse("recent change in "+descriptor(field),this.hashDim,1),semanticDense:projectSemanticVector(field.semanticVector,this.hashDim)}));this.compiledTemporalPrefix=compileSparse("recent temporal state change",this.hashDim,.2);
-    this.compiledCollections=(schema.collections||[]).map(collection=>({id:collection.id,fields:compileFields(collection.fields,this.hashDim),prefixSparse:compileSparse([collection.label,collection.description].filter(Boolean).join(" ")||collection.id,this.hashDim,.2),prefixDense:projectSemanticVector(collection.semanticVector,this.hashDim)}));
+    this.compiledCollections=(schema.collections||[]).map(collection=>({
+      id:collection.id,
+      fields:compileFields(collection.fields,this.hashDim),
+      prefixSparse:compileSparse([collection.label,collection.description].filter(Boolean).join(" ")||collection.id,this.hashDim,.2),
+      prefixDense:projectSemanticVector(collection.semanticVector,this.hashDim),
+      attentionWeight:Math.max(.05,Number(collection.attentionWeight??1)||1)
+    }));
+    this.collectionAttentionWeights=new Map(this.compiledCollections.map(collection=>[collection.id,collection.attentionWeight]));
     this.compiledActionFields=compileFields(schema.actionFields||[],this.actionDim);
     this.compiledHistoryActionFields=compileFields(schema.actionFields||[],this.hashDim);
     this.historyPrefix=compileSparse("recent decision action and observed consequence",this.hashDim,.25);
@@ -269,8 +276,23 @@ export class NeuralSetResidualQ{
     const queryInput=new Float32Array(this.queryInputDim);queryInput.set(this.actionEmbeddings[actionIndex],0);queryInput.set(state.context.slice(0,this.attentionStateDim),this.actionDim);
     const queryCache=this.queryLayer.forward(queryInput),query=queryCache.out,n=state.latents.length,weights=new Float32Array(n),attended=new Float32Array(this.entityDim);
     if(!n)return{queryCache,weights,attended};
+
+    // A set may contain heterogeneous record collections with wildly different
+    // cardinalities (for example a few actors and hundreds of geometry lines).
+    // Normalize each record by its collection population before the global
+    // softmax, then apply an adapter-provided semantic weight. This preserves
+    // permutation invariance without allowing a large collection to win
+    // attention merely by having more rows.
+    const counts=new Map();
+    for(const meta of state.records)counts.set(meta.collectionId,(counts.get(meta.collectionId)||0)+1);
+
     const logits=new Float32Array(n),scale=1/Math.sqrt(this.entityDim);let peak=-Infinity;
-    for(let r=0;r<n;r++){let s=0,z=state.latents[r];for(let d=0;d<this.entityDim;d++)s+=query[d]*z[d];s*=scale;logits[r]=s;if(s>peak)peak=s}
+    for(let r=0;r<n;r++){
+      let s=0,z=state.latents[r];for(let d=0;d<this.entityDim;d++)s+=query[d]*z[d];s*=scale;
+      const id=state.records[r]?.collectionId,count=Math.max(1,counts.get(id)||1),collectionWeight=Math.max(.05,Number(this.collectionAttentionWeights?.get(id)??1)||1);
+      s+=Math.log(collectionWeight)-Math.log(count);
+      logits[r]=s;if(s>peak)peak=s;
+    }
     let denom=0;for(let r=0;r<n;r++){const e=Math.exp(logits[r]-peak);weights[r]=e;denom+=e}denom=denom||1;
     for(let r=0;r<n;r++){const w=weights[r]/denom;weights[r]=w;const z=state.latents[r];for(let d=0;d<this.entityDim;d++)attended[d]+=w*z[d]}
     return{queryCache,weights,attended};
