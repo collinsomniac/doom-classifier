@@ -247,6 +247,7 @@ EMSCRIPTEN_KEEPALIVE int PromptFPS_HasSnapshot(void)
         '#if defined(__EMSCRIPTEN__)\n'
         'extern void PromptFPS_RecordLevelComplete(int secret_exit);\n'
         'extern int prndindex;\n'
+        'extern int validcount;\n'
         '#endif\n\n'
         '#define SAVEGAMESIZE',
         "level recorder declaration",
@@ -271,7 +272,12 @@ static int promptfps_snapshot_target_index[PROMPTFPS_MAX_SNAPSHOT_MOBJS];
 static int promptfps_snapshot_tracer_index[PROMPTFPS_MAX_SNAPSHOT_MOBJS];
 static int promptfps_snapshot_player_attacker_index[MAXPLAYERS];
 static int *promptfps_snapshot_sector_soundtarget_index;
+static int *promptfps_snapshot_sector_validcount;
+static int *promptfps_snapshot_sector_soundtraversed;
+static int *promptfps_snapshot_line_validcount;
 static int promptfps_snapshot_sector_capacity;
+static int promptfps_snapshot_line_capacity;
+static int promptfps_snapshot_validcount;
 
 static int PromptFPS_MobjIndex(mobj_t *needle)
 {
@@ -321,21 +327,46 @@ static int PromptFPS_CaptureSnapshotLinks(void)
 
     if (numsectors > promptfps_snapshot_sector_capacity)
     {
-        int *next = realloc(promptfps_snapshot_sector_soundtarget_index,
-                            sizeof(int) * (size_t) numsectors);
-        if (next == NULL)
+        int *soundtargets = realloc(promptfps_snapshot_sector_soundtarget_index,
+                                    sizeof(int) * (size_t) numsectors);
+        int *sector_valid = realloc(promptfps_snapshot_sector_validcount,
+                                    sizeof(int) * (size_t) numsectors);
+        int *soundtraversed = realloc(promptfps_snapshot_sector_soundtraversed,
+                                      sizeof(int) * (size_t) numsectors);
+        if (soundtargets == NULL || sector_valid == NULL || soundtraversed == NULL)
             return 0;
-        promptfps_snapshot_sector_soundtarget_index = next;
+        promptfps_snapshot_sector_soundtarget_index = soundtargets;
+        promptfps_snapshot_sector_validcount = sector_valid;
+        promptfps_snapshot_sector_soundtraversed = soundtraversed;
         promptfps_snapshot_sector_capacity = numsectors;
+    }
+
+    if (numlines > promptfps_snapshot_line_capacity)
+    {
+        int *line_valid = realloc(promptfps_snapshot_line_validcount,
+                                  sizeof(int) * (size_t) numlines);
+        if (line_valid == NULL)
+            return 0;
+        promptfps_snapshot_line_validcount = line_valid;
+        promptfps_snapshot_line_capacity = numlines;
     }
 
     for (i = 0; i < MAXPLAYERS; ++i)
         promptfps_snapshot_player_attacker_index[i] =
             PromptFPS_MobjIndex(players[i].attacker);
 
+    promptfps_snapshot_validcount = validcount;
+
     for (i = 0; i < numsectors; ++i)
+    {
         promptfps_snapshot_sector_soundtarget_index[i] =
             PromptFPS_MobjIndex(sectors[i].soundtarget);
+        promptfps_snapshot_sector_validcount[i] = sectors[i].validcount;
+        promptfps_snapshot_sector_soundtraversed[i] = sectors[i].soundtraversed;
+    }
+
+    for (i = 0; i < numlines; ++i)
+        promptfps_snapshot_line_validcount[i] = lines[i].validcount;
 
     for (th = thinkercap.next; th != &thinkercap; th = th->next)
     {
@@ -384,12 +415,22 @@ static int PromptFPS_RestoreSnapshotLinks(void)
         players[i].attacker =
             PromptFPS_MobjAtIndex(promptfps_snapshot_player_attacker_index[i]);
 
-    if (numsectors > promptfps_snapshot_sector_capacity)
+    if (numsectors > promptfps_snapshot_sector_capacity
+        || numlines > promptfps_snapshot_line_capacity)
         return 0;
 
+    validcount = promptfps_snapshot_validcount;
+
     for (i = 0; i < numsectors; ++i)
+    {
         sectors[i].soundtarget =
             PromptFPS_MobjAtIndex(promptfps_snapshot_sector_soundtarget_index[i]);
+        sectors[i].validcount = promptfps_snapshot_sector_validcount[i];
+        sectors[i].soundtraversed = promptfps_snapshot_sector_soundtraversed[i];
+    }
+
+    for (i = 0; i < numlines; ++i)
+        lines[i].validcount = promptfps_snapshot_line_validcount[i];
 
     return 1;
 }
