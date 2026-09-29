@@ -2,7 +2,7 @@ name: browser-smoke
 
 on:
   push:
-    branches: [main, fix/separate-starter-runtime]
+    branches: [main]
     paths:
       - doom.html
       - src/doom-main.js
