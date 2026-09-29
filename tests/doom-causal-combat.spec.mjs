@@ -22,6 +22,7 @@ async function bootAndPrepare(page){
   // Compile MiniLM schema embeddings directly and keep the slow teacher out of
   // the offline simulator loop.
   await page.locator("#inspectTabBtn").click();
+  await page.locator(".advanced-panel").evaluate(el=>{el.open=true});
   await page.locator("#schemaCompileBtn").click();
   await expect(page.locator("#schemaStatus")).toContainText("compiled",{timeout:300000});
   await page.locator("#playTabBtn").click();
@@ -232,12 +233,6 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
   },causalSteps);
 
   const checkpoint=await page.evaluate(()=>window.__doomLab.policy.exportCheckpoint());
-  checkpoint.build={
-    selection:"canonical exact-state causal policy curriculum",
-    causalSteps,probeTics:24,actionTics:4,rolloutHorizon:64,
-    training:{kills:training.kills,damage:training.damage,return:training.return,examples:training.examples,informative:training.informative}
-  };
-  writeFileSync(resolve(outputDir,"doom-causal-checkpoint.json"),JSON.stringify(checkpoint));
 
   const runtime=await page.evaluate(()=>({
     commit:window.__doomLab.env.runtime?.commit||null,
@@ -246,21 +241,39 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
   }));
   const evaluated=await evaluateExact(page,{rollouts:replayRollouts,stepsPerRollout:replaySteps,actionTics:4,verifyReplay:true});
   const {replay,...evaluation}=evaluated;
+  const grounding=await groundingProbe(page);
+  const fiveMinute=await fiveMinuteBenchmark(page,{totalTics:10500,actionTics:4});
+
+  checkpoint.build={
+    selection:"canonical exact-state typed causal curriculum",
+    causalSteps,probeTics:24,actionTics:4,rolloutHorizon:128,
+    training:{
+      kills:training.kills,damage:training.damage,return:training.return,examples:training.examples,informative:training.informative,
+      meanTypedTargetFit:training.meanTypedTargetFit,meanTypedTargetBlend:training.meanTypedTargetBlend
+    },
+    validation:{kills:evaluation.totalKills,damage:evaluation.totalDamage,reward:evaluation.totalReward},
+    grounding,
+    fiveMinute:{kills:fiveMinute.kills,damage:fiveMinute.damage,simulatedSeconds:fiveMinute.simulatedSeconds,normalizedStateActionMI:fiveMinute.normalizedStateActionMI}
+  };
+  writeFileSync(resolve(outputDir,"doom-causal-checkpoint.json"),JSON.stringify(checkpoint));
+
   const report={
-    version:"causal-policy-v3-canonical-replay",
+    version:"causal-policy-v4-grounded-typed-replay",
     gate:{killTarget,minDiversity,minSwitches,maxStreakLimit},
-    runtime,baseline,training,evaluation,replay,
+    runtime,baseline,training,evaluation,replay,grounding,fiveMinute,
     checkpoint:{params:checkpoint.q?.params,bytes:JSON.stringify(checkpoint).length}
   };
   writeFileSync(resolve(outputDir,"combat-report.json"),JSON.stringify(report,null,2));
-  writeFileSync(resolve(outputDir,"combat-replays.json"),JSON.stringify({version:3,actionTics:4,verification:"same canonical native start snapshot with restored RNG state",runs:evaluation.runs},null,2));
+  writeFileSync(resolve(outputDir,"combat-replays.json"),JSON.stringify({version:4,actionTics:4,verification:"same canonical native start snapshot with restored RNG state",runs:evaluation.runs},null,2));
 
   console.log("CAUSAL_COMBAT_RESULT "+JSON.stringify({
     target:killTarget,runtime,
     baseline:{kills:baseline.totalKills,damage:baseline.totalDamage,reward:baseline.totalReward,diversity:baseline.actionDiversity,maxStreak:baseline.maxStreak},
-    training:{kills:training.kills,damage:training.damage,reward:training.return,examples:training.examples,informative:training.informative,diversity:training.actionDiversity,replaySupervisionUpdates:training.replaySupervisionUpdates,fitPasses:training.fitPasses},
+    training:{kills:training.kills,damage:training.damage,reward:training.return,examples:training.examples,informative:training.informative,diversity:training.actionDiversity,replaySupervisionUpdates:training.replaySupervisionUpdates,fitPasses:training.fitPasses,typedFit:training.meanTypedTargetFit,typedBlend:training.meanTypedTargetBlend},
     evaluation:{kills:evaluation.totalKills,damage:evaluation.totalDamage,reward:evaluation.totalReward,decisions:evaluation.totalDecisions,diversity:evaluation.actionDiversity,minRunDiversity:evaluation.minRunDiversity,switches:evaluation.totalSwitches,maxStreak:evaluation.maxStreak,counts:evaluation.actionCounts},
     replay:{kills:replay.totalKills,damage:replay.totalDamage,reward:replay.totalReward},
+    grounding,
+    fiveMinute:{kills:fiveMinute.kills,damage:fiveMinute.damage,reward:fiveMinute.reward,deaths:fiveMinute.deaths,decisions:fiveMinute.decisions,wallMs:fiveMinute.wallMs,diversity:fiveMinute.actionDiversity,alignedFireRate:fiveMinute.alignedFireRate,correctTurnRate:fiveMinute.correctTurnRate,noVisibleFireRate:fiveMinute.noVisibleFireRate,normalizedStateActionMI:fiveMinute.normalizedStateActionMI,counts:fiveMinute.actionCounts},
     params:checkpoint.q?.params
   }));
 
