@@ -1,0 +1,32 @@
+name: snapshot-regression
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - tests/doom-snapshot-regression.spec.mjs
+      - .github/workflows/snapshot-regression.yml
+      - src/env/doom-wasm.js
+      - "engine/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chromium:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Chromium tooling
+        run: |
+          npm install --no-save --no-package-lock @playwright/test@1.55.0
+          npx playwright install chromium
+      - name: Start static server
+        run: python3 -m http.server 8000 --bind 127.0.0.1 > /tmp/snapshot-http.log 2>&1 &
+      - name: Verify long-horizon rollback determinism
+        run: npx playwright test tests/doom-snapshot-regression.spec.mjs --reporter=line
