@@ -150,7 +150,7 @@ export class ExperimentController extends EventTarget{
     steps=512,probeTics=24,actionTics=4,plannerDepth=1,continuationTics=8,continuationCandidates=4,rolloutHorizon=128,
     targetTemperature=.30,priorStrength=0,superviseSteps=3,superviseStrength=.55,
     supervisionReplay=2,replayStrength=.24,batchRefitEvery=0,batchWindow=192,
-    finalRefit=false,ridge=.025,factorizedTargetBlend=.70,behaviorCoverage=.35,seed=0x51a9e,onProgress=()=>{}
+    finalRefit=false,ridge=.025,factorizedTargetBlend=0,behaviorCoverage=.35,seed=0x51a9e,onProgress=()=>{}
   }={}){
     if(!this.environment?.supportsSnapshots?.()||!this.environment?.supportsExactTics?.())throw new Error("Causal policy training requires exact snapshots and tic stepping");
     if(!this.policy?.superviseDecisionDistribution||!this.policy?.fitDecisionDistributions)throw new Error("Policy does not support proper-score supervision");
@@ -218,6 +218,11 @@ export class ExperimentController extends EventTarget{
         });
         const measuredTarget=[...probe.target],oracleIndex=argmax(measuredTarget),oracle=this.policy.actions[oracleIndex];
         const logTarget=measuredTarget.map(p=>Math.log(Math.max(1e-8,Number(p)||0)));
+        // Labels stay in measured-return space by default (blend 0). A ridge
+        // projection onto typed columns broke exact ties toward the action with
+        // the most distinctive column pattern ("use"), fabricating preferences
+        // (tools/projection-artifact.mjs). Factor structure now lives in the
+        // jointly trained factor head instead of in the target.
         const typedProjection=projectValueToActionFields(this.policy.schema,this.policy.actions,logTarget,{ridge:.035,maxBlend:factorizedTargetBlend});
         const target=softmax(typedProjection.scores,1);
         const isInformative=probe.spread>1e-9;

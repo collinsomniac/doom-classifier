@@ -333,14 +333,20 @@ export class DoomWasmArena{
     const attributedCombatReward=events.playerDamageDealt*.02+events.playerKills*1.25;
     const pickupReward=events.playerPickups*.03;
     const completionReward=events.levelCompletions*5+events.secretExits*.5;
-    let reward=-.001+explorationBonus+attributedCombatReward+pickupReward+completionReward;
+    // Factual resource consumption: ammunition spent this interval (pickups
+    // excluded by clamping at zero). Without it, trigger choices with no
+    // target are exactly tied with holding fire and the causal label carries
+    // no information about when firing is inappropriate.
+    const ammoOf=pl=>["bullets","shells","rockets","cells"].reduce((s,k)=>s+Number(pl?.ammo?.[k]||0),0);
+    const ammoSpent=Math.max(0,ammoOf(prev)-ammoOf(cur)),ammoCost=ammoSpent*.01;
+    let reward=-.001+explorationBonus+attributedCombatReward+pickupReward+completionReward-ammoCost;
     if(healthDelta<0)reward+=healthDelta*.03;else if(healthDelta>0)reward+=healthDelta*.005;
     if(Number(cur.health||0)<=0)reward-=2;
     return{
       reward,hostileHpLoss,damageDealt:events.playerDamageDealt,damageAttributed:events.available,
       killDelta,playerKillDelta:events.playerKills,killAttributed:events.available,playerPickupDelta:events.playerPickups,
       levelCompletionDelta:events.levelCompletions,secretExitDelta:events.secretExits,
-      combatAttributionAvailable:events.available,attributedCombatReward,pickupReward,completionReward,
+      combatAttributionAvailable:events.available,attributedCombatReward,ammoSpent,ammoCost,pickupReward,completionReward,
       healthDelta,explorationBonus,newCell:!!exploration?.newCell,visitedCells:Number(exploration?.visitedCells||0),
       dead:Number(cur.health||0)<=0,levelCompleted:events.levelCompletions>0
     };
