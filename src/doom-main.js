@@ -548,7 +548,7 @@ async function loadBundledCheckpoint({silent=false}={}){
     if(!silent)ui.checkpointStatus.textContent="Fetching validated starter…";
     const {checkpoint,url}=await fetchStarterCheckpoint();
     await importPortableCheckpoint(checkpoint,"validated starter");
-    const summary=checkpointSummary(checkpointInfo);ui.checkpointStatus.textContent=(summary?("Validated starter · "+(summary.kind==="causal"?"causal policy":"stage "+summary.stage)+" / "+summary.decisions+" decisions · "+summary.damage.toFixed(0)+" damage · "+summary.kills.toFixed(0)+" kills · return "+summary.reward.toFixed(3)):"Validated starter loaded")+" · "+policy.q.parameterCount()+" params · source "+(url.includes("model-runtime")?"model-runtime snapshot":"local bundle");
+    const summary=checkpointSummary(checkpointInfo);ui.checkpointStatus.textContent=(summary?("Validated starter · "+(summary.kind==="causal"?"causal policy":"stage "+summary.stage)+" / "+summary.decisions+" decisions · "+summary.damage.toFixed(0)+" damage · "+summary.kills.toFixed(0)+" kills · return "+summary.reward.toFixed(3)):"Validated starter loaded")+" · "+policy.q.parameterCount()+" params · source "+(url.includes("model-runtime")?"model-runtime causal snapshot":url.includes("starter-runtime")?"starter-runtime staged snapshot":"local bundle");
     if(url.includes("model-runtime"))try{installReplayBundle(await fetchPublishedReplayBundle())}catch(error){if(ui.publishedReplayStatus)ui.publishedReplayStatus.textContent="Replay bundle unavailable · "+String(error?.message||error)}
     return true;
   }catch(error){
