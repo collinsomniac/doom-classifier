@@ -2,7 +2,7 @@ name: causal-combat-model
 
 on:
   push:
-    branches: [main]
+    branches: [main, fix/canonical-snapshot-determinism]
     paths:
       - tests/doom-causal-combat.spec.mjs
       - src/core/counterfactual.js
