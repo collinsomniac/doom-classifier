@@ -307,13 +307,22 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5df}
 .lab-tab-panel.active{display:block}
 #playTab .lab-grid{grid-template-columns:1fr}
 #playTab .arena-panel{grid-column:1/-1;grid-row:auto}
-.doom-stage{display:grid;place-items:center;width:100%;overflow:visible;border-radius:12px;background:#000}
-#doomCanvas{display:block;width:min(100%,1120px)!important;height:auto!important;max-width:100%;max-height:none;aspect-ratio:4/3!important;background:#000;border:1px solid #242c36;border-radius:12px;image-rendering:pixelated}
+.doom-stage{position:relative;width:min(100%,960px);aspect-ratio:4/3;min-width:0;margin-inline:auto;overflow:hidden;border:1px solid #242c36;border-radius:12px;background:#000;contain:layout paint}
+#doomCanvas{position:absolute!important;inset:0!important;display:block!important;width:100%!important;height:100%!important;min-width:0!important;max-width:none!important;min-height:0!important;max-height:none!important;aspect-ratio:auto!important;border:0!important;border-radius:0!important;background:#000;image-rendering:pixelated;transform:none!important}
+.teacher-pause-overlay{position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;gap:12px;padding:18px;background:#05080bcf;backdrop-filter:blur(3px);text-align:left;pointer-events:none}
+.teacher-pause-overlay[hidden]{display:none!important}
+.teacher-pause-overlay>div:last-child{display:grid;gap:3px;max-width:min(420px,75%)}
+.teacher-pause-overlay span{font:900 9px ui-monospace,monospace;letter-spacing:.16em;color:#8ccfff}
+.teacher-pause-overlay strong{font:800 14px ui-monospace,monospace;color:#e7edf2}
+.teacher-pause-overlay small{font:9px ui-monospace,monospace;color:#8995a1}
+.teacher-pause-pulse{width:18px;height:18px;border:2px solid #8ccfff;border-radius:50%;box-shadow:0 0 18px #8ccfff55;animation:teacherPausePulse .9s ease-in-out infinite alternate}
+@keyframes teacherPausePulse{from{transform:scale(.75);opacity:.45}to{transform:scale(1.08);opacity:1}}
 .inspect-grid>.engine-controls-panel{align-self:start}
 @media(max-width:650px){
   .lab-tabs{top:env(safe-area-inset-top);margin-inline:-2px}
   .lab-tab-btn{flex:1 1 0}
-  #doomCanvas{max-width:100%;max-height:none}
+  .doom-stage{width:100%;max-width:100%}
 }
+@media(prefers-reduced-motion:reduce){.teacher-pause-pulse{animation:none}}
 
 .replay-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}.replay-controls select{min-width:190px;background:#0c1015;color:var(--text);border:1px solid #303946;border-radius:9px;padding:.55rem}.replay-controls button{flex:0 0 auto}
