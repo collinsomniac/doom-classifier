@@ -2,7 +2,7 @@ import {test,expect} from "@playwright/test";
 import {mkdirSync,writeFileSync} from "node:fs";
 import {resolve} from "node:path";
 
-test.setTimeout(720000);
+test.setTimeout(900000);
 
 const causalSteps=Number(process.env.CAUSAL_TRAIN_STEPS||768);
 const replayRollouts=Number(process.env.CAUSAL_REPLAY_ROLLOUTS||16);
@@ -17,8 +17,14 @@ async function bootAndPrepare(page){
   await page.goto("http://127.0.0.1:8000/doom.html?starter=off",{waitUntil:"domcontentloaded"});
   await page.locator("#bootBtn").click();
   await expect(page.locator("#runtimeStatus")).toContainText("ENGINE READY",{timeout:120000});
-  await page.locator("#prepareBtn").click();
-  await expect(page.locator("#policyChip")).toContainText("ready to play",{timeout:360000});
+
+  // Causal training needs semantic schema bindings but no runtime NLI teacher.
+  // Compile MiniLM schema embeddings directly and keep the slow teacher out of
+  // the offline simulator loop.
+  await page.locator("#inspectTabBtn").click();
+  await page.locator("#schemaCompileBtn").click();
+  await expect(page.locator("#schemaStatus")).toContainText("compiled",{timeout:300000});
+  await page.locator("#playTabBtn").click();
 }
 
 async function evaluateExact(page,{rollouts=replayRollouts,stepsPerRollout=replaySteps,actionTics=4,verifyReplay=false}={}){
@@ -92,6 +98,119 @@ async function evaluateExact(page,{rollouts=replayRollouts,stepsPerRollout=repla
       }:null
     };
   },{rollouts,stepsPerRollout,actionTics,verifyReplay});
+}
+
+
+async function groundingProbe(page){
+  return page.evaluate(()=>{
+    const {env,policy:p}=window.__doomLab,base=env.observe(),actions=p.actions;
+    const clone=value=>structuredClone(value);
+    const softmax=s=>{const peak=Math.max(...s),e=s.map(v=>Math.exp(v-peak)),z=e.reduce((a,b)=>a+b,0)||1;return e.map(v=>v/z)};
+    const entity=(bearing,distance=192)=>{
+      const rad=bearing*Math.PI;
+      return{engine_record_id:999,type:11,kind:1,x:base.player_x+distance*Math.cos(rad),y:base.player_y+distance*Math.sin(rad),z:base.player_z,
+        relative_x:distance*Math.cos(rad),relative_y:distance*Math.sin(rad),relative_z:0,velocity_x:0,velocity_y:0,radius:20,height:56,health:60,
+        distance,relative_angle:bearing,visible:1,countkill:1,pickup:0,targeting_player:1};
+    };
+    const make=(bearing=null)=>{
+      const obs=clone(base),has=bearing!==null,e=has?entity(bearing):null;
+      Object.assign(obs,{
+        visible_hostile_count:has?1:0,targeting_hostile_count:has?1:0,
+        nearest_hostile_distance:has?e.distance:4096,nearest_hostile_bearing:has?bearing:0,
+        nearest_visible_hostile_distance:has?e.distance:4096,nearest_visible_hostile_bearing:has?bearing:0,nearest_visible_hostile_health:has?60:0,
+        aim_alignment:has?1-Math.min(1,Math.abs(bearing)*8):0,
+        nearest_targeting_hostile_distance:has?e.distance:4096,nearest_targeting_hostile_bearing:has?bearing:0,
+        visible_projectile_count:0,nearest_projectile_distance:4096,nearest_projectile_bearing:0,
+        _collections:{entities:has?[e]:[],geometry:[]}
+      });
+      return obs;
+    };
+    const score=obs=>{
+      const encoded=p.encode(obs,false,false),ev=p.residualEvaluation(obs,encoded.features,encoded.temporal,[]),probs=softmax(ev.scores.map(v=>Number(v)/Math.max(.05,Number(p.temperature)||1)));
+      const mass=predicate=>actions.reduce((sum,a,i)=>sum+(predicate(a)?probs[i]:0),0);
+      return{
+        probs,
+        top:actions.map((a,i)=>({id:a.id,p:probs[i]})).sort((a,b)=>b.p-a.p).slice(0,5),
+        fire:mass(a=>Number(a.params?.trigger||0)===1),
+        left:mass(a=>Number(a.params?.view||0)===1||Number(a.params?.movement||0)===3),
+        right:mass(a=>Number(a.params?.view||0)===2||Number(a.params?.movement||0)===4),
+        turnLeft:mass(a=>Number(a.params?.view||0)===1),
+        turnRight:mass(a=>Number(a.params?.view||0)===2)
+      };
+    };
+    const left=score(make(-.24)),ahead=score(make(0)),right=score(make(.24)),quiet=score(make(null));
+    const tv=.5*left.probs.reduce((sum,p,i)=>sum+Math.abs(p-right.probs[i]),0);
+    const directional=.5*((left.left-left.right)+(right.right-right.left));
+    const turnDirectional=.5*((left.turnLeft-left.turnRight)+(right.turnRight-right.turnLeft));
+    return{
+      left:{top:left.top,left:left.left,right:left.right,fire:left.fire},
+      ahead:{top:ahead.top,fire:ahead.fire},
+      right:{top:right.top,left:right.left,right:right.right,fire:right.fire},
+      quiet:{top:quiet.top,fire:quiet.fire},
+      totalVariationLeftRight:tv,directionalPreference:directional,turnDirectionalPreference:turnDirectional,
+      fireContrastAheadVsQuiet:ahead.fire-quiet.fire
+    };
+  });
+}
+
+async function fiveMinuteBenchmark(page,{totalTics=10500,actionTics=4}={}){
+  return page.evaluate(async({totalTics,actionTics})=>{
+    const {policy:p,controller:c,env}=window.__doomLab;
+    c.pause();c.training=false;c.explore=false;c.memory=true;c.useResidual=true;await c.quiesce({teacher:true});p.setInferenceMode("neural");
+    const started=performance.now(),actions={},bearingAction={left:{},center:{},right:{},none:{}};
+    let tics=0,decisions=0,kills=0,damage=0,reward=0,deaths=0,resets=0;
+    let visible=0,aligned=0,alignedFire=0,offAxis=0,correctTurn=0,noVisible=0,noVisibleFire=0;
+
+    const canonicalReset=async()=>{
+      await env.reset();p.resetEpisode();const snap=env.saveSnapshot();env.restoreSnapshot(snap);p.resetEpisode();resets++;
+    };
+    await canonicalReset();
+
+    while(tics<totalTics){
+      const obs=env.observe(),d=await p.decide(obs,{useResidual:true,memory:true,explore:false}),id=d.action.id,params=d.action.params||{};
+      const hasVisible=Number(obs.visible_hostile_count||0)>0&&Number(obs.nearest_visible_hostile_distance||4096)<4096;
+      const bearing=Number(obs.nearest_visible_hostile_bearing||0),fire=Number(params.trigger||0)===1;
+      const bin=!hasVisible?"none":bearing<-.08?"left":bearing>.08?"right":"center";
+      bearingAction[bin][id]=(bearingAction[bin][id]||0)+1;
+      if(hasVisible){
+        visible++;
+        if(Math.abs(bearing)<=.06){aligned++;if(fire)alignedFire++}
+        if(Math.abs(bearing)>=.10){
+          offAxis++;
+          if((bearing<0&&Number(params.view||0)===1)||(bearing>0&&Number(params.view||0)===2))correctTurn++;
+        }
+      }else{noVisible++;if(fire)noVisibleFire++}
+
+      const step=env.stepTics(id,Math.min(actionTics,totalTics-tics)),outcome=step.info?.outcome||null;
+      p.commitActionOutcome?.({actionIndex:d.actionIndex,reward:step.reward,outcome,done:step.done});
+      tics+=Number(step.info?.exactTics||actionTics);decisions++;actions[id]=(actions[id]||0)+1;
+      kills+=Number(outcome?.playerKillDelta||0);damage+=Number(outcome?.damageDealt||0);reward+=Number(step.reward||0);
+      if(step.done){
+        if(Number(step.observation?.health||0)<=0)deaths++;
+        if(tics<totalTics)await canonicalReset();
+      }
+    }
+
+    const stateTotals=Object.fromEntries(Object.entries(bearingAction).map(([k,row])=>[k,Object.values(row).reduce((a,b)=>a+b,0)]));
+    const total=decisions||1,actionTotals=actions;
+    let mi=0;
+    for(const [state,row] of Object.entries(bearingAction)){
+      const ps=(stateTotals[state]||0)/total;if(ps<=0)continue;
+      for(const [action,n] of Object.entries(row)){
+        const pxy=n/total,pa=(actionTotals[action]||0)/total;
+        if(pxy>0&&pa>0)mi+=pxy*Math.log(pxy/(ps*pa));
+      }
+    }
+    const hState=-Object.values(stateTotals).reduce((sum,n)=>{const q=n/total;return q>0?sum+q*Math.log(q):sum},0);
+    return{
+      simulatedSeconds:tics/35,tics,decisions,kills,damage,reward,deaths,resets,
+      wallMs:performance.now()-started,actionCounts:actions,actionDiversity:Object.keys(actions).length,
+      visibleDecisions:visible,alignedDecisions:aligned,alignedFireRate:aligned?alignedFire/aligned:0,
+      offAxisDecisions:offAxis,correctTurnRate:offAxis?correctTurn/offAxis:0,
+      noVisibleDecisions:noVisible,noVisibleFireRate:noVisible?noVisibleFire/noVisible:0,
+      bearingAction,stateActionMutualInformation:mi,normalizedStateActionMI:hState>1e-9?mi/hState:0
+    };
+  },{totalTics,actionTics});
 }
 
 test("causal policy curriculum trains, saves, and exactly replays combat runs",async({page})=>{
