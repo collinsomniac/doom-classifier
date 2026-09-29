@@ -12,7 +12,7 @@ test("owned Chocolate Doom runtime exposes causal event counters",async({page})=
   const result=await page.evaluate(async()=>{
     const {DoomWasmArena}=await import("/src/env/doom-wasm.js");
     const canvas=document.createElement("canvas");
-    canvas.width=640;canvas.height=400;canvas.style.display="none";document.body.appendChild(canvas);
+    canvas.width=640;canvas.height=480;canvas.style.display="none";document.body.appendChild(canvas);
 
     const env=await DoomWasmArena.boot({
       canvas,
@@ -72,7 +72,30 @@ test("owned Chocolate Doom runtime exposes causal event counters",async({page})=
     const exactA=runExact(),exactB=runExact();
     env.restoreSnapshot(exactSnapshot);
 
-    return{runtime:env.runtime,initial,observed,reset,pulses,lastOutcome,snapshotSupported,snapshotBefore,snapshotRestored,exactTicSupported,exactA,exactB};
+    // A single FIRE pulse can pass even when the command/tic ring is not
+    // actually rolled back. Exercise turning, movement, firing and strafe
+    // combinations across enough tics to expose loop-state drift.
+    await env.reset();
+    const sequence=["forward_fire","turn_right_fire","strafe_left_fire","fire","back_fire","turn_left","forward_fire","strafe_right_fire","turn_right","fire","strafe_left","forward_fire"];
+    const sequenceSnapshot=env.saveSnapshot();
+    const runSequence=()=>{
+      env.restoreSnapshot(sequenceSnapshot);
+      return sequence.map((id,index)=>{
+        const before=env.readRaw(),step=env.stepTics(id,4),after=env.readRaw();
+        return{
+          index,id,
+          gameticBefore:Number(before.engine_state?.gametic||0),
+          gameticAfter:Number(after.engine_state?.gametic||0),
+          state:simplify(after),
+          reward:Number(step.reward||0),
+          outcome:step.info?.outcome||null
+        };
+      });
+    };
+    const sequenceA=runSequence(),sequenceB=runSequence();
+    env.restoreSnapshot(sequenceSnapshot);
+
+    return{runtime:env.runtime,initial,observed,reset,pulses,lastOutcome,snapshotSupported,snapshotBefore,snapshotRestored,exactTicSupported,exactA,exactB,sequence,sequenceA,sequenceB};
   });
 
   expect(result.runtime.owned).toBe(true);
@@ -96,6 +119,9 @@ test("owned Chocolate Doom runtime exposes causal event counters",async({page})=
   expect(result.exactB.state).toEqual(result.exactA.state);
   expect(result.exactB.reward).toBe(result.exactA.reward);
   expect(result.exactB.outcome).toEqual(result.exactA.outcome);
+  expect(result.sequenceA).toEqual(result.sequenceB);
+  expect(result.sequenceA).toHaveLength(result.sequence.length);
+  for(const row of result.sequenceA)expect(row.gameticAfter-row.gameticBefore).toBe(4);
   if(consoleErrors.length)throw new Error(consoleErrors.join(" | "));
 
   console.log("OWNED_ENGINE_ABI "+JSON.stringify(result));

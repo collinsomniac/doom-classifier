@@ -121,6 +121,8 @@ static void PromptFPS_ResetEvents(void)
 
 extern void G_PromptFPSSaveSnapshot(void);
 extern void G_PromptFPSLoadSnapshot(void);
+extern void D_PromptFPSSaveLoopState(void);
+extern void D_PromptFPSRestoreLoopState(void);
 extern int D_PromptFPSStepTics(int count);
 
 EMSCRIPTEN_KEEPALIVE int PromptFPS_StepTics(int controls, int count)
@@ -139,6 +141,7 @@ EMSCRIPTEN_KEEPALIVE int PromptFPS_StepTics(int controls, int count)
 EMSCRIPTEN_KEEPALIVE int PromptFPS_SaveSnapshot(void)
 {
     PromptFPS_SetControls(0);
+    D_PromptFPSSaveLoopState();
     G_PromptFPSSaveSnapshot();
     promptfps_snapshot_player_damage_dealt = promptfps_player_damage_dealt;
     promptfps_snapshot_player_kills = promptfps_player_kills;
@@ -154,7 +157,11 @@ EMSCRIPTEN_KEEPALIVE int PromptFPS_RestoreSnapshot(void)
     if (!promptfps_snapshot_ready)
         return 0;
     PromptFPS_SetControls(0);
+    // Restore loop counters before loading so G_InitNew observes the original
+    // gametic, then restore again after load to undo any incidental changes.
+    D_PromptFPSRestoreLoopState();
     G_PromptFPSLoadSnapshot();
+    D_PromptFPSRestoreLoopState();
     promptfps_player_damage_dealt = promptfps_snapshot_player_damage_dealt;
     promptfps_player_kills = promptfps_snapshot_player_kills;
     promptfps_player_pickups = promptfps_snapshot_player_pickups;
@@ -440,6 +447,41 @@ void G_PromptFPSLoadSnapshot(void)
         d_loop,
         "void D_RegisterLoopCallbacks",
         """#if defined(__EMSCRIPTEN__)
+static int promptfps_snapshot_maketic;
+static int promptfps_snapshot_recvtic;
+static int promptfps_snapshot_gametic;
+static int promptfps_snapshot_skiptics;
+static int promptfps_snapshot_lasttime;
+static boolean promptfps_snapshot_singletics;
+static ticcmd_set_t promptfps_snapshot_ticdata[BACKUPTICS];
+static boolean promptfps_snapshot_local_playeringame[NET_MAXPLAYERS];
+
+void D_PromptFPSSaveLoopState(void)
+{
+    promptfps_snapshot_maketic = maketic;
+    promptfps_snapshot_recvtic = recvtic;
+    promptfps_snapshot_gametic = gametic;
+    promptfps_snapshot_skiptics = skiptics;
+    promptfps_snapshot_lasttime = lasttime;
+    promptfps_snapshot_singletics = singletics;
+    memcpy(promptfps_snapshot_ticdata, ticdata, sizeof(ticdata));
+    memcpy(promptfps_snapshot_local_playeringame, local_playeringame,
+           sizeof(local_playeringame));
+}
+
+void D_PromptFPSRestoreLoopState(void)
+{
+    maketic = promptfps_snapshot_maketic;
+    recvtic = promptfps_snapshot_recvtic;
+    gametic = promptfps_snapshot_gametic;
+    skiptics = promptfps_snapshot_skiptics;
+    lasttime = promptfps_snapshot_lasttime;
+    singletics = promptfps_snapshot_singletics;
+    memcpy(ticdata, promptfps_snapshot_ticdata, sizeof(ticdata));
+    memcpy(local_playeringame, promptfps_snapshot_local_playeringame,
+           sizeof(local_playeringame));
+}
+
 int D_PromptFPSStepTics(int count)
 {
     boolean old_singletics = singletics;
