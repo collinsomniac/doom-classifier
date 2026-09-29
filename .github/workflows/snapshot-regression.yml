@@ -7,6 +7,7 @@ on:
       - tests/doom-snapshot-regression.spec.mjs
       - .github/workflows/snapshot-regression.yml
       - src/env/doom-wasm.js
+      - runtime/engine-runtime.json
       - "engine/**"
   workflow_dispatch:
 

@@ -59,7 +59,9 @@ jobs:
           grep -q "player_damage_dealt" .engine-work/upstream/vendor/chocolate-doom/src/doom/browser_doom_bridge.c
           grep -q "PromptFPS_RecordPlayerDamage" .engine-work/upstream/vendor/chocolate-doom/src/doom/p_inter.c
           grep -q "PromptFPS_RecordLevelComplete" .engine-work/upstream/vendor/chocolate-doom/src/doom/g_game.c
-          grep -q "D_PromptFPSStepTics" .engine-work/upstream/vendor/chocolate-doom/src/d_loop.c\n          grep -q "D_PromptFPSSaveLoopState" .engine-work/upstream/vendor/chocolate-doom/src/d_loop.c\n          grep -q "D_PromptFPSRestoreLoopState" .engine-work/upstream/vendor/chocolate-doom/src/d_loop.c
+          grep -q "D_PromptFPSStepTics" .engine-work/upstream/vendor/chocolate-doom/src/d_loop.c
+          grep -q "D_PromptFPSSaveLoopState" .engine-work/upstream/vendor/chocolate-doom/src/d_loop.c
+          grep -q "D_PromptFPSRestoreLoopState" .engine-work/upstream/vendor/chocolate-doom/src/d_loop.c
           grep -q "PromptFPS_StepTics" .engine-work/upstream/vendor/chocolate-doom/src/doom/browser_doom_bridge.c
           grep -q "PromptFPS_RecordPlayerDamage" engine/dist/telemetry.patch
           ls -lh engine/dist
@@ -90,6 +92,7 @@ jobs:
           retention-days: 14
 
       - name: Publish validated runtime snapshot
+        id: publish
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -106,5 +109,37 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "engine runtime from ${GITHUB_SHA}"
+          RUNTIME_SHA="$(git rev-parse HEAD)"
+          echo "asset_sha=${RUNTIME_SHA}" >> "$GITHUB_OUTPUT"
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push --force origin HEAD:engine-runtime
+
+      - name: Publish exact runtime pointer on main
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUNTIME_SHA: ${{ steps.publish.outputs.asset_sha }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B runtime-pointer origin/main
+          mkdir -p runtime
+          cat > runtime/engine-runtime.json <<EOF
+          {
+            "repository": "${GITHUB_REPOSITORY}",
+            "branch": "engine-runtime",
+            "asset_commit": "${RUNTIME_SHA}",
+            "source_commit": "${GITHUB_SHA}"
+          }
+          EOF
+          git add runtime/engine-runtime.json
+          if git diff --cached --quiet; then
+            echo "Runtime pointer already current."
+            exit 0
+          fi
+          git commit -m "runtime: pin owned engine ${RUNTIME_SHA:0:8}"
+          git pull --rebase origin main
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
