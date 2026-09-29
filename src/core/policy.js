@@ -55,9 +55,10 @@ export class SemanticResidualPolicy{
     inferenceMode="hybrid",teacherInterval=32,teacherMinGap=8,teacherEntropy=.78,teacherMargin=.10,teacherNovelty=.85,teacherEpistemic=.025,distillSteps=4,replayCapacity=96,replayBatch=2,
     teacherReplayCapacity=8,teacherReplayBatch=2,teacherReplayStrength=.2,nStep=4,
     priorKlBudget=.08,valueBetaMax=4096,valueBetaSearchSteps=12,valueTrustUpdates=192,valueEpistemicBudget=.025,typedValueBlend=.65,typedValueRidge=.05,
-    criticKlExpansion=1,criticKlFloor=.10,criticAgreementFloor=.67,criticSnrFloor=.75,criticSnrTarget=2,criticGapShareTarget=.25
+    criticKlExpansion=1,criticKlFloor=.10,criticAgreementFloor=.67,criticSnrFloor=.75,criticSnrTarget=2,criticGapShareTarget=.25,
+    neuralUncertaintySample=.30,neuralSampleTemperature=.60,neuralEntropyThreshold=.75,neuralMarginThreshold=.15
   }){
-    this.schema=schema;this.actions=actions;this.residualWeight=residualWeight;this.baseTemperature=temperature;this.temperature=temperature;this.epsilon=epsilon;this.seed=seed;this.rng=mulberry32(seed);
+    this.schema=schema;this.actions=actions;this.residualWeight=residualWeight;this.baseTemperature=temperature;this.temperature=temperature;this.epsilon=epsilon;this.seed=seed;this.rng=mulberry32(seed);this.decodeRngState=(Number(seed)^0x9e3779b9)>>>0;
     this.baseSize=1+schema.fields.length;this.memory=new TemporalMemory(this.baseSize);this.featureSize=this.baseSize*2;
     if(typeof residual==="object")this.q=residual;
     else if(residual==="neural-set")this.q=new NeuralSetResidualQ(schema,actions,{seed});
@@ -66,6 +67,7 @@ export class SemanticResidualPolicy{
     this.teacherReplayCapacity=Math.max(0,Math.floor(teacherReplayCapacity));this.teacherReplayBatch=Math.max(0,Math.floor(teacherReplayBatch));this.teacherReplayStrength=teacherReplayStrength;this.teacherReplay=[];this.teacherReplayRng=mulberry32((seed^0xa341316c)>>>0);this.nStep=Math.max(1,Math.floor(nStep));this.nStepBuffer=[];
     this.priorKlBudget=Math.max(0,Number(priorKlBudget)||0);this.valueBetaMax=Math.max(0,Number(valueBetaMax)||0);this.valueBetaSearchSteps=Math.max(1,Math.floor(valueBetaSearchSteps));this.valueTrustUpdates=Math.max(1,Math.floor(valueTrustUpdates));this.valueEpistemicBudget=clamp(Number(valueEpistemicBudget??.025),0,1);this.typedValueBlend=clamp(Number(typedValueBlend??.65),0,1);this.typedValueRidge=Math.max(1e-6,Number(typedValueRidge)||.05);
     this.criticKlExpansion=Math.max(0,Number(criticKlExpansion)||0);this.criticKlFloor=clamp(Number(criticKlFloor??.10),0,1);this.criticAgreementFloor=clamp(Number(criticAgreementFloor??.67),0,.99);this.criticSnrFloor=Math.max(0,Number(criticSnrFloor??.75));this.criticSnrTarget=Math.max(this.criticSnrFloor+1e-6,Number(criticSnrTarget??2));this.criticGapShareTarget=Math.max(1e-6,Number(criticGapShareTarget??.25));
+    this.neuralUncertaintySample=clamp(Number(neuralUncertaintySample??.30),0,1);this.neuralSampleTemperature=clamp(Number(neuralSampleTemperature??.60),.05,2);this.neuralEntropyThreshold=clamp(Number(neuralEntropyThreshold??.75),0,1);this.neuralMarginThreshold=clamp(Number(neuralMarginThreshold??.15),0,1);
     this.novelty=new NoveltyTracker(this.baseSize);
     this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherGeneration=0;this.teacherPromise=null;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];this.onTeacherResult=null;this.probabilityCalibrator=new TemperatureCalibrator();this.actionOutcomeHistory=[];this.actionOutcomeHistoryLimit=4;
     this.setSemantic(semantic);
@@ -76,6 +78,11 @@ export class SemanticResidualPolicy{
   setInferenceMode(mode){
     if(!["hybrid","adaptive","neural"].includes(mode))throw new Error("Unknown inference mode: "+mode);
     this.inferenceMode=mode;
+  }
+  nextDecodeRandom(){
+    let a=this.decodeRngState|0;a=a+0x6D2B79F5|0;this.decodeRngState=a>>>0;
+    let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;
+    return((t^t>>>14)>>>0)/4294967296;
   }
   reconfigure({schema=this.schema,actions=this.actions}={}){
     this.teacherGeneration++;this.teacherPromise=null;
@@ -102,7 +109,7 @@ export class SemanticResidualPolicy{
     return this.snapshotActionOutcomeHistory();
   }
   resetLearning(){
-    this.teacherGeneration++;this.teacherPromise=null;this.q.reset();this.novelty.reset();this.rng=mulberry32(this.seed);this.replayRng=mulberry32((this.seed^0x517cc1b7)>>>0);this.teacherReplayRng=mulberry32((this.seed^0xa341316c)>>>0);this.replay=[];this.teacherReplay=[];this.nStepBuffer=[];this.temperature=this.baseTemperature;
+    this.teacherGeneration++;this.teacherPromise=null;this.q.reset();this.novelty.reset();this.rng=mulberry32(this.seed);this.decodeRngState=(Number(this.seed)^0x9e3779b9)>>>0;this.replayRng=mulberry32((this.seed^0x517cc1b7)>>>0);this.teacherReplayRng=mulberry32((this.seed^0xa341316c)>>>0);this.replay=[];this.teacherReplay=[];this.nStepBuffer=[];this.temperature=this.baseTemperature;
     this.decisionCount=0;this.lastTeacherStep=-1e9;this.teacherCalls=0;this.semanticCalls=0;this.teacherScheduled=0;this.lastTeacherLatencyMs=0;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];this.actionOutcomeHistory=[];this.probabilityCalibrator=new TemperatureCalibrator();
   }
   exportCheckpoint(){
@@ -111,7 +118,9 @@ export class SemanticResidualPolicy{
     return{
       format:"doom-classifier-policy",version:1,createdAt:new Date().toISOString(),
       schema:clone(this.schema),actions:clone(this.actions),temperature:this.temperature,baseTemperature:this.baseTemperature,
-      probabilityCalibration:this.probabilityCalibrator?.export?.()||null,inferenceMode:"neural",q:this.q.exportCheckpoint()
+      probabilityCalibration:this.probabilityCalibrator?.export?.()||null,inferenceMode:"neural",
+      decode:{strategy:"confidence-mixture",sample:Number(this.neuralUncertaintySample),sampleTemperature:Number(this.neuralSampleTemperature),entropyThreshold:Number(this.neuralEntropyThreshold),marginThreshold:Number(this.neuralMarginThreshold),seed:Number(this.seed),rngState:Number(this.decodeRngState>>>0)},
+      q:this.q.exportCheckpoint()
     };
   }
   importCheckpoint(checkpoint){
@@ -122,6 +131,15 @@ export class SemanticResidualPolicy{
     this.q.importCheckpoint(checkpoint.q);
     this.temperature=clamp(Number(checkpoint.temperature||this.baseTemperature),.05,2);
     this.baseTemperature=clamp(Number(checkpoint.baseTemperature||this.temperature),.05,2);
+    if(checkpoint.decode){
+      this.neuralUncertaintySample=clamp(Number(checkpoint.decode.sample??this.neuralUncertaintySample),0,1);
+      this.neuralSampleTemperature=clamp(Number(checkpoint.decode.sampleTemperature??this.neuralSampleTemperature),.05,2);
+      this.neuralEntropyThreshold=clamp(Number(checkpoint.decode.entropyThreshold??this.neuralEntropyThreshold),0,1);
+      this.neuralMarginThreshold=clamp(Number(checkpoint.decode.marginThreshold??this.neuralMarginThreshold),0,1);
+      this.seed=Number(checkpoint.decode.seed??this.seed)>>>0;
+      this.decodeRngState=Number(checkpoint.decode.rngState??((this.seed^0x9e3779b9)>>>0))>>>0;
+    }else this.decodeRngState=(Number(this.seed)^0x9e3779b9)>>>0;
+    this.rng=mulberry32(this.seed);
     this.probabilityCalibrator=new TemperatureCalibrator();if(checkpoint.probabilityCalibration)this.probabilityCalibrator.import(checkpoint.probabilityCalibration);
     this.inferenceMode="neural";this.teacherGeneration++;this.teacherPromise=null;this.lastTeacherStep=-1e9;this.lastTeacherError=null;this.lastTeacherResult=null;this.teacherHistory=[];
     return this;
@@ -373,19 +391,25 @@ export class SemanticResidualPolicy{
     }
 
     const decodeTemperature=mode==="hybrid"&&!useResidual?1:this.temperature,calibrationMultiplier=this.probabilityCalibrator?.fitted?this.probabilityCalibrator.temperature:1,probabilityTemperature=decodeTemperature*calibrationMultiplier;
-    const probs=softmax(logits,probabilityTemperature);let chosen=argmax(probs),explorationStrategy="greedy";
+    const probs=softmax(logits,probabilityTemperature),stats=confidenceStats(probs);let chosen=argmax(probs),explorationStrategy="greedy",decisionRule="argmax",uncertaintySampleChance=0;
     if(explore){
       const mix=clamp(this.epsilon,0,1),uniform=1/Math.max(1,probs.length);
       const sampling=probs.map(p=>(1-mix)*p+mix*uniform);
-      chosen=sampleCategorical(sampling,this.rng);explorationStrategy="policy-proportional";
+      chosen=sampleCategorical(sampling,this.rng);explorationStrategy="policy-proportional";decisionRule="training-sample";
+    }else if(mode==="neural"&&this.neuralUncertaintySample>0&&stats.entropy>=this.neuralEntropyThreshold&&stats.margin<=this.neuralMarginThreshold){
+      uncertaintySampleChance=this.neuralUncertaintySample;
+      if(this.nextDecodeRandom()<uncertaintySampleChance){
+        const sampling=softmax(probs.map(p=>Math.log(Math.max(1e-12,p))),this.neuralSampleTemperature);
+        chosen=sampleCategorical(sampling,()=>this.nextDecodeRandom());decisionRule="confidence-mixture";explorationStrategy=chosen===argmax(probs)?"confidence-resample-same":"confidence-mixture";
+      }else decisionRule="confidence-greedy";
     }
-    const stats=confidenceStats(probs);this.decisionCount++;
+    this.decisionCount++;
     return{
       actionIndex:chosen,action:this.actions[chosen],probs,semanticScores:sem,qScores:logits,semanticPriorScores:activeFusion.semanticScores||residualEval.semanticScores||null,valueScores:residualEval.valueScores||null,features:encoded.features,temporal:encoded.temporal,history,
       valueBeta:Number(activeFusion.valueBeta||0),priorKL:Number(activeFusion.priorKL||0),valueTrust:Number(activeFusion.valueTrust||0),basePriorKlBudget:Number(activeFusion.basePriorKlBudget||0),priorKlBudget:Number(activeFusion.priorKlBudget||0),klUtilization:Number(activeFusion.klUtilization||0),valueEpistemic:Number(activeFusion.valueEpistemic||0),valueEpistemicBudget:Number(activeFusion.valueEpistemicBudget??this.valueEpistemicBudget),epistemicUtilization:Number(activeFusion.epistemicUtilization||0),valueBetaSaturated:!!activeFusion.valueBetaSaturated,typedValueScores:activeFusion.typedValueScores||null,typedValueFit:Number(activeFusion.typedValueFit||0),typedValueBlendUsed:Number(activeFusion.typedValueBlendUsed||0),typedFieldCoefficients:activeFusion.typedFieldCoefficients||null,criticTopIndex:Number(activeFusion.criticTopIndex??-1),criticRunnerIndex:Number(activeFusion.criticRunnerIndex??-1),criticGap:Number(activeFusion.criticGap||0),criticSpread:Number(activeFusion.criticSpread||0),criticGapShare:Number(activeFusion.criticGapShare||0),criticTopAgreement:Number(activeFusion.criticTopAgreement||0),criticMarginMean:Number(activeFusion.criticMarginMean||0),criticMarginStd:Number(activeFusion.criticMarginStd||0),criticMarginSnr:Number(activeFusion.criticMarginSnr||0),criticRankingConfidence:Number(activeFusion.criticRankingConfidence||0),criticAuthority:Number(activeFusion.criticAuthority||0),criticKlGate:Number(activeFusion.criticKlGate??1),criticKlMultiplier:Number(activeFusion.criticKlMultiplier||1),
       probabilityCalibrated:!!this.probabilityCalibrator?.fitted,probabilityCalibrationTemperature:Number(this.probabilityCalibrator?.temperature||1),probabilityTemperature,
       uncertainty:{...stats,novelty,epistemic},latencyMs:performance.now()-t0,semanticLatencyMs:semanticMs,residualLatencyMs:residualMs,
-      teacherUsed,teacherPending:!!this.teacherPromise,semanticUsed,inferenceMode:mode,explorationStrategy,teacherCalls:this.teacherCalls,teacherScheduled:this.teacherScheduled,lastTeacherLatencyMs:this.lastTeacherLatencyMs
+      teacherUsed,teacherPending:!!this.teacherPromise,semanticUsed,inferenceMode:mode,explorationStrategy,decisionRule,uncertaintySampleChance,teacherCalls:this.teacherCalls,teacherScheduled:this.teacherScheduled,lastTeacherLatencyMs:this.lastTeacherLatencyMs
     };
   }
   aggregateNStep(count=Math.min(this.nStep,this.nStepBuffer.length)){

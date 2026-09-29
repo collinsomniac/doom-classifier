@@ -149,7 +149,7 @@ function renderDecisionCircuit(obs,d){
     ui.circuitSearchTop.textContent=env.supportsSnapshots?.()&&env.supportsExactTics?.()?"fork ready":"unavailable";
     ui.circuitSearchMeta.textContent=env.supportsSnapshots?.()&&env.supportsExactTics?.()?"snapshot + deterministic tics":"runtime lacks exact fork";
   }
-  ui.circuitFusionMeta.textContent="β "+Number(d.valueBeta||0).toFixed(1)+" · KL "+Number(d.priorKL||0).toFixed(3);
+  ui.circuitFusionMeta.textContent="β "+Number(d.valueBeta||0).toFixed(1)+" · KL "+Number(d.priorKL||0).toFixed(3)+" · "+String(d.decisionRule||"argmax");
   ui.circuitOutputGlyph.textContent=actionGlyph(chosen);ui.circuitOutputLabel.textContent=chosen?.id||"waiting";ui.circuitOutputProb.textContent="p "+chosenP.toFixed(3);
   const semanticId=semanticAction?.id||"—",valueId=valueAction?.id||"—",chosenId=chosen?.id||"—";
   ui.circuitAgreement.textContent="prior "+semanticId+(semanticId===valueId?" = ":" ≠ ")+"critic "+valueId+" → fused "+chosenId;
