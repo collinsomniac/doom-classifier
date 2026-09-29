@@ -120,7 +120,7 @@ jobs:
           cp artifacts/causal-combat/doom-causal-checkpoint.json "$SNAPSHOT/doom-starter.json"
           cp artifacts/causal-combat/combat-replays.json "$SNAPSHOT/combat-replays.json"
           cp artifacts/causal-combat/combat-report.json "$SNAPSHOT/combat-report.json"
-          node -e 'const fs=require("fs"),x=require("./artifacts/causal-combat/combat-report.json");fs.writeFileSync(process.argv[1],JSON.stringify({source_commit:process.env.GITHUB_SHA,workflow_run:process.env.GITHUB_RUN_ID,training:"exact-state causal proper-score replay v2",kills:x.evaluation.totalKills,target:x.gate.killTarget,diversity:x.evaluation.actionDiversity,min_run_diversity:x.evaluation.minRunDiversity,switches:x.evaluation.totalSwitches,max_streak:x.evaluation.maxStreak,same_start_snapshot_replay_verified:x.replay.sameStartSnapshot===true&&x.replay.exact===true},null,2))' "$SNAPSHOT/metadata.json"
+          node -e 'const fs=require("fs"),x=require("./artifacts/causal-combat/combat-report.json");fs.writeFileSync(process.argv[1],JSON.stringify({source_commit:process.env.GITHUB_SHA,workflow_run:process.env.GITHUB_RUN_ID,engine_runtime_commit:x.runtime?.commit||null,engine_source_commit:x.runtime?.sourceCommit||null,training:"exact-state causal proper-score replay v2",kills:x.evaluation.totalKills,target:x.gate.killTarget,diversity:x.evaluation.actionDiversity,min_run_diversity:x.evaluation.minRunDiversity,switches:x.evaluation.totalSwitches,max_streak:x.evaluation.maxStreak,same_start_snapshot_replay_verified:x.replay.sameStartSnapshot===true&&x.replay.exact===true},null,2))' "$SNAPSHOT/metadata.json"
           cd "$SNAPSHOT"
           git init
           git checkout --orphan model-runtime
