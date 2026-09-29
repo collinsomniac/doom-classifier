@@ -58,7 +58,13 @@
     <div id="circuitActions" class="circuit-actions" aria-label="typed action outputs"></div>
     <div class="circuit-footer"><span id="circuitBackend">engine WASM · fast core local-js</span><span id="circuitAgreement">prior / critic / fused waiting</span></div>
   </div>
-  <div class="doom-stage"><canvas id="doomCanvas" tabindex="0" width="640" height="480"></canvas></div>
+  <div id="doomStage" class="doom-stage">
+    <canvas id="doomCanvas" tabindex="0" width="640" height="480"></canvas>
+    <div id="teacherPauseOverlay" class="teacher-pause-overlay" hidden aria-live="polite">
+      <div class="teacher-pause-pulse"></div>
+      <div><span>TEACHER PAUSE</span><strong id="teacherPauseReason">low confidence</strong><small>simulation frozen · resolving this exact state</small></div>
+    </div>
+  </div>
 </article>
 </section>
 </div>
@@ -75,7 +81,7 @@
 <article class="panel control-panel">
   <p class="kicker">WHAT IS ACTIVE?</p><h2>Decision path</h2>
   <div class="toggle-grid">
-    <label><span>Teacher</span><select id="teacherModeSelect" disabled><option value="adaptive">Adaptive</option><option value="every">Every decision</option><option value="off">Off</option></select><small>Adaptive = asynchronous supervisor for later ticks; Every decision = teacher is in the decode path; Off = neural-only lowest latency.</small></label>
+    <label><span>Teacher</span><select id="teacherModeSelect" disabled><option value="adaptive">Adaptive</option><option value="every">Every decision</option><option value="off">Off</option></select><small>Adaptive = invoke only when the fast policy is uncertain, freeze the simulator, distill that exact state, then act. Every decision = teacher-gated slow baseline. Off = neural-only lowest latency.</small></label>
     <label><span>Neural value</span><input id="useNeuralToggle" type="checkbox" checked disabled /><small>The tiny fast semantic-prior + consequence-value controller; parameter count is shown live after boot.</small></label>
     <label><span>Reward learning</span><input id="learnToggle" type="checkbox" disabled /><small>Updates neural weights from game consequences.</small></label>
     <label><span>Temporal memory</span><input id="memoryToggle" type="checkbox" checked disabled /><small>Recent state changes enter the neural query.</small></label>
