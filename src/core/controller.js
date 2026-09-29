@@ -2,6 +2,39 @@ import {argmax,mulberry32,percentile,softmax} from "./math.js";
 import {probeCounterfactualActions} from "./counterfactual.js";
 import {projectValueToActionFields} from "./action-factorization.js";
 
+function normalizedActionField(field,action){
+  const raw=action?.params?.[field.id];
+  if(field.enum)return String(raw??"__unset");
+  const value=Number(raw??0),lo=Number(field.min),hi=Number(field.max);
+  if(Number.isFinite(lo)&&Number.isFinite(hi)&&hi>lo)return (value-lo)/(hi-lo);
+  return Number.isFinite(value)?value:0;
+}
+function actionAxisDistance(schema,a,b){
+  const fields=schema?.actionFields||[];if(!fields.length)return a?.id===b?.id?0:1;
+  let total=0;
+  for(const field of fields){
+    const av=normalizedActionField(field,a),bv=normalizedActionField(field,b);
+    total+=field.enum?(av===bv?0:1):Math.min(1,Math.abs(Number(av)-Number(bv)));
+  }
+  return total/fields.length;
+}
+function diverseContinuationIndices(schema,actions,prior,limit=4){
+  const count=Math.max(1,Math.min(actions.length,Math.floor(limit)||1));
+  const probabilities=actions.map((_,i)=>Math.max(0,Number(prior?.[i]||0)));
+  let first=0;for(let i=1;i<actions.length;i++)if(probabilities[i]>probabilities[first])first=i;
+  const selected=[first],remaining=new Set(actions.map((_,i)=>i).filter(i=>i!==first));
+  while(selected.length<count&&remaining.size){
+    let best=-1,bestScore=-Infinity;
+    for(const i of remaining){
+      const novelty=Math.min(...selected.map(j=>actionAxisDistance(schema,actions[i],actions[j])));
+      const score=novelty+.15*probabilities[i];
+      if(score>bestScore){bestScore=score;best=i}
+    }
+    if(best<0)break;selected.push(best);remaining.delete(best);
+  }
+  return selected;
+}
+
 export const ControllerState=Object.freeze({READY:"READY",RUNNING:"RUNNING",PAUSED:"PAUSED",RESETTING:"RESETTING",TUNING:"TUNING",ERROR:"ERROR"});
 export class ExperimentController extends EventTarget{
   constructor({environment,policy,hz=20}){
@@ -114,7 +147,7 @@ export class ExperimentController extends EventTarget{
     }
   }
   async trainCausalPolicy({
-    steps=512,probeTics=24,actionTics=4,rolloutHorizon=128,
+    steps=512,probeTics=8,actionTics=4,plannerDepth=2,continuationTics=8,continuationCandidates=4,rolloutHorizon=128,
     targetTemperature=.30,priorStrength=.08,superviseSteps=3,superviseStrength=.55,
     supervisionReplay=2,replayStrength=.24,batchRefitEvery=0,batchWindow=192,
     finalRefit=false,ridge=.025,factorizedTargetBlend=.70,behaviorCoverage=.35,seed=0x51a9e,onProgress=()=>{}
@@ -139,10 +172,24 @@ export class ExperimentController extends EventTarget{
       for(let i=0;i<Math.max(1,Math.floor(steps));i++){
         const obs=await this.environment.observe();
         const decision=await this.policy.decide(obs,{useResidual:true,memory:true,explore:false});
+        const planningDepth=Math.max(1,Math.min(2,Math.floor(plannerDepth||1)));
         const probe=await probeCounterfactualActions({
-          environment:this.environment,actions:this.policy.actions,prior:decision.probs,horizon:1,
-          temperature:targetTemperature,priorStrength,
-          stepper:id=>this.environment.stepTics(id,probeTics)
+          environment:this.environment,actions:this.policy.actions,prior:decision.probs,horizon:planningDepth,
+          temperature:targetTemperature,priorStrength,discount:.96,
+          continuation:planningDepth>1?async({environment})=>{
+            const nextObs=await environment.observe();
+            const nextDecision=await this.policy.decide(nextObs,{useResidual:true,memory:true,explore:false,allowTeacher:false,commit:false});
+            const candidates=diverseContinuationIndices(this.policy.schema,this.policy.actions,nextDecision.probs,continuationCandidates);
+            const continuationProbe=await probeCounterfactualActions({
+              environment,actions:this.policy.actions,prior:nextDecision.probs,candidateIndices:candidates,horizon:1,
+              temperature:targetTemperature,priorStrength:0,
+              stepper:id=>environment.stepTics(id,continuationTics)
+            });
+            let best=candidates[0];
+            for(const index of candidates)if(Number(continuationProbe.returns[index])>Number(continuationProbe.returns[best]))best=index;
+            return best;
+          }:null,
+          stepper:(id,{depth})=>this.environment.stepTics(id,depth===0?actionTics:continuationTics)
         });
         const measuredTarget=[...probe.target],oracleIndex=argmax(measuredTarget),oracle=this.policy.actions[oracleIndex];
         const logTarget=measuredTarget.map(p=>Math.log(Math.max(1e-8,Number(p)||0)));
@@ -223,7 +270,7 @@ export class ExperimentController extends EventTarget{
       }
       this.policy.q.syncTarget?.({value:false});
       return{
-        requested:steps,completed:this.steps-startStep,probeTics,actionTics,rolloutHorizon,factorizedTargetBlend,behaviorCoverage:coverage,
+        requested:steps,completed:this.steps-startStep,probeTics,actionTics,plannerDepth:Math.max(1,Math.min(2,Math.floor(plannerDepth||1))),continuationTics,continuationCandidates,rolloutHorizon,factorizedTargetBlend,behaviorCoverage:coverage,
         examples:examples.length,informative,meanInformativeSpread:informative?totalSpread/informative:0,
         meanTypedTargetFit:examples.length?examples.reduce((sum,ex)=>sum+Number(ex.typedFit||0),0)/examples.length:0,
         meanTypedTargetBlend:examples.length?examples.reduce((sum,ex)=>sum+Number(ex.typedBlend||0),0)/examples.length:0,
