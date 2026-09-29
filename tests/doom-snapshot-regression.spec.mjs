@@ -2,11 +2,13 @@ import {test,expect} from "@playwright/test";
 
 test.setTimeout(180000);
 
-const sequence=["back_fire","back_fire","back_fire","back_fire","back_fire","back_fire","forward","back_fire","back_fire","back_fire","back_fire","forward_fire","back_fire","turn_right_fire","strafe_left_fire","forward_fire","strafe_left_fire","forward_fire","forward_fire","forward_fire","forward","forward_fire","forward_fire","forward_fire","forward_fire","forward_fire","forward_fire","forward_fire","forward_fire","forward_fire","forward_fire","forward_fire","forward_fire","back_fire","forward_fire","forward_fire","forward_fire","forward_fire","back","turn_right_fire","forward_fire","strafe_left_fire","back","forward_fire","forward_fire","fire","strafe_right_fire","forward_fire","forward_fire","forward_fire","forward_fire","strafe_left_fire","forward_fire","forward_fire","back_fire","forward_fire","forward_fire","forward_fire","back","forward_fire","forward_fire","turn_right","forward_fire","forward_fire"];
+const genericSequence=["back_fire","back_fire","back_fire","back_fire","back_fire","back_fire","forward","back_fire","back_fire","back_fire","back_fire","forward_fire","back_fire","turn_right_fire","strafe_left_fire","forward_fire","strafe_left_fire","forward_fire","forward_fire","forward_fire","forward","forward_fire","forward_fire","forward_fire","forward_fire","forward_fire","forward_fire","forward_fire","forward_fire","forward_fire","forward_fire","forward_fire","forward_fire","back_fire","forward_fire","forward_fire","forward_fire","forward_fire","back","turn_right_fire","forward_fire","strafe_left_fire","back","forward_fire","forward_fire","fire","strafe_right_fire","forward_fire","forward_fire","forward_fire","forward_fire","strafe_left_fire","forward_fire","forward_fire","back_fire","forward_fire","forward_fire","forward_fire","back","forward_fire","forward_fire","turn_right","forward_fire","forward_fire"];
 
-test("long mixed exact-tic sequence is identical after snapshot restore",async({page})=>{
+const combatSequence=["strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","back_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","turn_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_right_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_right_fire","strafe_left_fire","strafe_left_fire","strafe_left","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","forward_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","forward_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left","forward_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_right_fire","strafe_left_fire","strafe_left_fire","strafe_right_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire","strafe_left_fire"];
+
+test("generic and combat exact-tic sequences are identical after snapshot restore",async({page})=>{
   await page.goto("http://127.0.0.1:8000/doom.html?starter=off",{waitUntil:"domcontentloaded"});
-  const result=await page.evaluate(async sequence=>{
+  const result=await page.evaluate(async({genericSequence,combatSequence})=>{
     const {DoomWasmArena}=await import("/src/env/doom-wasm.js");
     const canvas=document.createElement("canvas");canvas.width=640;canvas.height=480;canvas.style.display="none";document.body.appendChild(canvas);
     const pointer=await fetch("/runtime/engine-runtime.json",{cache:"no-store"}).then(r=>r.json());
@@ -14,8 +16,6 @@ test("long mixed exact-tic sequence is identical after snapshot restore",async({
     if(!/^[0-9a-f]{40}$/i.test(commit))throw new Error("invalid engine runtime pointer");
     const base="https://raw.githubusercontent.com/collinsomniac/doom-classifier/"+commit;
     const env=await DoomWasmArena.boot({canvas,runtimeBase:base,runtimeInfo:{owned:true,base,commit,sourceCommit:pointer.source_commit,source:"long-snapshot-regression"},actionMs:110});
-    await env.reset();
-    const snap=env.saveSnapshot();
     const simplify=raw=>({
       player:{
         health:Number(raw.player?.health||0),armor:Number(raw.player?.armor||0),weapon:Number(raw.player?.weapon||0),
@@ -30,26 +30,49 @@ test("long mixed exact-tic sequence is identical after snapshot restore",async({
         target:!!e.targeting_player,visible:!!e.visible
       })).sort((a,b)=>a.id-b.id)
     });
-    const run=()=>{
-      env.restoreSnapshot(snap);
-      const rows=[];
-      for(let i=0;i<sequence.length;i++){
-        const before=simplify(env.readRaw()),step=env.stepTics(sequence[i],4),after=simplify(env.readRaw());
-        rows.push({i,action:sequence[i],before,after,reward:Number(step.reward||0),outcome:step.info?.outcome||null});
+    const check=async(sequence,{precondition=false}={})=>{
+      await env.reset();
+
+      // The causal trainer performs hundreds of branch/restore cycles before
+      // frozen evaluation. Reproduce that hidden-state pressure here rather
+      // than validating only a pristine fresh boot.
+      if(precondition){
+        const branchActions=["forward_fire","strafe_left_fire","back_fire","turn_left_fire","strafe_right_fire","fire"];
+        for(let i=0;i<72;i++){
+          const branch=env.saveSnapshot();
+          env.stepTics(branchActions[i%branchActions.length],24);
+          env.restoreSnapshot(branch);
+        }
       }
-      return rows;
+
+      const snap=env.saveSnapshot();
+      const run=()=>{
+        env.restoreSnapshot(snap);
+        const rows=[];
+        for(let i=0;i<sequence.length;i++){
+          const before=simplify(env.readRaw()),step=env.stepTics(sequence[i],4),after=simplify(env.readRaw());
+          rows.push({i,action:sequence[i],before,after,reward:Number(step.reward||0),outcome:step.info?.outcome||null});
+        }
+        return rows;
+      };
+      const a=run(),b=run();let first=-1;
+      for(let i=0;i<a.length;i++)if(JSON.stringify(a[i])!==JSON.stringify(b[i])){first=i;break}
+      return{
+        first,length:sequence.length,
+        diff:first<0?null:{first,action:sequence[first],a:a[first],b:b[first],previous:first>0?{a:a[first-1],b:b[first-1]}:null}
+      };
     };
-    const a=run(),b=run();
-    let first=-1;
-    for(let i=0;i<a.length;i++)if(JSON.stringify(a[i])!==JSON.stringify(b[i])){first=i;break}
-    const diff=first<0?null:{
-      first,action:sequence[first],
-      a:a[first],b:b[first],
-      previous:first>0?{a:a[first-1],b:b[first-1]}:null
+
+    return{
+      generic:await check(genericSequence),
+      combat:await check(combatSequence),
+      combatAfterForkPressure:await check(combatSequence,{precondition:true}),
+      runtime:env.runtime
     };
-    return{first,diff,length:sequence.length};
-  },sequence);
+  },{genericSequence,combatSequence});
 
   console.log("SNAPSHOT_DIVERGENCE "+JSON.stringify(result));
-  expect(result.first).toBe(-1);
+  expect(result.generic.first).toBe(-1);
+  expect(result.combat.first).toBe(-1);
+  expect(result.combatAfterForkPressure.first).toBe(-1);
 });
