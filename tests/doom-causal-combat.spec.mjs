@@ -139,7 +139,9 @@ async function groundingProbe(page){
         turnRight:mass(a=>Number(a.params?.view||0)===2)
       };
     };
-    const left=score(make(-.24)),ahead=score(make(0)),right=score(make(.24)),quiet=score(make(null));
+    // Native DOOM bridge uses relative_angle = bearing - player_angle.
+    // Left-turn input increases player_angle, so positive relative_angle is left.
+    const left=score(make(.24)),ahead=score(make(0)),right=score(make(-.24)),quiet=score(make(null));
     const tv=.5*left.probs.reduce((sum,p,i)=>sum+Math.abs(p-right.probs[i]),0);
     const directional=.5*((left.left-left.right)+(right.right-right.left));
     const turnDirectional=.5*((left.turnLeft-left.turnRight)+(right.turnRight-right.turnLeft));
@@ -171,14 +173,14 @@ async function fiveMinuteBenchmark(page,{totalTics=10500,actionTics=4}={}){
       const obs=env.observe(),d=await p.decide(obs,{useResidual:true,memory:true,explore:false}),id=d.action.id,params=d.action.params||{};
       const hasVisible=Number(obs.visible_hostile_count||0)>0&&Number(obs.nearest_visible_hostile_distance||4096)<4096;
       const bearing=Number(obs.nearest_visible_hostile_bearing||0),fire=Number(params.trigger||0)===1;
-      const bin=!hasVisible?"none":bearing<-.08?"left":bearing>.08?"right":"center";
+      const bin=!hasVisible?"none":bearing>.08?"left":bearing<-.08?"right":"center";
       bearingAction[bin][id]=(bearingAction[bin][id]||0)+1;
       if(hasVisible){
         visible++;
         if(Math.abs(bearing)<=.06){aligned++;if(fire)alignedFire++}
         if(Math.abs(bearing)>=.10){
           offAxis++;
-          if((bearing<0&&Number(params.view||0)===1)||(bearing>0&&Number(params.view||0)===2))correctTurn++;
+          if((bearing>0&&Number(params.view||0)===1)||(bearing<0&&Number(params.view||0)===2))correctTurn++;
         }
       }else{noVisible++;if(fire)noVisibleFire++}
 
