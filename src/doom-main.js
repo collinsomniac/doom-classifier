@@ -7,9 +7,25 @@ import {MiniLMSchemaCompiler,SCHEMA_EMBEDDING_PRESET} from "./model-adapters/sch
 import {probeCounterfactualActions} from "./core/counterfactual.js";
 import {softmax} from "./core/math.js";
 
-const OWNED_RUNTIME_BASE="https://raw.githubusercontent.com/collinsomniac/doom-classifier/engine-runtime";
+const OWNED_RUNTIME_POINTER="./runtime/engine-runtime.json";
+const OWNED_RUNTIME_RAW_ROOT="https://raw.githubusercontent.com/collinsomniac/doom-classifier";
 const STARTER_MODEL_BASE="https://raw.githubusercontent.com/collinsomniac/doom-classifier/model-runtime";
 const query=new URLSearchParams(globalThis.location?.search||""),requestedRuntime=query.get("runtime")||"owned",starterMode=query.get("starter")||"auto";
+async function resolveOwnedRuntime(){
+  const response=await fetch(OWNED_RUNTIME_POINTER,{cache:"no-store"});
+  if(!response.ok)throw new Error("owned runtime pointer HTTP "+response.status);
+  const pointer=await response.json(),commit=String(pointer?.asset_commit||"").trim();
+  if(!/^[0-9a-f]{40}$/i.test(commit))throw new Error("owned runtime pointer is missing an exact asset commit");
+  const base=OWNED_RUNTIME_RAW_ROOT+"/"+commit;
+  return{
+    base,
+    info:{
+      owned:true,repository:String(pointer.repository||"collinsomniac/doom-classifier"),
+      branch:String(pointer.branch||"engine-runtime"),commit,
+      sourceCommit:String(pointer.source_commit||""),base
+    }
+  };
+}
 const $=id=>document.getElementById(id);
 const ui={
   boot:$("bootBtn"),prepare:$("prepareBtn"),start:$("startBtn"),step:$("stepBtn"),reset:$("resetBtn"),canvas:$("doomCanvas"),runtime:$("runtimeStatus"),runtimeTitle:$("runtimeTitle"),bootStatus:$("bootStatus"),
@@ -423,14 +439,16 @@ async function boot(){
   try{
     const file=ui.iwad.files?.[0]||null;if(file&&file.size>128*1024*1024)throw new Error("IWAD is larger than the 128 MB browser safety limit");
     const iwadFile=file?await file.arrayBuffer():null;
-    const runtimeOptions=requestedRuntime!=="borrowed"?{runtimeBase:OWNED_RUNTIME_BASE,runtimeInfo:{owned:true,repository:"collinsomniac/doom-classifier",branch:"engine-runtime",base:OWNED_RUNTIME_BASE}}:{};
+    const runtimeOptions=requestedRuntime!=="borrowed"
+      ?await resolveOwnedRuntime().then(runtime=>({runtimeBase:runtime.base,runtimeInfo:runtime.info}))
+      :{};
     env=await DoomWasmArena.boot({canvas:ui.canvas,actionMs:Number(ui.actionMs.value),iwadFile,contentName:file?.name||null,...runtimeOptions,onProgress:message=>{ui.bootStatus.textContent=message}});
     hashSemantic=new HashSemanticAdapter();hashSemantic.backend="local-js";
     policy=new SemanticResidualPolicy({schema:env.schema,actions:env.actions,semantic:hashSemantic,residual:"neural-set",seed:1993,inferenceMode:"adaptive"});
     policy.onTeacherResult=()=>{if(env&&controller){const obs=env.lastObservation||env.observe(),d=controller.lastDecision,outcome=d?.outcome||env.lastOutcome;renderTeacherTranscript();renderArchitecture(obs,d,outcome)}};
     controller=new ExperimentController({environment:env,policy,hz:8});controller.training=false;controller.explore=false;controller.memory=true;controller.useResidual=true;
     bindController();buildBars();engineReady=true;ui.runtimeTitle.textContent=(env.runtime?.owned?"Owned ":"")+"Chocolate Doom · "+env.contentName;
-    const counts=env.lastObservation?._collections||{};ui.bootStatus.textContent=DOOM_RUNTIME_PROVENANCE.engine+" · "+env.contentName+" · "+policy.q.parameterCount()+" params · "+(counts.entities?.length||0)+" entities · "+(counts.geometry?.length||0)+" lines";
+    const counts=env.lastObservation?._collections||{},runtimeId=env.runtime?.commit?(" · runtime "+String(env.runtime.commit).slice(0,8)):"";ui.bootStatus.textContent=DOOM_RUNTIME_PROVENANCE.engine+" · "+env.contentName+runtimeId+" · "+policy.q.parameterCount()+" params · "+(counts.entities?.length||0)+" entities · "+(counts.geometry?.length||0)+" lines";
     ui.prepareStatus.textContent="Engine ready. Prepare Recommended before model-controlled play.";ui.schemaStatus.textContent="Lexical feature hash only.";ui.modelStatus.textContent="No learned teacher loaded.";
     applyProfile("assisted");setRuntime("ENGINE READY");window.__doomLab={get env(){return env},get policy(){return policy},get controller(){return controller},get counterfactual(){return lastCounterfactualProbe},get counterfactualExamples(){return counterfactualExamples}};render();
     if(starterMode==="auto")void maybeAutoLoadStarter();
