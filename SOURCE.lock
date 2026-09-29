@@ -1,0 +1,8 @@
+{
+  "upstream_repository": "https://github.com/lukaske/jev-doom-agent.git",
+  "upstream_commit": "318c32a24851444c1170bf083671c38723f3a35a",
+  "chocolate_doom_version": "3.1.1",
+  "emscripten_version": "4.0.14",
+  "default_iwad": "Freedoom 0.13.0",
+  "license": "GPL-2.0-or-later"
+}
