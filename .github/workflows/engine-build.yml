@@ -66,6 +66,7 @@ jobs:
           grep -q "promptfps_snapshot_sector_soundtraversed" .engine-work/upstream/vendor/chocolate-doom/src/doom/g_game.c
           grep -q "promptfps_snapshot_line_validcount" .engine-work/upstream/vendor/chocolate-doom/src/doom/g_game.c
           grep -q "promptfps_snapshot_validcount" .engine-work/upstream/vendor/chocolate-doom/src/doom/g_game.c
+          grep -q "PromptFPS_CheckSightPure" .engine-work/upstream/vendor/chocolate-doom/src/doom/browser_doom_bridge.c
           grep -q "PromptFPS_StepTics" .engine-work/upstream/vendor/chocolate-doom/src/doom/browser_doom_bridge.c
           grep -q "PromptFPS_RecordPlayerDamage" engine/dist/telemetry.patch
           ls -lh engine/dist
