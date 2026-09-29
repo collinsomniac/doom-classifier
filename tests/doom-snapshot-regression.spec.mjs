@@ -9,8 +9,11 @@ test("long mixed exact-tic sequence is identical after snapshot restore",async({
   const result=await page.evaluate(async sequence=>{
     const {DoomWasmArena}=await import("/src/env/doom-wasm.js");
     const canvas=document.createElement("canvas");canvas.width=640;canvas.height=480;canvas.style.display="none";document.body.appendChild(canvas);
-    const base="https://raw.githubusercontent.com/collinsomniac/doom-classifier/engine-runtime";
-    const env=await DoomWasmArena.boot({canvas,runtimeBase:base,runtimeInfo:{owned:true,base,source:"long-snapshot-regression"},actionMs:110});
+    const pointer=await fetch("/runtime/engine-runtime.json",{cache:"no-store"}).then(r=>r.json());
+    const commit=String(pointer.asset_commit||"");
+    if(!/^[0-9a-f]{40}$/i.test(commit))throw new Error("invalid engine runtime pointer");
+    const base="https://raw.githubusercontent.com/collinsomniac/doom-classifier/"+commit;
+    const env=await DoomWasmArena.boot({canvas,runtimeBase:base,runtimeInfo:{owned:true,base,commit,sourceCommit:pointer.source_commit,source:"long-snapshot-regression"},actionMs:110});
     await env.reset();
     const snap=env.saveSnapshot();
     const simplify=raw=>({
