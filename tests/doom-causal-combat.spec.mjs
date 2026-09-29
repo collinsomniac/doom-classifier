@@ -158,80 +158,6 @@ async function groundingProbe(page){
   });
 }
 
-async function trainReferenceGrounding(page,{epochs=8,strength=.70}={}){
-  return page.evaluate(({epochs,strength})=>{
-    const {env,policy:p}=window.__doomLab,base=env.observe(),actions=p.actions;
-    const actionIndex=id=>actions.findIndex(a=>a.id===id);
-    const add=(target,id,weight)=>{const i=actionIndex(id);if(i>=0)target[i]+=weight};
-    const entity=(bearing,distance)=>({
-      engine_record_id:997,type:11,kind:1,
-      x:base.player_x+distance*Math.cos(bearing*Math.PI),y:base.player_y+distance*Math.sin(bearing*Math.PI),z:base.player_z,
-      relative_x:distance*Math.cos(bearing*Math.PI),relative_y:distance*Math.sin(bearing*Math.PI),relative_z:0,
-      velocity_x:0,velocity_y:0,radius:20,height:56,health:60,distance,relative_angle:bearing,
-      visible:1,countkill:1,pickup:0,targeting_player:1
-    });
-    const observation=(bearing=null,distance=384)=>{
-      const obs=structuredClone(base),has=bearing!==null,e=has?entity(bearing,distance):null;
-      Object.assign(obs,{
-        health:100,armor:0,bullets:50,recent_damage:0,recent_hostile_hp_loss:0,recent_player_damage_dealt:0,recent_player_kills:0,under_fire:0,
-        visible_hostile_count:has?1:0,targeting_hostile_count:has?1:0,
-        nearest_hostile_distance:has?distance:4096,nearest_hostile_bearing:has?bearing:0,
-        nearest_visible_hostile_distance:has?distance:4096,nearest_visible_hostile_bearing:has?bearing:0,nearest_visible_hostile_health:has?60:0,
-        visible_hostile_bearing_zone:!has?0:Math.abs(bearing)<=.06?1:bearing>0?2:3,
-        visible_hostile_distance_zone:!has?0:distance<256?1:distance<768?2:3,
-        aim_alignment:has?1-Math.min(1,Math.abs(bearing)*8):0,
-        nearest_targeting_hostile_distance:has?distance:4096,nearest_targeting_hostile_bearing:has?bearing:0,
-        visible_projectile_count:0,nearest_projectile_distance:4096,nearest_projectile_bearing:0,
-        _collections:{entities:has?[e]:[],geometry:[]}
-      });
-      return obs;
-    };
-    const target=(bearing=null)=>{
-      const t=new Array(actions.length).fill(0);
-      if(bearing===null){
-        for(const id of ["forward","back","turn_left","turn_right","strafe_left","strafe_right","wait"])add(t,id,1/7);
-      }else if(bearing>.06){
-        add(t,"turn_left",.75);add(t,"turn_left_fire",.25);
-      }else if(bearing<-.06){
-        add(t,"turn_right",.75);add(t,"turn_right_fire",.25);
-      }else{
-        for(const id of ["fire","forward_fire","back_fire","strafe_left_fire","strafe_right_fire"])add(t,id,.2);
-      }
-      const sum=t.reduce((a,b)=>a+b,0)||1;return t.map(v=>v/sum);
-    };
-    const bearings=[-.45,-.30,-.20,-.12,-.075,-.04,0,.04,.075,.12,.20,.30,.45],distances=[160,384,896],examples=[];
-    for(const distance of distances)for(const bearing of bearings)examples.push({observation:observation(bearing,distance),target:target(bearing),temporal:null,history:null});
-    for(let i=0;i<9;i++)examples.push({observation:observation(null,384),target:target(null),temporal:null,history:null});
-
-    let updates=0,loss=0,brier=0;
-    for(let epoch=0;epoch<Math.max(1,Math.floor(epochs));epoch++){
-      const ordered=epoch%2?[...examples].reverse():examples;
-      for(const ex of ordered){
-        const result=p.superviseDecisionDistribution(ex.observation,ex.target,{steps:1,strength});
-        updates+=Number(result?.stepsUsed||0);loss+=Number(result?.loss||0);brier+=Number(result?.brier||0);
-      }
-    }
-    p.q.syncTarget?.({value:false});
-    window.__referenceGroundingExamples=examples;
-
-    const softmax=s=>{const peak=Math.max(...s),e=s.map(v=>Math.exp(v-peak)),z=e.reduce((a,b)=>a+b,0)||1;return e.map(v=>v/z)};
-    let supportMass=0,topInSupport=0;
-    for(const ex of examples){
-      const scores=p.q.scoreStatsObservation(ex.observation,{temporal:null,history:null}).semanticScores,probs=softmax(scores);
-      const support=ex.target.map((v,i)=>v>0?i:-1).filter(i=>i>=0);
-      supportMass+=support.reduce((sum,i)=>sum+probs[i],0);
-      const top=probs.reduce((best,v,i,a)=>v>a[best]?i:best,0);if(support.includes(top))topInSupport++;
-    }
-    return{
-      kind:"training-only Jev-parity relation demonstrations",
-      examples:examples.length,epochs,updates,
-      meanLoss:updates?loss/updates:0,meanBrier:updates?brier/updates:0,
-      meanTargetSupportMass:examples.length?supportMass/examples.length:0,
-      topInTargetSupport:examples.length?topInSupport/examples.length:0
-    };
-  },{epochs,strength});
-}
-
 async function fiveMinuteBenchmark(page,{totalTics=10500,actionTics=4}={}){
   return page.evaluate(async({totalTics,actionTics})=>{
     const {policy:p,controller:c,env}=window.__doomLab;
@@ -297,9 +223,6 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
   await bootAndPrepare(page);
 
   const baseline=await evaluateExact(page,{rollouts:4,stepsPerRollout:64,actionTics:4});
-  const referenceGrounding=await trainReferenceGrounding(page,{epochs:8,strength:.70});
-  const groundingAfterReference=await groundingProbe(page);
-  const referenceEvaluation=await evaluateExact(page,{rollouts:4,stepsPerRollout:64,actionTics:4});
   const training=await page.evaluate(async steps=>{
     const {controller:c,policy:p}=window.__doomLab;
     await c.reset({learning:false});
@@ -309,7 +232,6 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
       steps,probeTics:24,actionTics:4,rolloutHorizon:128,
       targetTemperature:.28,priorStrength:.02,superviseSteps:3,superviseStrength:.58,
       supervisionReplay:2,replayStrength:.20,behaviorCoverage:.55,
-      anchorExamples:window.__referenceGroundingExamples||[],anchorReplay:1,anchorStrength:.14,
       batchRefitEvery:0,batchWindow:steps,finalRefit:false,ridge:.02
     });
   },causalSteps);
@@ -329,9 +251,6 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
   checkpoint.build={
     selection:"canonical exact-state typed causal curriculum",
     causalSteps,probeTics:24,actionTics:4,rolloutHorizon:128,
-    referenceGrounding,
-    groundingAfterReference,
-    referenceValidation:{kills:referenceEvaluation.totalKills,damage:referenceEvaluation.totalDamage,reward:referenceEvaluation.totalReward},
     training:{
       kills:training.kills,damage:training.damage,return:training.return,examples:training.examples,informative:training.informative,
       meanTypedTargetFit:training.meanTypedTargetFit,meanTypedTargetBlend:training.meanTypedTargetBlend,
@@ -347,7 +266,7 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
   const report={
     version:"causal-policy-v4-grounded-typed-replay",
     gate:{killTarget,minDiversity,minSwitches,maxStreakLimit},
-    runtime,baseline,referenceGrounding,groundingAfterReference,referenceEvaluation,training,evaluation,replay,grounding,fiveMinute,
+    runtime,baseline,training,evaluation,replay,grounding,fiveMinute,
     checkpoint:{params:checkpoint.q?.params,bytes:JSON.stringify(checkpoint).length}
   };
   writeFileSync(resolve(outputDir,"combat-report.json"),JSON.stringify(report,null,2));
@@ -356,10 +275,7 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
   console.log("CAUSAL_COMBAT_RESULT "+JSON.stringify({
     target:killTarget,runtime,
     baseline:{kills:baseline.totalKills,damage:baseline.totalDamage,reward:baseline.totalReward,diversity:baseline.actionDiversity,maxStreak:baseline.maxStreak},
-    referenceGrounding,
-    groundingAfterReference,
-    referenceEvaluation:{kills:referenceEvaluation.totalKills,damage:referenceEvaluation.totalDamage,reward:referenceEvaluation.totalReward,diversity:referenceEvaluation.actionDiversity,maxStreak:referenceEvaluation.maxStreak},
-    training:{kills:training.kills,damage:training.damage,reward:training.return,examples:training.examples,informative:training.informative,diversity:training.actionDiversity,replaySupervisionUpdates:training.replaySupervisionUpdates,anchorSupervisionUpdates:training.anchorSupervisionUpdates,fitPasses:training.fitPasses,typedFit:training.meanTypedTargetFit,typedBlend:training.meanTypedTargetBlend,behaviorCoverage:training.behaviorCoverage,coverageActions:training.coverageActions,behaviorDiversity:training.behaviorDiversity,behaviorCounts:training.behaviorActionCounts},
+    training:{kills:training.kills,damage:training.damage,reward:training.return,examples:training.examples,informative:training.informative,diversity:training.actionDiversity,replaySupervisionUpdates:training.replaySupervisionUpdates,fitPasses:training.fitPasses,typedFit:training.meanTypedTargetFit,typedBlend:training.meanTypedTargetBlend,behaviorCoverage:training.behaviorCoverage,coverageActions:training.coverageActions,behaviorDiversity:training.behaviorDiversity,behaviorCounts:training.behaviorActionCounts},
     evaluation:{kills:evaluation.totalKills,damage:evaluation.totalDamage,reward:evaluation.totalReward,decisions:evaluation.totalDecisions,diversity:evaluation.actionDiversity,minRunDiversity:evaluation.minRunDiversity,switches:evaluation.totalSwitches,maxStreak:evaluation.maxStreak,counts:evaluation.actionCounts},
     replay:{kills:replay.totalKills,damage:replay.totalDamage,reward:replay.totalReward},
     grounding,
