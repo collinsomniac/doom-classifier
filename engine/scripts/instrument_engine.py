@@ -329,12 +329,17 @@ static int promptfps_snapshot_next_weapon;
 static int promptfps_snapshot_mobj_count;
 static int promptfps_snapshot_target_index[PROMPTFPS_MAX_SNAPSHOT_MOBJS];
 static int promptfps_snapshot_tracer_index[PROMPTFPS_MAX_SNAPSHOT_MOBJS];
+static int promptfps_snapshot_snext_index[PROMPTFPS_MAX_SNAPSHOT_MOBJS];
+static int promptfps_snapshot_bnext_index[PROMPTFPS_MAX_SNAPSHOT_MOBJS];
 static int promptfps_snapshot_player_attacker_index[MAXPLAYERS];
 static int *promptfps_snapshot_sector_soundtarget_index;
 static int *promptfps_snapshot_sector_validcount;
 static int *promptfps_snapshot_sector_soundtraversed;
+static int *promptfps_snapshot_sector_thinglist_index;
+static int *promptfps_snapshot_block_head_index;
 static int *promptfps_snapshot_line_validcount;
 static int promptfps_snapshot_sector_capacity;
+static int promptfps_snapshot_block_capacity;
 static int promptfps_snapshot_line_capacity;
 static int promptfps_snapshot_validcount;
 
@@ -405,7 +410,24 @@ static int PromptFPS_CaptureSnapshotLinks(void)
         if (next == NULL)
             return 0;
         promptfps_snapshot_sector_soundtraversed = next;
+
+        next = realloc(promptfps_snapshot_sector_thinglist_index,
+                       sizeof(int) * (size_t) numsectors);
+        if (next == NULL)
+            return 0;
+        promptfps_snapshot_sector_thinglist_index = next;
         promptfps_snapshot_sector_capacity = numsectors;
+    }
+
+    if (bmapwidth * bmapheight > promptfps_snapshot_block_capacity)
+    {
+        int block_count = bmapwidth * bmapheight;
+        int *next = realloc(promptfps_snapshot_block_head_index,
+                            sizeof(int) * (size_t) block_count);
+        if (next == NULL)
+            return 0;
+        promptfps_snapshot_block_head_index = next;
+        promptfps_snapshot_block_capacity = block_count;
     }
 
     if (numlines > promptfps_snapshot_line_capacity)
@@ -430,7 +452,13 @@ static int PromptFPS_CaptureSnapshotLinks(void)
             PromptFPS_MobjIndex(sectors[i].soundtarget);
         promptfps_snapshot_sector_validcount[i] = sectors[i].validcount;
         promptfps_snapshot_sector_soundtraversed[i] = sectors[i].soundtraversed;
+        promptfps_snapshot_sector_thinglist_index[i] =
+            PromptFPS_MobjIndex(sectors[i].thinglist);
     }
+
+    for (i = 0; i < bmapwidth * bmapheight; ++i)
+        promptfps_snapshot_block_head_index[i] =
+            PromptFPS_MobjIndex(blocklinks[i]);
 
     for (i = 0; i < numlines; ++i)
         promptfps_snapshot_line_validcount[i] = lines[i].validcount;
@@ -447,6 +475,8 @@ static int PromptFPS_CaptureSnapshotLinks(void)
         mobj = (mobj_t *) th;
         promptfps_snapshot_target_index[index] = PromptFPS_MobjIndex(mobj->target);
         promptfps_snapshot_tracer_index[index] = PromptFPS_MobjIndex(mobj->tracer);
+        promptfps_snapshot_snext_index[index] = PromptFPS_MobjIndex(mobj->snext);
+        promptfps_snapshot_bnext_index[index] = PromptFPS_MobjIndex(mobj->bnext);
         ++index;
     }
 
@@ -472,18 +502,34 @@ static int PromptFPS_RestoreSnapshotLinks(void)
         mobj = (mobj_t *) th;
         mobj->target = PromptFPS_MobjAtIndex(promptfps_snapshot_target_index[index]);
         mobj->tracer = PromptFPS_MobjAtIndex(promptfps_snapshot_tracer_index[index]);
+        mobj->snext = PromptFPS_MobjAtIndex(promptfps_snapshot_snext_index[index]);
+        mobj->sprev = NULL;
+        mobj->bnext = PromptFPS_MobjAtIndex(promptfps_snapshot_bnext_index[index]);
+        mobj->bprev = NULL;
         ++index;
     }
 
     if (index != promptfps_snapshot_mobj_count)
         return 0;
 
+    for (index = 0; index < promptfps_snapshot_mobj_count; ++index)
+    {
+        mobj_t *mobj = PromptFPS_MobjAtIndex(index);
+        if (mobj == NULL)
+            return 0;
+        if (mobj->snext != NULL)
+            mobj->snext->sprev = mobj;
+        if (mobj->bnext != NULL)
+            mobj->bnext->bprev = mobj;
+    }
+
     for (i = 0; i < MAXPLAYERS; ++i)
         players[i].attacker =
             PromptFPS_MobjAtIndex(promptfps_snapshot_player_attacker_index[i]);
 
     if (numsectors > promptfps_snapshot_sector_capacity
-        || numlines > promptfps_snapshot_line_capacity)
+        || numlines > promptfps_snapshot_line_capacity
+        || bmapwidth * bmapheight > promptfps_snapshot_block_capacity)
         return 0;
 
     validcount = promptfps_snapshot_validcount;
@@ -494,7 +540,13 @@ static int PromptFPS_RestoreSnapshotLinks(void)
             PromptFPS_MobjAtIndex(promptfps_snapshot_sector_soundtarget_index[i]);
         sectors[i].validcount = promptfps_snapshot_sector_validcount[i];
         sectors[i].soundtraversed = promptfps_snapshot_sector_soundtraversed[i];
+        sectors[i].thinglist =
+            PromptFPS_MobjAtIndex(promptfps_snapshot_sector_thinglist_index[i]);
     }
+
+    for (i = 0; i < bmapwidth * bmapheight; ++i)
+        blocklinks[i] =
+            PromptFPS_MobjAtIndex(promptfps_snapshot_block_head_index[i]);
 
     for (i = 0; i < numlines; ++i)
         lines[i].validcount = promptfps_snapshot_line_validcount[i];
