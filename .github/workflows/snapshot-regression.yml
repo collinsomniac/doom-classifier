@@ -2,7 +2,7 @@ name: snapshot-regression
 
 on:
   push:
-    branches: [main]
+    branches: [main, diagnose/live-vs-restored-continuation]
     paths:
       - tests/doom-snapshot-regression.spec.mjs
       - .github/workflows/snapshot-regression.yml
