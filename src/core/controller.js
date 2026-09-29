@@ -117,15 +117,16 @@ export class ExperimentController extends EventTarget{
     steps=512,probeTics=24,actionTics=4,rolloutHorizon=128,
     targetTemperature=.30,priorStrength=.08,superviseSteps=3,superviseStrength=.55,
     supervisionReplay=2,replayStrength=.24,batchRefitEvery=0,batchWindow=192,
-    finalRefit=false,ridge=.025,factorizedTargetBlend=.70,seed=0x51a9e,onProgress=()=>{}
+    finalRefit=false,ridge=.025,factorizedTargetBlend=.70,behaviorCoverage=.35,seed=0x51a9e,onProgress=()=>{}
   }={}){
     if(!this.environment?.supportsSnapshots?.()||!this.environment?.supportsExactTics?.())throw new Error("Causal policy training requires exact snapshots and tic stepping");
     if(!this.policy?.superviseDecisionDistribution||!this.policy?.fitDecisionDistributions)throw new Error("Policy does not support proper-score supervision");
     const previous={training:this.training,explore:this.explore,mode:this.policy.inferenceMode,memory:this.memory};
     await this.quiesce({teacher:true});
     this.training=false;this.explore=false;this.memory=true;this.policy.setInferenceMode("neural");this.setState(ControllerState.TUNING);
-    const examples=[],curriculumTrace=[],counts={},startStep=this.steps,replayRng=mulberry32(Number(seed)>>>0);
-    let totalReward=0,totalDamage=0,totalKills=0,totalPickups=0,totalSpread=0,informative=0,resets=0,fitPasses=0,supervisionUpdates=0,replaySupervisionUpdates=0;
+    const examples=[],curriculumTrace=[],counts={},behaviorCounts={},startStep=this.steps,replayRng=mulberry32(Number(seed)>>>0);
+    const coverage=Math.max(0,Math.min(1,Number(behaviorCoverage)||0));
+    let totalReward=0,totalDamage=0,totalKills=0,totalPickups=0,totalSpread=0,informative=0,resets=0,fitPasses=0,supervisionUpdates=0,replaySupervisionUpdates=0,coverageActions=0;
     const canonicalize=()=>{
       const snapshot=this.environment.saveSnapshot();
       this.environment.restoreSnapshot(snapshot);
@@ -171,14 +172,25 @@ export class ExperimentController extends EventTarget{
         }
         if(probe.spread>1e-9){informative++;totalSpread+=probe.spread}
 
-        const step=this.environment.stepTics(oracle.id,actionTics),outcome=step.info?.outcome||null;
-        this.policy.commitActionOutcome?.({actionIndex:oracleIndex,reward:step.reward,outcome,done:step.done});
+        // Supervision and state collection are intentionally decoupled.
+        // The exact-state probe supplies the label, while a coverage behavior
+        // occasionally advances with the least-visited typed action. This is
+        // off-policy dataset coverage, not a runtime tactical rule.
+        let behaviorIndex=oracleIndex,usedCoverage=false;
+        if(coverage>0&&replayRng()<coverage){
+          const visits=this.policy.actions.map(action=>Number(behaviorCounts[action.id]||0));
+          const least=Math.min(...visits),candidates=visits.map((n,index)=>n===least?index:-1).filter(index=>index>=0);
+          behaviorIndex=candidates[Math.floor(replayRng()*candidates.length)]??oracleIndex;
+          usedCoverage=behaviorIndex!==oracleIndex;coverageActions+=usedCoverage?1:0;
+        }
+        const behavior=this.policy.actions[behaviorIndex],step=this.environment.stepTics(behavior.id,actionTics),outcome=step.info?.outcome||null;
+        this.policy.commitActionOutcome?.({actionIndex:behaviorIndex,reward:step.reward,outcome,done:step.done});
         this.steps++;this.episodeReturn+=Number(step.reward||0);totalReward+=Number(step.reward||0);
         totalDamage+=Number(outcome?.damageDealt||0);totalKills+=Number(outcome?.playerKillDelta||0);totalPickups+=Number(outcome?.playerPickupDelta||0);
-        counts[oracle.id]=(counts[oracle.id]||0)+1;
+        counts[oracle.id]=(counts[oracle.id]||0)+1;behaviorCounts[behavior.id]=(behaviorCounts[behavior.id]||0)+1;
         const ranked=probe.trials.map(t=>({id:t.id,return:Number(t.return||0)})).sort((a,b)=>b.return-a.return);
         curriculumTrace.push({
-          step:i+1,action:oracle.id,reward:Number(step.reward||0),probeSpread:Number(probe.spread||0),
+          step:i+1,action:behavior.id,behaviorAction:behavior.id,targetAction:oracle.id,coverageAction:usedCoverage,reward:Number(step.reward||0),probeSpread:Number(probe.spread||0),
           measuredTop:ranked[0]?.id||oracle.id,measuredTopReturn:Number(ranked[0]?.return||0),
           targetTop:oracle.id,targetTopProbability:Number(target[oracleIndex]||0),
           typedTargetFit:Number(typedProjection.fitQuality||0),typedTargetBlend:Number(typedProjection.blendUsed||0),
@@ -199,7 +211,8 @@ export class ExperimentController extends EventTarget{
         }
         if(i===0||(i+1)%8===0||i+1===steps)onProgress({
           completed:i+1,total:steps,ratio:(i+1)/steps,kills:totalKills,damage:totalDamage,
-          examples:examples.length,informative,resets,replaySupervisionUpdates
+          examples:examples.length,informative,resets,replaySupervisionUpdates,coverageActions,
+          behaviorDiversity:Object.keys(behaviorCounts).length
         });
         await Promise.resolve();
       }
@@ -210,13 +223,14 @@ export class ExperimentController extends EventTarget{
       }
       this.policy.q.syncTarget?.({value:false});
       return{
-        requested:steps,completed:this.steps-startStep,probeTics,actionTics,rolloutHorizon,factorizedTargetBlend,
+        requested:steps,completed:this.steps-startStep,probeTics,actionTics,rolloutHorizon,factorizedTargetBlend,behaviorCoverage:coverage,
         examples:examples.length,informative,meanInformativeSpread:informative?totalSpread/informative:0,
         meanTypedTargetFit:examples.length?examples.reduce((sum,ex)=>sum+Number(ex.typedFit||0),0)/examples.length:0,
         meanTypedTargetBlend:examples.length?examples.reduce((sum,ex)=>sum+Number(ex.typedBlend||0),0)/examples.length:0,
-        supervisionUpdates,replaySupervisionUpdates,fitPasses,finalRefit:!!finalRefit,resets,
+        supervisionUpdates,replaySupervisionUpdates,fitPasses,finalRefit:!!finalRefit,resets,coverageActions,
         return:totalReward,damage:totalDamage,kills:totalKills,pickups:totalPickups,
-        actionDiversity:Object.keys(counts).length,actionCounts:counts,trace:curriculumTrace
+        actionDiversity:Object.keys(counts).length,actionCounts:counts,
+        behaviorDiversity:Object.keys(behaviorCounts).length,behaviorActionCounts:behaviorCounts,trace:curriculumTrace
       };
     }finally{
       this.training=previous.training;this.explore=previous.explore;this.memory=previous.memory;this.policy.setInferenceMode(previous.mode);
