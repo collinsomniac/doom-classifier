@@ -16,6 +16,9 @@ test("real DOOM verifies firing, prepares semantics, and runs the neural fast pa
   await expect(page.locator('[data-arch="environment"]')).toHaveClass(/active/);
   await page.locator("#playTabBtn").click();
   expect(await page.evaluate(()=>window.__doomLab.env.runtime?.owned)).toBe(true);
+  const runtimeIdentity=await page.evaluate(()=>window.__doomLab.env.runtime);
+  expect(String(runtimeIdentity?.commit||"")).toMatch(/^[0-9a-f]{40}$/i);
+  expect(String(runtimeIdentity?.base||"")).toContain(String(runtimeIdentity.commit));
   await expect(page.locator("#weaponState")).toContainText("pistol");
   await expect(page.locator("#manualActionSelect")).toHaveValue("fire");
 
