@@ -44,12 +44,15 @@ concurrency:
 jobs:
   train:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 18
     env:
       CAUSAL_TRAIN_STEPS: ${{ github.event_name == 'workflow_dispatch' && inputs.steps || '768' }}
       CAUSAL_REPLAY_ROLLOUTS: ${{ github.event_name == 'workflow_dispatch' && inputs.rollouts || '16' }}
       CAUSAL_REPLAY_STEPS: "64"
       CAUSAL_KILL_TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.kill_target || '20' }}
+      CAUSAL_MIN_DIVERSITY: "4"
+      CAUSAL_MIN_SWITCHES: "8"
+      CAUSAL_MAX_STREAK: "24"
       CAUSAL_OUTPUT_DIR: artifacts/causal-combat
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +73,7 @@ jobs:
         if: always()
         run: |
           test -s artifacts/causal-combat/combat-report.json
-          node -e 'const x=require("./artifacts/causal-combat/combat-report.json"); console.log(JSON.stringify({target:x.killTarget,training:{kills:x.training.kills,damage:x.training.damage,examples:x.training.examples},evaluation:{kills:x.evaluation.totalKills,damage:x.evaluation.totalDamage,reward:x.evaluation.totalReward},replay:{kills:x.replay.totalKills,damage:x.replay.totalDamage}},null,2))'
+          node -e 'const x=require("./artifacts/causal-combat/combat-report.json"); console.log(JSON.stringify({gate:x.gate,training:{kills:x.training.kills,damage:x.training.damage,examples:x.training.examples,replayUpdates:x.training.replaySupervisionUpdates,fitPasses:x.training.fitPasses},evaluation:{kills:x.evaluation.totalKills,damage:x.evaluation.totalDamage,reward:x.evaluation.totalReward,diversity:x.evaluation.actionDiversity,minRunDiversity:x.evaluation.minRunDiversity,switches:x.evaluation.totalSwitches,maxStreak:x.evaluation.maxStreak,counts:x.evaluation.actionCounts},replay:{kills:x.replay.totalKills,damage:x.replay.totalDamage}},null,2))'
       - name: Upload checkpoint and replay bundle
         if: always()
         uses: actions/upload-artifact@v4
@@ -89,11 +92,16 @@ jobs:
           const p="artifacts/causal-combat/combat-report.json";
           if(!fs.existsSync(p)){console.log("publish=false");process.exit(0)}
           const x=JSON.parse(fs.readFileSync(p,"utf8"));
-          const ok=x.evaluation.totalKills>=x.killTarget &&
+          const gate=x.gate||{killTarget:20,minDiversity:4,minSwitches:8,maxStreakLimit:24};
+          const ok=x.evaluation.totalKills>=gate.killTarget &&
+            x.evaluation.actionDiversity>=gate.minDiversity &&
+            x.evaluation.minRunDiversity>=gate.minDiversity &&
+            x.evaluation.totalSwitches>=gate.minSwitches*x.evaluation.rollouts &&
+            x.evaluation.maxStreak<=gate.maxStreakLimit &&
             x.replay.totalKills===x.evaluation.totalKills &&
             x.replay.totalDamage===x.evaluation.totalDamage;
           fs.appendFileSync(process.env.GITHUB_OUTPUT,"publish="+String(ok)+"\n");
-          console.log({publish:ok,kills:x.evaluation.totalKills,target:x.killTarget});
+          console.log({publish:ok,kills:x.evaluation.totalKills,target:gate.killTarget,diversity:x.evaluation.actionDiversity,minRunDiversity:x.evaluation.minRunDiversity,switches:x.evaluation.totalSwitches,maxStreak:x.evaluation.maxStreak});
           NODE
       - name: Publish validated combat model and replay
         if: steps.gate.outputs.publish == 'true'
@@ -108,7 +116,7 @@ jobs:
           cp artifacts/causal-combat/doom-causal-checkpoint.json "$SNAPSHOT/doom-starter.json"
           cp artifacts/causal-combat/combat-replays.json "$SNAPSHOT/combat-replays.json"
           cp artifacts/causal-combat/combat-report.json "$SNAPSHOT/combat-report.json"
-          node -e 'const fs=require("fs"),x=require("./artifacts/causal-combat/combat-report.json");fs.writeFileSync(process.argv[1],JSON.stringify({source_commit:process.env.GITHUB_SHA,workflow_run:process.env.GITHUB_RUN_ID,training:"exact-state causal policy curriculum",kills:x.evaluation.totalKills,target:x.killTarget,replay_verified:true},null,2))' "$SNAPSHOT/metadata.json"
+          node -e 'const fs=require("fs"),x=require("./artifacts/causal-combat/combat-report.json");fs.writeFileSync(process.argv[1],JSON.stringify({source_commit:process.env.GITHUB_SHA,workflow_run:process.env.GITHUB_RUN_ID,training:"exact-state causal proper-score replay v2",kills:x.evaluation.totalKills,target:x.gate.killTarget,diversity:x.evaluation.actionDiversity,min_run_diversity:x.evaluation.minRunDiversity,switches:x.evaluation.totalSwitches,max_streak:x.evaluation.maxStreak,replay_verified:true},null,2))' "$SNAPSHOT/metadata.json"
           cd "$SNAPSHOT"
           git init
           git checkout --orphan model-runtime
