@@ -228,8 +228,8 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
     p.setInferenceMode("neural");
     return c.trainCausalPolicy({
       steps,probeTics:24,actionTics:4,rolloutHorizon:128,
-      targetTemperature:.28,priorStrength:.08,superviseSteps:3,superviseStrength:.58,
-      supervisionReplay:2,replayStrength:.20,
+      targetTemperature:.28,priorStrength:.02,superviseSteps:3,superviseStrength:.58,
+      supervisionReplay:2,replayStrength:.20,behaviorCoverage:.55,
       batchRefitEvery:0,batchWindow:steps,finalRefit:false,ridge:.02
     });
   },causalSteps);
@@ -251,7 +251,9 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
     causalSteps,probeTics:24,actionTics:4,rolloutHorizon:128,
     training:{
       kills:training.kills,damage:training.damage,return:training.return,examples:training.examples,informative:training.informative,
-      meanTypedTargetFit:training.meanTypedTargetFit,meanTypedTargetBlend:training.meanTypedTargetBlend
+      meanTypedTargetFit:training.meanTypedTargetFit,meanTypedTargetBlend:training.meanTypedTargetBlend,
+      behaviorCoverage:training.behaviorCoverage,coverageActions:training.coverageActions,
+      behaviorDiversity:training.behaviorDiversity,behaviorActionCounts:training.behaviorActionCounts
     },
     validation:{kills:evaluation.totalKills,damage:evaluation.totalDamage,reward:evaluation.totalReward},
     grounding,
@@ -271,7 +273,7 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
   console.log("CAUSAL_COMBAT_RESULT "+JSON.stringify({
     target:killTarget,runtime,
     baseline:{kills:baseline.totalKills,damage:baseline.totalDamage,reward:baseline.totalReward,diversity:baseline.actionDiversity,maxStreak:baseline.maxStreak},
-    training:{kills:training.kills,damage:training.damage,reward:training.return,examples:training.examples,informative:training.informative,diversity:training.actionDiversity,replaySupervisionUpdates:training.replaySupervisionUpdates,fitPasses:training.fitPasses,typedFit:training.meanTypedTargetFit,typedBlend:training.meanTypedTargetBlend},
+    training:{kills:training.kills,damage:training.damage,reward:training.return,examples:training.examples,informative:training.informative,diversity:training.actionDiversity,replaySupervisionUpdates:training.replaySupervisionUpdates,fitPasses:training.fitPasses,typedFit:training.meanTypedTargetFit,typedBlend:training.meanTypedTargetBlend,behaviorCoverage:training.behaviorCoverage,coverageActions:training.coverageActions,behaviorDiversity:training.behaviorDiversity,behaviorCounts:training.behaviorActionCounts},
     evaluation:{kills:evaluation.totalKills,damage:evaluation.totalDamage,reward:evaluation.totalReward,decisions:evaluation.totalDecisions,diversity:evaluation.actionDiversity,minRunDiversity:evaluation.minRunDiversity,switches:evaluation.totalSwitches,maxStreak:evaluation.maxStreak,counts:evaluation.actionCounts},
     replay:{kills:replay.totalKills,damage:replay.totalDamage,reward:replay.totalReward},
     grounding,
