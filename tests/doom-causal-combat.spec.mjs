@@ -238,7 +238,10 @@ test("causal policy curriculum trains, saves, and exactly replays combat runs",a
       steps,probeTics:24,actionTics:4,plannerDepth:1,continuationTics:8,continuationCandidates:4,rolloutHorizon:128,
       targetTemperature:.28,priorStrength:0,superviseSteps:3,superviseStrength:.58,
       supervisionReplay:2,replayStrength:.20,behaviorCoverage:.55,
-      batchRefitEvery:0,batchWindow:steps,finalRefit:false,ridge:.02
+      batchRefitEvery:0,batchWindow:steps,finalRefit:false,ridge:.02,
+      // Shared continuation set: hold still, or keep firing. Lets orienting
+      // actions earn credit for the shot they enable.
+      probeContinuations:["wait","fire"]
     });
   },causalSteps);
 
