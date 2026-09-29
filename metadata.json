@@ -1,0 +1,15 @@
+{
+  "source_commit": "57dc85f150616b889a3bc19a695f42a9175319c1",
+  "workflow_run": "36513986930",
+  "engine_runtime_commit": "93adb06803ce1c9f82e0d5df0744e7091cf544c1",
+  "engine_source_commit": "ae07287b5699f46f369e96cb2ad11a37477ba64c",
+  "training": "canonical exact-state causal proper-score replay v3",
+  "kills": 44,
+  "target": 20,
+  "diversity": 9,
+  "min_run_diversity": 5,
+  "switches": 350,
+  "max_streak": 18,
+  "same_start_snapshot_replay_verified": true,
+  "canonical_start_snapshot_verified": true
+}
