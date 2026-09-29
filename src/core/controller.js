@@ -1,5 +1,6 @@
-import {argmax,mulberry32,percentile} from "./math.js";
+import {argmax,mulberry32,percentile,softmax} from "./math.js";
 import {probeCounterfactualActions} from "./counterfactual.js";
+import {projectValueToActionFields} from "./action-factorization.js";
 
 export const ControllerState=Object.freeze({READY:"READY",RUNNING:"RUNNING",PAUSED:"PAUSED",RESETTING:"RESETTING",TUNING:"TUNING",ERROR:"ERROR"});
 export class ExperimentController extends EventTarget{
@@ -116,7 +117,7 @@ export class ExperimentController extends EventTarget{
     steps=512,probeTics=24,actionTics=4,rolloutHorizon=128,
     targetTemperature=.30,priorStrength=.08,superviseSteps=3,superviseStrength=.55,
     supervisionReplay=2,replayStrength=.24,batchRefitEvery=0,batchWindow=192,
-    finalRefit=false,ridge=.025,seed=0x51a9e,onProgress=()=>{}
+    finalRefit=false,ridge=.025,factorizedTargetBlend=.70,seed=0x51a9e,onProgress=()=>{}
   }={}){
     if(!this.environment?.supportsSnapshots?.()||!this.environment?.supportsExactTics?.())throw new Error("Causal policy training requires exact snapshots and tic stepping");
     if(!this.policy?.superviseDecisionDistribution||!this.policy?.fitDecisionDistributions)throw new Error("Policy does not support proper-score supervision");
@@ -142,10 +143,14 @@ export class ExperimentController extends EventTarget{
           temperature:targetTemperature,priorStrength,
           stepper:id=>this.environment.stepTics(id,probeTics)
         });
-        const target=[...probe.target],oracleIndex=argmax(target),oracle=this.policy.actions[oracleIndex];
+        const measuredTarget=[...probe.target],oracleIndex=argmax(measuredTarget),oracle=this.policy.actions[oracleIndex];
+        const logTarget=measuredTarget.map(p=>Math.log(Math.max(1e-8,Number(p)||0)));
+        const typedProjection=projectValueToActionFields(this.policy.schema,this.policy.actions,logTarget,{ridge:.035,maxBlend:factorizedTargetBlend});
+        const target=softmax(typedProjection.scores,1);
         const example={
           observation:globalThis.structuredClone?globalThis.structuredClone(obs):JSON.parse(JSON.stringify(obs)),
-          target,temporal:decision.temporal?new Float32Array(decision.temporal):null,
+          target,measuredTarget,typedFit:Number(typedProjection.fitQuality||0),typedBlend:Number(typedProjection.blendUsed||0),
+          temporal:decision.temporal?new Float32Array(decision.temporal):null,
           history:decision.history?JSON.parse(JSON.stringify(decision.history)):null
         };
         examples.push(example);
@@ -176,6 +181,7 @@ export class ExperimentController extends EventTarget{
           step:i+1,action:oracle.id,reward:Number(step.reward||0),probeSpread:Number(probe.spread||0),
           measuredTop:ranked[0]?.id||oracle.id,measuredTopReturn:Number(ranked[0]?.return||0),
           targetTop:oracle.id,targetTopProbability:Number(target[oracleIndex]||0),
+          typedTargetFit:Number(typedProjection.fitQuality||0),typedTargetBlend:Number(typedProjection.blendUsed||0),
           outcome:outcome?{
             damageDealt:Number(outcome.damageDealt||0),playerKillDelta:Number(outcome.playerKillDelta||0),
             playerPickupDelta:Number(outcome.playerPickupDelta||0),healthDelta:Number(outcome.healthDelta||0),
@@ -204,8 +210,10 @@ export class ExperimentController extends EventTarget{
       }
       this.policy.q.syncTarget?.({value:false});
       return{
-        requested:steps,completed:this.steps-startStep,probeTics,actionTics,rolloutHorizon,
+        requested:steps,completed:this.steps-startStep,probeTics,actionTics,rolloutHorizon,factorizedTargetBlend,
         examples:examples.length,informative,meanInformativeSpread:informative?totalSpread/informative:0,
+        meanTypedTargetFit:examples.length?examples.reduce((sum,ex)=>sum+Number(ex.typedFit||0),0)/examples.length:0,
+        meanTypedTargetBlend:examples.length?examples.reduce((sum,ex)=>sum+Number(ex.typedBlend||0),0)/examples.length:0,
         supervisionUpdates,replaySupervisionUpdates,fitPasses,finalRefit:!!finalRefit,resets,
         return:totalReward,damage:totalDamage,kills:totalKills,pickups:totalPickups,
         actionDiversity:Object.keys(counts).length,actionCounts:counts,trace:curriculumTrace
