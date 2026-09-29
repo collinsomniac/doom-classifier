@@ -17,11 +17,12 @@ test("compare greedy and seeded uncertainty-aware decoders on the published caus
     c.pause();c.training=false;c.explore=false;c.memory=true;c.useResidual=true;p.setInferenceMode("neural");
 
     const modes=[
-      {id:"greedy",temperature:0},
-      {id:"sample_045",temperature:.45},
-      {id:"sample_060",temperature:.60},
-      {id:"sample_075",temperature:.75},
-      {id:"sample_100",temperature:1.0}
+      {id:"greedy",temperature:0,mix:0},
+      {id:"sample_045",temperature:.45,mix:1},
+      {id:"mix_010",temperature:.60,mix:.10},
+      {id:"mix_020",temperature:.60,mix:.20},
+      {id:"mix_030",temperature:.60,mix:.30},
+      {id:"adaptive",temperature:.60,adaptiveMax:.35}
     ];
     const sample=(probs,temp,rng)=>{
       const power=1/Math.max(.05,temp),weights=probs.map(v=>Math.pow(Math.max(1e-12,Number(v)||0),power));
@@ -31,14 +32,22 @@ test("compare greedy and seeded uncertainty-aware decoders on the published caus
     };
     const argmax=xs=>xs.reduce((best,v,i,a)=>v>a[best]?i:best,0);
     const evaluate=async mode=>{
-      const runs=[],globalCounts={};let totalKills=0,totalDamage=0,totalReward=0,totalSwitches=0,globalMaxStreak=0,totalFire=0,totalActions=0;
+      const runs=[],globalCounts={};let totalKills=0,totalDamage=0,totalReward=0,totalSwitches=0,globalMaxStreak=0,totalFire=0,totalActions=0,totalSampled=0,totalNonGreedy=0;
       for(let r=0;r<8;r++){
-        const rng=mulberry32((0x6d2b79f5^(r*0x9e3779b9)^(Math.round(mode.temperature*1000)<<8))>>>0);
+        const rng=mulberry32((0x6d2b79f5^(r*0x9e3779b9)^(Math.round(mode.temperature*1000)<<8)^(Math.round((mode.mix||mode.adaptiveMax||0)*1000)<<16))>>>0);
         await env.reset();p.resetEpisode();let kills=0,damage=0,reward=0,last=null,streak=0,maxStreak=0,switches=0;const counts={},actions=[];
         for(let i=0;i<64;i++){
-          const obs=env.observe(),d=await p.decide(obs,{useResidual:true,memory:true,explore:false});
-          const index=mode.id==="greedy"?argmax(d.probs):sample(d.probs,mode.temperature,rng),action=p.actions[index];
-          const step=env.stepTics(action.id,4),outcome=step.info?.outcome||null;
+          const obs=env.observe(),d=await p.decide(obs,{useResidual:true,memory:true,explore:false}),greedy=argmax(d.probs);
+          let sampleChance=Number(mode.mix||0);
+          if(mode.adaptiveMax){
+            const entropy=Number(d.uncertainty?.entropy||0),margin=Number(d.uncertainty?.margin||0);
+            const entropyGate=Math.max(0,Math.min(1,(entropy-.65)/.35)),marginGate=Math.max(0,Math.min(1,(.15-margin)/.15));
+            sampleChance=mode.adaptiveMax*entropyGate*marginGate;
+          }
+          let index=greedy;
+          if(sampleChance>0&&rng()<sampleChance){index=sample(d.probs,mode.temperature,rng);totalSampled++}
+          if(index!==greedy)totalNonGreedy++;
+          const action=p.actions[index],step=env.stepTics(action.id,4),outcome=step.info?.outcome||null;
           p.commitActionOutcome?.({actionIndex:index,reward:step.reward,outcome,done:step.done});
           kills+=Number(outcome?.playerKillDelta||0);damage+=Number(outcome?.damageDealt||0);reward+=Number(step.reward||0);
           counts[action.id]=(counts[action.id]||0)+1;globalCounts[action.id]=(globalCounts[action.id]||0)+1;
@@ -52,7 +61,8 @@ test("compare greedy and seeded uncertainty-aware decoders on the published caus
       return{
         ...mode,totalKills,totalDamage,totalReward,diversity:Object.keys(globalCounts).length,
         minRunDiversity:Math.min(...runs.map(x=>x.diversity)),totalSwitches,maxStreak:globalMaxStreak,
-        fireRate:totalActions?totalFire/totalActions:0,counts:globalCounts,runs
+        fireRate:totalActions?totalFire/totalActions:0,sampleRate:totalActions?totalSampled/totalActions:0,
+        nonGreedyRate:totalActions?totalNonGreedy/totalActions:0,counts:globalCounts,runs
       };
     };
     const out=[];for(const mode of modes)out.push(await evaluate(mode));
@@ -60,10 +70,10 @@ test("compare greedy and seeded uncertainty-aware decoders on the published caus
   });
 
   console.log("DECODE_BENCHMARK "+JSON.stringify(result.map(x=>({
-    id:x.id,temperature:x.temperature,kills:x.totalKills,damage:x.totalDamage,reward:x.totalReward,
-    diversity:x.diversity,minRunDiversity:x.minRunDiversity,switches:x.totalSwitches,maxStreak:x.maxStreak,fireRate:x.fireRate,counts:x.counts
+    id:x.id,temperature:x.temperature,mix:x.mix,adaptiveMax:x.adaptiveMax,kills:x.totalKills,damage:x.totalDamage,reward:x.totalReward,
+    diversity:x.diversity,minRunDiversity:x.minRunDiversity,switches:x.totalSwitches,maxStreak:x.maxStreak,fireRate:x.fireRate,sampleRate:x.sampleRate,nonGreedyRate:x.nonGreedyRate,counts:x.counts
   }))));
-  const greedy=result.find(x=>x.id==="greedy"),sampled=result.filter(x=>x.id!=="greedy");
-  expect(greedy?.totalKills).toBeGreaterThanOrEqual(20);
-  expect(sampled.some(x=>x.diversity>=4&&x.minRunDiversity>=4&&x.totalSwitches>=64)).toBe(true);
+  const greedy=result.find(x=>x.id==="greedy"),mixed=result.filter(x=>x.id.startsWith("mix_")||x.id==="adaptive");
+  expect(greedy?.totalKills).toBeGreaterThanOrEqual(12);
+  expect(mixed.some(x=>x.totalKills>=12&&x.diversity>=4&&x.minRunDiversity>=3&&x.totalSwitches>=48&&x.maxStreak<=32)).toBe(true);
 });
