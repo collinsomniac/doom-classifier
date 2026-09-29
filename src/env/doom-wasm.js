@@ -126,6 +126,8 @@ export class DoomWasmArena{
         {id:"nearest_visible_hostile_distance",label:"nearest visible hostile distance",description:"distance to the nearest living hostile with line of sight; large sentinel when none are visible",scale:1024},
         {id:"nearest_visible_hostile_bearing",label:"nearest visible hostile bearing",description:"signed normalized bearing to the nearest visible hostile; positive is left, zero is centered, negative is right",min:-1,max:1},
         {id:"nearest_visible_hostile_health",label:"nearest visible hostile health",description:"remaining health of the nearest visible hostile",scale:256},
+        {id:"visible_hostile_bearing_zone",label:"visible hostile bearing zone",description:"categorical player-relative direction of the nearest visible hostile",enum:{0:"no visible hostile",1:"centered",2:"left of view",3:"right of view"}},
+        {id:"visible_hostile_distance_zone",label:"visible hostile distance zone",description:"categorical distance band of the nearest visible hostile",enum:{0:"no visible hostile",1:"close",2:"medium",3:"far"}},
         {id:"aim_alignment",label:"aim alignment",description:"how closely the current view is aligned with the nearest visible hostile; one is centered and zero is substantially off-axis",min:0,max:1},
         {id:"nearest_targeting_hostile_distance",label:"nearest targeting hostile distance",description:"distance to the nearest living hostile actively targeting the player",scale:1024},
         {id:"nearest_targeting_hostile_bearing",label:"nearest targeting hostile bearing",description:"signed normalized bearing to the nearest hostile actively targeting the player; positive is left and negative is right",min:-1,max:1},
@@ -297,6 +299,11 @@ export class DoomWasmArena{
     const nearest=list=>list.reduce((best,e)=>!best||e.distance<best.distance?e:best,null);
     const nearestHostile=nearest(livingHostiles),nearestVisible=nearest(visibleHostiles),nearestTargeting=nearest(targetingHostiles),nearestProjectile=nearest(projectiles);
     const sentinel=4096,bearing=e=>Number(e?.relative_angle||0),distance=e=>e?Number(e.distance||0):sentinel;
+    const visibleBearing=bearing(nearestVisible),visibleDistance=distance(nearestVisible);
+    // These buckets are factual semantic projections, analogous to a schema
+    // exposing both a continuous measurement and a human-legible enum.
+    const visibleBearingZone=!nearestVisible?0:Math.abs(visibleBearing)<=.06?1:visibleBearing>0?2:3;
+    const visibleDistanceZone=!nearestVisible?0:visibleDistance<256?1:visibleDistance<768?2:3;
 
     return{
       health:Number(p.health||0),armor:Number(p.armor||0),bullets:Number(p.ammo?.bullets||0),shells:Number(p.ammo?.shells||0),rockets:Number(p.ammo?.rockets||0),cells:Number(p.ammo?.cells||0),
@@ -308,8 +315,9 @@ export class DoomWasmArena{
       visited_cells:Number(this.lastExploration?.visitedCells||0),cell_visits:Number(this.lastExploration?.cellVisits||0),exploration_novelty:Number(this.lastExploration?.novelty??1),
       visible_hostile_count:visibleHostiles.length,targeting_hostile_count:targetingHostiles.length,
       nearest_hostile_distance:distance(nearestHostile),nearest_hostile_bearing:bearing(nearestHostile),
-      nearest_visible_hostile_distance:distance(nearestVisible),nearest_visible_hostile_bearing:bearing(nearestVisible),nearest_visible_hostile_health:Number(nearestVisible?.health||0),
-      aim_alignment:nearestVisible?1-clamp(Math.abs(bearing(nearestVisible))*8,0,1):0,
+      nearest_visible_hostile_distance:visibleDistance,nearest_visible_hostile_bearing:visibleBearing,nearest_visible_hostile_health:Number(nearestVisible?.health||0),
+      visible_hostile_bearing_zone:visibleBearingZone,visible_hostile_distance_zone:visibleDistanceZone,
+      aim_alignment:nearestVisible?1-clamp(Math.abs(visibleBearing)*8,0,1):0,
       nearest_targeting_hostile_distance:distance(nearestTargeting),nearest_targeting_hostile_bearing:bearing(nearestTargeting),
       visible_projectile_count:projectiles.filter(e=>e.visible>0).length,nearest_projectile_distance:distance(nearestProjectile),nearest_projectile_bearing:bearing(nearestProjectile),
       _collections:{entities,geometry}
