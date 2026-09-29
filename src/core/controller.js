@@ -231,7 +231,8 @@ export class ExperimentController extends EventTarget{
         // occasionally advances with the least-visited typed action. This is
         // off-policy dataset coverage, not a runtime tactical rule.
         let behaviorIndex=oracleIndex,usedCoverage=false;
-        if(coverage>0&&replayRng()<coverage){
+        const shouldCover=!isInformative||(coverage>0&&replayRng()<coverage);
+        if(shouldCover){
           const visits=this.policy.actions.map(action=>Number(behaviorCounts[action.id]||0));
           const least=Math.min(...visits),candidates=visits.map((n,index)=>n===least?index:-1).filter(index=>index>=0);
           behaviorIndex=candidates[Math.floor(replayRng()*candidates.length)]??oracleIndex;
