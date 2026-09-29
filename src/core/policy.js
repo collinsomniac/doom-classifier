@@ -379,7 +379,7 @@ export class SemanticResidualPolicy{
     const t0=performance.now(),encoded=this.encode(obs,memory,commit),novelty=this.novelty.score(encoded.base,{commit}),history=this.snapshotActionOutcomeHistory();
     const residualStart=performance.now(),residualEval=this.residualEvaluation(obs,encoded.features,encoded.temporal,history);let q=residualEval.scores,residualMs=performance.now()-residualStart;
     let activeFusion=residualEval,epistemic=ensembleDisagreement(residualEval.memberScores,this.temperature);
-    let sem=new Array(this.actions.length).fill(0),semanticMs=0,teacherUsed=false,semanticUsed=false,logits;
+    let sem=new Array(this.actions.length).fill(0),semanticMs=0,teacherUsed=false,teacherReason=null,semanticUsed=false,logits;
     const mode=useResidual?this.inferenceMode:"hybrid";
 
     if(mode==="hybrid"){
@@ -391,7 +391,7 @@ export class SemanticResidualPolicy{
         activeFusion={...residualEval,...direct};logits=direct.scores;epistemic=ensembleDisagreement(direct.memberScores,this.temperature);
       }else logits=useResidual?sem.map((v,i)=>v+this.residualWeight*q[i]):sem;
     }else if(mode==="adaptive"){
-      const provisional={...confidenceStats(softmax(q,this.temperature)),epistemic},teacherReason=allowTeacher?this.teacherTriggerReason(provisional,novelty):null;
+      const provisional={...confidenceStats(softmax(q,this.temperature)),epistemic};teacherReason=allowTeacher?this.teacherTriggerReason(provisional,novelty):null;
       teacherUsed=teacherReason?this.scheduleTeacher(obs,encoded.temporal,teacherReason):false;
       logits=q;
     }else{
@@ -417,7 +417,7 @@ export class SemanticResidualPolicy{
       valueBeta:Number(activeFusion.valueBeta||0),priorKL:Number(activeFusion.priorKL||0),valueTrust:Number(activeFusion.valueTrust||0),basePriorKlBudget:Number(activeFusion.basePriorKlBudget||0),priorKlBudget:Number(activeFusion.priorKlBudget||0),klUtilization:Number(activeFusion.klUtilization||0),valueEpistemic:Number(activeFusion.valueEpistemic||0),valueEpistemicBudget:Number(activeFusion.valueEpistemicBudget??this.valueEpistemicBudget),epistemicUtilization:Number(activeFusion.epistemicUtilization||0),valueBetaSaturated:!!activeFusion.valueBetaSaturated,typedValueScores:activeFusion.typedValueScores||null,typedValueFit:Number(activeFusion.typedValueFit||0),typedValueBlendUsed:Number(activeFusion.typedValueBlendUsed||0),typedFieldCoefficients:activeFusion.typedFieldCoefficients||null,criticTopIndex:Number(activeFusion.criticTopIndex??-1),criticRunnerIndex:Number(activeFusion.criticRunnerIndex??-1),criticGap:Number(activeFusion.criticGap||0),criticSpread:Number(activeFusion.criticSpread||0),criticGapShare:Number(activeFusion.criticGapShare||0),criticTopAgreement:Number(activeFusion.criticTopAgreement||0),criticMarginMean:Number(activeFusion.criticMarginMean||0),criticMarginStd:Number(activeFusion.criticMarginStd||0),criticMarginSnr:Number(activeFusion.criticMarginSnr||0),criticRankingConfidence:Number(activeFusion.criticRankingConfidence||0),criticAuthority:Number(activeFusion.criticAuthority||0),criticKlGate:Number(activeFusion.criticKlGate??1),criticKlMultiplier:Number(activeFusion.criticKlMultiplier||1),
       probabilityCalibrated:!!this.probabilityCalibrator?.fitted,probabilityCalibrationTemperature:Number(this.probabilityCalibrator?.temperature||1),probabilityTemperature,
       uncertainty:{...stats,novelty,epistemic},latencyMs:performance.now()-t0,semanticLatencyMs:semanticMs,residualLatencyMs:residualMs,
-      teacherUsed,teacherPending:!!this.teacherPromise,teacherReason:teacherUsed?(this.teacherHistory.at(-1)?.reason||null):null,semanticUsed,inferenceMode:mode,explorationStrategy,decisionRule,uncertaintySampleChance,teacherCalls:this.teacherCalls,teacherScheduled:this.teacherScheduled,lastTeacherLatencyMs:this.lastTeacherLatencyMs
+      teacherUsed,teacherPending:!!this.teacherPromise,teacherReason:teacherUsed?teacherReason:null,semanticUsed,inferenceMode:mode,explorationStrategy,decisionRule,uncertaintySampleChance,teacherCalls:this.teacherCalls,teacherScheduled:this.teacherScheduled,lastTeacherLatencyMs:this.lastTeacherLatencyMs
     };
   }
   aggregateNStep(count=Math.min(this.nStep,this.nStepBuffer.length)){
