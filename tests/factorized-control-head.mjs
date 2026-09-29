@@ -32,11 +32,14 @@ for(let epoch=0;epoch<220;epoch++)for(const [obs,target] of states)head.supervis
 
 const score=obs=>head.evaluate(obs);
 const left=score(states[0][0]),right=score(states[1][0]),ahead=score(states[2][0]),quiet=score(states[3][0]);
-const index=id=>actions.findIndex(a=>a.id===id);
-assert.ok(left.scores[index("left")] > left.scores[index("right")]+1,"left bearing should prefer left control");
-assert.ok(right.scores[index("right")] > right.scores[index("left")]+1,"right bearing should prefer right control");
-assert.ok(ahead.scores[index("fire")] > ahead.scores[index("wait")]+1,"aligned visible target should prefer fire");
-assert.ok(quiet.scores[index("wait")] > quiet.scores[index("fire")]+1,"no target should prefer hold");
+const axis=(result,id)=>result.axis.find(x=>x.id===id);
+const probability=(result,id,value)=>{
+  const a=axis(result,id),i=a.values.indexOf(String(value));return a.probs[i];
+};
+assert.ok(probability(left,"view",1)>.8,"left bearing should strongly prefer left view");
+assert.ok(probability(right,"view",2)>.8,"right bearing should strongly prefer right view");
+assert.ok(probability(ahead,"trigger",1)>.8,"aligned visible target should strongly prefer fire");
+assert.ok(probability(quiet,"trigger",0)>.8,"no target should strongly prefer hold");
 assert.ok(head.parameterCount()<500,"factor head should stay tiny");
 
 const saved=head.exportCheckpoint(),restored=new FactorizedControlHead(schema,actions);
