@@ -226,14 +226,14 @@ EMSCRIPTEN_KEEPALIVE int PromptFPS_HasSnapshot(void)
     )
     replace_once(
         bridge,
-        '!P_CheckSight(p->mo, mo)',
-        '!PromptFPS_CheckSightPure(p->mo, mo)',
+        'if (mo == p->mo || mo->health <= 0 || !(mo->flags & MF_COUNTKILL) || !P_CheckSight(p->mo, mo)) continue;',
+        'if (mo == p->mo || mo->health <= 0 || !(mo->flags & MF_COUNTKILL) || !PromptFPS_CheckSightPure(p->mo, mo)) continue;',
         "pure enemy visibility filter",
     )
     replace_once(
         bridge,
-        '!P_CheckSight(p->mo, mo)',
-        '!PromptFPS_CheckSightPure(p->mo, mo)',
+        'if (!(mo->flags & MF_SPECIAL) || !P_CheckSight(p->mo, mo)) continue;',
+        'if (!(mo->flags & MF_SPECIAL) || !PromptFPS_CheckSightPure(p->mo, mo)) continue;',
         "pure pickup visibility filter",
     )
 
