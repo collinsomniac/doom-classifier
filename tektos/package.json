@@ -1,0 +1,17 @@
+{
+  "name": "tektos",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Typed-choice decision model: information + choices in, calibrated typed choices out.",
+  "scripts": {
+    "test": "node tests/core-invariants.mjs && node tests/gradient-check.mjs",
+    "test:invariants": "node tests/core-invariants.mjs",
+    "test:gradients": "node tests/gradient-check.mjs",
+    "test:grounding": "node tests/grounding.mjs",
+    "diagnose": "node tools/diagnose-learning.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
